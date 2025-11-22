@@ -3,18 +3,7 @@ export const TAB_CONFIG = [
         id: 'sphere',
         name: 'SPHERE',
         angle: 0,
-        subTabs: [
-            {
-                id: 'view',
-                name: 'View',
-                description: 'Sphere visualization'
-            },
-            {
-                id: 'settings',
-                name: 'Settings',
-                description: 'Sphere configuration'
-            }
-        ]
+        subTabs: [] // No vertical tabs - single integrated dashboard
     },
     {
         id: 'params',

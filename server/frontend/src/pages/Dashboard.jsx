@@ -9,6 +9,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import { HoloSphere } from '../components/sphere/HoloSphere';
 import { NeonDial } from '../components/ui/NeonDial';
 import { VerticalTabContainer } from '../components/ui/VerticalTabContainer';
+import { CompactSlider } from '../components/ui/CompactSlider';
 import { TAB_CONFIG } from '../config/tabConfig';
 
 export const Dashboard = () => {
@@ -35,82 +36,176 @@ export const Dashboard = () => {
         preventScrollOnSwipe: true,
     });
 
-    // Render content for SPHERE sub-tabs
-    const renderSphereContent = (subTab) => {
-        if (subTab.id === 'view') {
-            return (
+    // Render content for SPHERE (Integrated Dashboard)
+    const renderSphereContent = () => {
+        return (
+            <Box
+                sx={{
+                    height: '100%',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    bgcolor: 'black', // Ensure dark background
+                }}
+            >
+                {/* Layer 1: Full Screen Sphere Visualization */}
                 <Box
                     sx={{
-                        height: '100%',
-                        bgcolor: 'rgba(0, 229, 255, 0.02)',
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        borderRadius: 2,
-                        boxShadow: '0 0 30px rgba(0, 229, 255, 0.2)',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        p: 2,
+                        position: 'absolute',
+                        inset: 0,
+                        zIndex: 0,
+                        '& canvas': {
+                            display: 'block', // Remove inline-block spacing
+                        }
                     }}
                 >
                     <HoloSphere />
-                    <Box
-                        sx={{
-                            position: 'absolute',
-                            top: 10,
-                            left: 10,
-                            fontFamily: '"Source Code Pro", monospace',
-                            fontSize: '0.75rem',
-                            color: 'primary.main',
-                            zIndex: 1,
-                        }}
-                    >
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                            <Box
-                                sx={{
-                                    width: 6,
-                                    height: 6,
-                                    borderRadius: '50%',
-                                    bgcolor: '#00ff00',
-                                    mr: 1,
-                                    boxShadow: '0 0 8px #00ff00',
-                                }}
-                            />
-                            ONLINE
-                        </Box>
-                    </Box>
                 </Box>
-            );
-        } else {
-            // Settings sub-tab
-            return (
+
+                {/* Layer 2: Top Status HUD */}
                 <Box
                     sx={{
-                        height: '100%',
-                        p: 2,
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        borderRadius: 2,
-                        bgcolor: 'rgba(20, 27, 45, 0.9)',
-                        overflow: 'auto',
+                        position: 'absolute',
+                        top: 10,
+                        left: 10,
+                        zIndex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 0.5,
+                        pointerEvents: 'none', // Allow clicks to pass through to sphere if needed
                     }}
                 >
-                    <Typography
-                        variant="h6"
+                    <Chip
+                        label="ONLINE"
+                        size="small"
                         sx={{
-                            mb: 2,
+                            bgcolor: '#00ff00',
+                            color: '#000',
+                            fontWeight: 'bold',
+                            height: 20,
+                            fontSize: '0.65rem',
+                            border: 'none',
+                            boxShadow: '0 0 8px #00ff00',
+                        }}
+                    />
+                    <Typography
+                        variant="caption"
+                        sx={{
                             color: 'primary.main',
-                            textAlign: 'center',
-                            letterSpacing: '0.1em',
+                            fontFamily: '"Source Code Pro", monospace',
+                            fontSize: '0.7rem',
+                            textShadow: '0 0 5px rgba(0, 229, 255, 0.5)',
+                            bgcolor: 'rgba(0,0,0,0.5)',
+                            px: 0.5,
+                            borderRadius: 0.5,
                         }}
                     >
-                        SPHERE SETTINGS
+                        FPS: 60
                     </Typography>
-                    <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>
-                        Configuration options for sphere visualization...
+                    <Typography
+                        variant="caption"
+                        sx={{
+                            color: 'primary.main',
+                            fontFamily: '"Source Code Pro", monospace',
+                            fontSize: '0.7rem',
+                            textShadow: '0 0 5px rgba(0, 229, 255, 0.5)',
+                            bgcolor: 'rgba(0,0,0,0.5)',
+                            px: 0.5,
+                            borderRadius: 0.5,
+                        }}
+                    >
+                        IMU: W:1.00 X:0.00 Y:0.00 Z:0.00
                     </Typography>
                 </Box>
-            );
-        }
+
+                {/* Layer 3: Bottom Control HUD */}
+                <Box
+                    sx={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        zIndex: 2,
+                        p: 2,
+                        background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 60%, transparent 100%)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        pb: 3, // Extra padding for bottom
+                    }}
+                    // CRITICAL: Stop propagation to prevent swipe gestures when interacting with controls
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                >
+                    {/* Playlist Controls */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1 }}>
+                        <Box>
+                            <Typography variant="caption" sx={{ color: 'primary.main', display: 'block', lineHeight: 1 }}>
+                                TRACK 1/5
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: '#fff', fontWeight: 600, textShadow: '0 0 10px rgba(0,0,0,0.5)' }}>
+                                Isolation Theme.mp3
+                            </Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Box
+                                onClick={() => console.log('START')}
+                                sx={{
+                                    p: 1,
+                                    border: '1px solid',
+                                    borderColor: 'primary.main',
+                                    borderRadius: '50%',
+                                    cursor: 'pointer',
+                                    bgcolor: 'rgba(0, 229, 255, 0.1)',
+                                    '&:active': { bgcolor: 'primary.main', color: 'black' }
+                                }}
+                            >
+                                <PlayArrowIcon fontSize="small" sx={{ color: 'inherit' }} />
+                            </Box>
+                            <Box
+                                onClick={() => console.log('STOP')}
+                                sx={{
+                                    p: 1,
+                                    border: '1px solid',
+                                    borderColor: 'error.main',
+                                    borderRadius: '50%',
+                                    cursor: 'pointer',
+                                    bgcolor: 'rgba(255, 23, 68, 0.1)',
+                                    '&:active': { bgcolor: 'error.main', color: 'white' }
+                                }}
+                            >
+                                <StopIcon fontSize="small" sx={{ color: 'error.main' }} />
+                            </Box>
+                        </Box>
+                    </Box>
+
+                    {/* Sliders */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                        <CompactSlider
+                            label="BRIGHTNESS"
+                            value={brightness}
+                            min={0}
+                            max={100}
+                            onChange={setBrightness}
+                        />
+                        <CompactSlider
+                            label="SPEED"
+                            value={speed}
+                            min={0}
+                            max={100}
+                            onChange={setSpeed}
+                        />
+                        <CompactSlider
+                            label="HUE"
+                            value={color}
+                            min={0}
+                            max={360}
+                            onChange={setColor}
+                            unit="°"
+                        />
+                    </Box>
+                </Box>
+            </Box>
+        );
     };
 
     // Render content for PARAMS sub-tabs
@@ -397,10 +492,14 @@ export const Dashboard = () => {
                                     boxSizing: 'border-box',
                                 }}
                             >
-                                <VerticalTabContainer
-                                    subTabs={tab.subTabs}
-                                    renderContent={contentRenderers[tab.id]}
-                                />
+                                {tab.subTabs.length > 0 ? (
+                                    <VerticalTabContainer
+                                        subTabs={tab.subTabs}
+                                        renderContent={contentRenderers[tab.id]}
+                                    />
+                                ) : (
+                                    contentRenderers[tab.id]()
+                                )}
                             </Box>
                         ))}
                     </Box>
