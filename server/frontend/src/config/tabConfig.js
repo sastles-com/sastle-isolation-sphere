@@ -6,9 +6,26 @@ export const TAB_CONFIG = [
         subTabs: [] // No vertical tabs - single integrated dashboard
     },
     {
+        id: 'playlist',
+        name: 'PLAYLIST',
+        angle: 90,
+        subTabs: [
+            {
+                id: 'playlists',
+                name: 'Playlists',
+                description: 'Manage playlists'
+            },
+            {
+                id: 'videos',
+                name: 'Videos',
+                description: 'Manage video library'
+            }
+        ]
+    },
+    {
         id: 'params',
         name: 'PARAMS',
-        angle: 120,
+        angle: 180,
         subTabs: [
             {
                 id: 'controls',
@@ -25,7 +42,7 @@ export const TAB_CONFIG = [
     {
         id: 'control',
         name: 'CONTROL',
-        angle: 240,
+        angle: 270,
         subTabs: [
             {
                 id: 'actions',

@@ -5,11 +5,14 @@ import WifiIcon from '@mui/icons-material/Wifi';
 import SpeedIcon from '@mui/icons-material/Speed';
 import ThermostatIcon from '@mui/icons-material/Thermostat';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
 import { HoloSphere } from '../components/sphere/HoloSphere';
 import { NeonDial } from '../components/ui/NeonDial';
 import { VerticalTabContainer } from '../components/ui/VerticalTabContainer';
 import { CompactSlider } from '../components/ui/CompactSlider';
+import { PlaylistManager } from '../components/playlist/PlaylistManager';
+import { VideoManager } from '../components/playlist/VideoManager';
 import { TAB_CONFIG } from '../config/tabConfig';
 
 export const Dashboard = () => {
@@ -19,14 +22,24 @@ export const Dashboard = () => {
     const [speed, setSpeed] = useState(50);
     const [color, setColor] = useState(120);
 
+    const [isPlaying, setIsPlaying] = useState(false);
+
+    const handleTogglePlay = () => {
+        setIsPlaying(!isPlaying);
+    };
+
+    const handleStop = () => {
+        setIsPlaying(false);
+    };
+
     const handleSwipeLeft = () => {
         setCurrentTab((prev) => (prev + 1) % TAB_CONFIG.length);
-        setRotation((prev) => prev - 120);
+        setRotation((prev) => prev - 90);
     };
 
     const handleSwipeRight = () => {
         setCurrentTab((prev) => (prev - 1 + TAB_CONFIG.length) % TAB_CONFIG.length);
-        setRotation((prev) => prev + 120);
+        setRotation((prev) => prev + 90);
     };
 
     const swipeHandlers = useSwipeable({
@@ -34,6 +47,8 @@ export const Dashboard = () => {
         onSwipedRight: handleSwipeRight,
         trackMouse: true,
         preventScrollOnSwipe: true,
+        delta: 10, // Lower delta for easier triggering on small areas
+        trackTouch: true,
     });
 
     // Render content for SPHERE (Integrated Dashboard)
@@ -75,16 +90,17 @@ export const Dashboard = () => {
                     }}
                 >
                     <Chip
-                        label="ONLINE"
+                        label={isPlaying ? "ONLINE (PLAYING)" : "ONLINE (IDLE)"}
                         size="small"
                         sx={{
-                            bgcolor: '#00ff00',
-                            color: '#000',
+                            bgcolor: isPlaying ? '#00ff00' : '#555',
+                            color: isPlaying ? '#000' : '#ccc',
                             fontWeight: 'bold',
                             height: 20,
                             fontSize: '0.65rem',
                             border: 'none',
-                            boxShadow: '0 0 8px #00ff00',
+                            boxShadow: isPlaying ? '0 0 8px #00ff00' : 'none',
+                            transition: 'all 0.3s',
                         }}
                     />
                     <Typography
@@ -148,21 +164,24 @@ export const Dashboard = () => {
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1 }}>
                             <Box
-                                onClick={() => console.log('START')}
+                                onClick={handleTogglePlay}
                                 sx={{
                                     p: 1,
                                     border: '1px solid',
                                     borderColor: 'primary.main',
                                     borderRadius: '50%',
                                     cursor: 'pointer',
-                                    bgcolor: 'rgba(0, 229, 255, 0.1)',
-                                    '&:active': { bgcolor: 'primary.main', color: 'black' }
+                                    bgcolor: isPlaying ? 'primary.main' : 'rgba(0, 229, 255, 0.1)',
+                                    color: isPlaying ? 'black' : 'primary.main',
+                                    boxShadow: isPlaying ? '0 0 15px rgba(0, 229, 255, 0.6)' : 'none',
+                                    transition: 'all 0.3s',
+                                    '&:active': { transform: 'scale(0.95)' }
                                 }}
                             >
-                                <PlayArrowIcon fontSize="small" sx={{ color: 'inherit' }} />
+                                {isPlaying ? <PauseIcon fontSize="small" sx={{ color: 'inherit' }} /> : <PlayArrowIcon fontSize="small" sx={{ color: 'inherit' }} />}
                             </Box>
                             <Box
-                                onClick={() => console.log('STOP')}
+                                onClick={handleStop}
                                 sx={{
                                     p: 1,
                                     border: '1px solid',
@@ -406,8 +425,18 @@ export const Dashboard = () => {
         }
     };
 
+    // Render content for PLAYLIST sub-tabs
+    const renderPlaylistContent = (subTab) => {
+        if (subTab.id === 'playlists') {
+            return <PlaylistManager />;
+        } else {
+            return <VideoManager />;
+        }
+    };
+
     const contentRenderers = {
         sphere: renderSphereContent,
+        playlist: renderPlaylistContent,
         params: renderParamsContent,
         control: renderControlContent,
     };
@@ -424,13 +453,20 @@ export const Dashboard = () => {
         >
             {/* HEADER */}
             <Box
+                {...swipeHandlers}
                 sx={{
                     p: 2,
+                    pt: 'max(16px, env(safe-area-inset-top))', // Handle notch/safe area
+                    pb: 2,
                     borderBottom: '2px solid',
                     borderColor: 'primary.main',
                     bgcolor: 'rgba(20, 27, 45, 0.95)',
                     boxShadow: '0 2px 20px rgba(0, 229, 255, 0.3)',
-                    zIndex: 10,
+                    zIndex: 20, // Increase z-index
+                    cursor: 'grab',
+                    touchAction: 'none',
+                    userSelect: 'none', // Prevent text selection
+                    '&:active': { cursor: 'grabbing' },
                 }}
             >
                 <Typography
@@ -441,6 +477,7 @@ export const Dashboard = () => {
                         fontWeight: 700,
                         letterSpacing: '0.15em',
                         textShadow: '0 0 10px rgba(0, 229, 255, 0.8)',
+                        pointerEvents: 'none', // Pass events to parent Box
                     }}
                 >
                     {TAB_CONFIG[currentTab].name} MODE
@@ -449,7 +486,6 @@ export const Dashboard = () => {
 
             {/* BODY - Revolving Cylinder */}
             <Box
-                {...swipeHandlers}
                 sx={{
                     width: '100%',
                     flex: 1,
@@ -487,9 +523,10 @@ export const Dashboard = () => {
                                     width: '100%',
                                     height: '100%',
                                     backfaceVisibility: 'hidden',
-                                    transform: `rotateY(${tab.angle}deg) translateZ(50px) scale(1.0)`,
+                                    transform: `rotateY(${tab.angle}deg) translateZ(50vw) scale(1.0)`,
                                     p: 2,
                                     boxSizing: 'border-box',
+                                    bgcolor: 'background.default', // Ensure background opacity to hide back faces
                                 }}
                             >
                                 {tab.subTabs.length > 0 ? (
@@ -508,16 +545,22 @@ export const Dashboard = () => {
 
             {/* FOOTER */}
             <Box
+                {...swipeHandlers}
                 sx={{
                     p: 1.5,
+                    pb: 'max(12px, env(safe-area-inset-bottom))', // Handle home bar area
                     borderTop: '2px solid',
                     borderColor: 'primary.main',
                     bgcolor: 'rgba(20, 27, 45, 0.95)',
                     boxShadow: '0 -2px 20px rgba(0, 229, 255, 0.3)',
-                    zIndex: 10,
+                    zIndex: 20, // Increase z-index
+                    cursor: 'grab',
+                    touchAction: 'none',
+                    userSelect: 'none',
+                    '&:active': { cursor: 'grabbing' },
                 }}
             >
-                <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', pointerEvents: 'none' }}>
                     <Chip
                         icon={<WifiIcon />}
                         label="CONNECTED"
