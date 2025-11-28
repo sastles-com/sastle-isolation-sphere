@@ -28,14 +28,14 @@ export const TAB_CONFIG = [
         angle: 180,
         subTabs: [
             {
-                id: 'controls',
-                name: 'Controls',
-                description: 'Parameter controls'
+                id: 'config',
+                name: 'Config',
+                description: 'System configuration'
             },
             {
-                id: 'presets',
-                name: 'Presets',
-                description: 'Saved presets'
+                id: 'parameters',
+                name: 'Parameters',
+                description: 'Operational parameters'
             }
         ]
     },
@@ -45,14 +45,14 @@ export const TAB_CONFIG = [
         angle: 270,
         subTabs: [
             {
-                id: 'actions',
-                name: 'Actions',
-                description: 'Control actions'
+                id: 'sphere_control',
+                name: 'Sphere',
+                description: 'Hardware control'
             },
             {
-                id: 'system',
-                name: 'System',
-                description: 'System information'
+                id: 'pattern_control',
+                name: 'Pattern',
+                description: 'Pattern control'
             }
         ]
     }

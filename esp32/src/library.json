@@ -1,0 +1,10 @@
+{
+  "name": "ProjectSrcLibrary",
+  "version": "1.0.0",
+  "build": {
+    "srcFilter": [
+      "+<*>",
+      "-<main.cpp>"
+    ]
+  }
+}

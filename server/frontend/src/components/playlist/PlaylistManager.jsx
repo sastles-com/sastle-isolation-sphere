@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Typography, Button, IconButton, List, ListItem, ListItemText, ListItemIcon, Chip } from '@mui/material';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import AddIcon from '@mui/icons-material/Add';
@@ -7,24 +7,60 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
 
-// Mock Data
-const INITIAL_PLAYLISTS = [
-    { id: 'p1', name: 'Morning Routine', count: 3, duration: '15:20' },
-    { id: 'p2', name: 'Focus Mode', count: 5, duration: '45:00' },
-    { id: 'p3', name: 'Relaxation', count: 2, duration: '12:30' },
-];
+// API URL
+const API_URL = 'http://localhost:8000/api/playlist/playlists';
 
 export const PlaylistManager = ({ isPlaying, onTogglePlay, onStop }) => {
-    const [playlists, setPlaylists] = useState(INITIAL_PLAYLISTS);
+    const [playlists, setPlaylists] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    const handleCreate = () => {
+    useEffect(() => {
+        fetchPlaylists();
+    }, []);
+
+    const fetchPlaylists = async () => {
+        try {
+            const response = await fetch(API_URL);
+            if (response.ok) {
+                const data = await response.json();
+                // Map API data to UI format if needed, or ensure API returns compatible format
+                // API returns { id, name, videos: [] }
+                // UI expects { id, name, count, duration }
+                const uiPlaylists = data.map(p => ({
+                    ...p,
+                    count: p.videos.length,
+                    duration: '0:00' // Placeholder as API doesn't return duration yet
+                }));
+                setPlaylists(uiPlaylists);
+            }
+        } catch (error) {
+            console.error('Error fetching playlists:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleCreate = async () => {
         const newPlaylist = {
             id: `p${Date.now()}`,
             name: `New Playlist ${playlists.length + 1}`,
-            count: 0,
-            duration: '0:00'
+            videos: []
         };
-        setPlaylists([newPlaylist, ...playlists]);
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newPlaylist)
+            });
+
+            if (response.ok) {
+                const savedPlaylist = await response.json();
+                setPlaylists([{ ...savedPlaylist, count: 0, duration: '0:00' }, ...playlists]);
+            }
+        } catch (error) {
+            console.error('Error creating playlist:', error);
+        }
     };
 
     return (

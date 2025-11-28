@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Typography, Chip } from '@mui/material';
 import { useSwipeable } from 'react-swipeable';
 import WifiIcon from '@mui/icons-material/Wifi';
@@ -7,29 +7,64 @@ import ThermostatIcon from '@mui/icons-material/Thermostat';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
+import WifiOffIcon from '@mui/icons-material/WifiOff';
 import { HoloSphere } from '../components/sphere/HoloSphere';
 import { NeonDial } from '../components/ui/NeonDial';
 import { VerticalTabContainer } from '../components/ui/VerticalTabContainer';
 import { CompactSlider } from '../components/ui/CompactSlider';
 import { PlaylistManager } from '../components/playlist/PlaylistManager';
 import { VideoManager } from '../components/playlist/VideoManager';
+import { SphereControl } from '../components/control/SphereControl';
+import { PatternControl } from '../components/control/PatternControl';
+import { ConfigEditor } from '../components/params/ConfigEditor';
+import { ParamsEditor } from '../components/params/ParamsEditor';
 import { TAB_CONFIG } from '../config/tabConfig';
+import { useWebSocket } from '../contexts/WebSocketContext';
 
 export const Dashboard = () => {
+    const { isConnected, lastMessage, sendMessage } = useWebSocket();
+
     const [currentTab, setCurrentTab] = useState(0);
     const [rotation, setRotation] = useState(0);
     const [brightness, setBrightness] = useState(80);
     const [speed, setSpeed] = useState(50);
     const [color, setColor] = useState(120);
-
     const [isPlaying, setIsPlaying] = useState(false);
 
+    // Sync state from WebSocket
+    useEffect(() => {
+        if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
+            const { playback, params } = lastMessage.payload;
+            if (playback) {
+                setIsPlaying(playback.isPlaying);
+            }
+            if (params) {
+                setBrightness(params.brightness);
+                setSpeed(params.speed);
+                setColor(params.hue);
+            }
+        }
+    }, [lastMessage]);
+
     const handleTogglePlay = () => {
-        setIsPlaying(!isPlaying);
+        const newState = !isPlaying;
+        setIsPlaying(newState);
+        sendMessage('SET_PLAYBACK', { isPlaying: newState });
     };
 
     const handleStop = () => {
         setIsPlaying(false);
+        sendMessage('SET_PLAYBACK', { isPlaying: false });
+    };
+
+    const handleParamChange = (key, value) => {
+        // Optimistic update
+        if (key === 'brightness') setBrightness(value);
+        if (key === 'speed') setSpeed(value);
+        if (key === 'hue') setColor(value);
+
+        // Send to backend
+        sendMessage('SET_PARAMS', { [key]: value });
     };
 
     const handleSwipeLeft = () => {
@@ -47,7 +82,7 @@ export const Dashboard = () => {
         onSwipedRight: handleSwipeRight,
         trackMouse: true,
         preventScrollOnSwipe: true,
-        delta: 10, // Lower delta for easier triggering on small areas
+        delta: 10,
         trackTouch: true,
     });
 
@@ -59,7 +94,7 @@ export const Dashboard = () => {
                     height: '100%',
                     position: 'relative',
                     overflow: 'hidden',
-                    bgcolor: 'black', // Ensure dark background
+                    bgcolor: 'black',
                 }}
             >
                 {/* Layer 1: Full Screen Sphere Visualization */}
@@ -69,11 +104,16 @@ export const Dashboard = () => {
                         inset: 0,
                         zIndex: 0,
                         '& canvas': {
-                            display: 'block', // Remove inline-block spacing
+                            display: 'block',
                         }
                     }}
                 >
-                    <HoloSphere />
+                    <HoloSphere
+                        rotation={rotation}
+                        brightness={brightness}
+                        speed={speed}
+                        color={color}
+                    />
                 </Box>
 
                 {/* Layer 2: Top Status HUD */}
@@ -86,7 +126,7 @@ export const Dashboard = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         gap: 0.5,
-                        pointerEvents: 'none', // Allow clicks to pass through to sphere if needed
+                        pointerEvents: 'none',
                     }}
                 >
                     <Chip
@@ -117,20 +157,6 @@ export const Dashboard = () => {
                     >
                         FPS: 60
                     </Typography>
-                    <Typography
-                        variant="caption"
-                        sx={{
-                            color: 'primary.main',
-                            fontFamily: '"Source Code Pro", monospace',
-                            fontSize: '0.7rem',
-                            textShadow: '0 0 5px rgba(0, 229, 255, 0.5)',
-                            bgcolor: 'rgba(0,0,0,0.5)',
-                            px: 0.5,
-                            borderRadius: 0.5,
-                        }}
-                    >
-                        IMU: W:1.00 X:0.00 Y:0.00 Z:0.00
-                    </Typography>
                 </Box>
 
                 {/* Layer 3: Bottom Control HUD */}
@@ -146,9 +172,8 @@ export const Dashboard = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         gap: 2,
-                        pb: 3, // Extra padding for bottom
+                        pb: 3,
                     }}
-                    // CRITICAL: Stop propagation to prevent swipe gestures when interacting with controls
                     onMouseDown={(e) => e.stopPropagation()}
                     onTouchStart={(e) => e.stopPropagation()}
                 >
@@ -204,21 +229,21 @@ export const Dashboard = () => {
                             value={brightness}
                             min={0}
                             max={100}
-                            onChange={setBrightness}
+                            onChange={(val) => handleParamChange('brightness', val)}
                         />
                         <CompactSlider
                             label="SPEED"
                             value={speed}
                             min={0}
                             max={100}
-                            onChange={setSpeed}
+                            onChange={(val) => handleParamChange('speed', val)}
                         />
                         <CompactSlider
                             label="HUE"
                             value={color}
                             min={0}
                             max={360}
-                            onChange={setColor}
+                            onChange={(val) => handleParamChange('hue', val)}
                             unit="°"
                         />
                     </Box>
@@ -227,210 +252,27 @@ export const Dashboard = () => {
         );
     };
 
-    // Render content for PARAMS sub-tabs
-    const renderParamsContent = (subTab) => {
-        if (subTab.id === 'controls') {
-            return (
-                <Box
-                    sx={{
-                        height: '100%',
-                        p: 2,
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        borderRadius: 2,
-                        boxShadow: '0 0 20px rgba(0, 229, 255, 0.2)',
-                        bgcolor: 'rgba(20, 27, 45, 0.9)',
-                        overflow: 'auto',
-                    }}
-                >
-                    <Typography
-                        variant="h6"
-                        sx={{
-                            mb: 3,
-                            pb: 1,
-                            borderBottom: '2px solid',
-                            borderColor: 'primary.main',
-                            color: 'primary.main',
-                            textAlign: 'center',
-                            letterSpacing: '0.1em',
-                        }}
-                    >
-                        PARAMETERS
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                        <NeonDial label="Brightness" value={brightness} min={0} max={100} onChange={setBrightness} />
-                        <NeonDial label="Speed" value={speed} min={0} max={100} onChange={setSpeed} />
-                        <NeonDial label="Hue" value={color} min={0} max={360} onChange={setColor} />
-                    </Box>
-                </Box>
-            );
-        } else {
-            // Presets sub-tab
-            return (
-                <Box
-                    sx={{
-                        height: '100%',
-                        p: 2,
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        borderRadius: 2,
-                        bgcolor: 'rgba(20, 27, 45, 0.9)',
-                        overflow: 'auto',
-                    }}
-                >
-                    <Typography
-                        variant="h6"
-                        sx={{
-                            mb: 2,
-                            color: 'primary.main',
-                            textAlign: 'center',
-                            letterSpacing: '0.1em',
-                        }}
-                    >
-                        PRESETS
-                    </Typography>
-                    <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>
-                        Saved parameter presets will appear here...
-                    </Typography>
-                </Box>
-            );
-        }
-    };
-
-    // Render content for CONTROL sub-tabs
-    const renderControlContent = (subTab) => {
-        if (subTab.id === 'actions') {
-            return (
-                <Box
-                    sx={{
-                        height: '100%',
-                        p: 2,
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        borderRadius: 2,
-                        boxShadow: '0 0 20px rgba(0, 229, 255, 0.2)',
-                        bgcolor: 'rgba(20, 27, 45, 0.9)',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        overflow: 'auto',
-                    }}
-                >
-                    <Typography
-                        variant="h6"
-                        sx={{
-                            mb: 3,
-                            pb: 1,
-                            borderBottom: '2px solid',
-                            borderColor: 'primary.main',
-                            color: 'primary.main',
-                            textAlign: 'center',
-                            letterSpacing: '0.1em',
-                        }}
-                    >
-                        ACTIONS
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <Box
-                            onClick={() => console.log('START')}
-                            sx={{
-                                p: 1.5,
-                                border: '2px solid',
-                                borderColor: 'primary.main',
-                                borderRadius: 1,
-                                cursor: 'pointer',
-                                transition: 'all 0.3s',
-                                '&:hover': {
-                                    boxShadow: '0 0 20px rgba(0, 229, 255, 0.5)',
-                                    transform: 'scale(1.02)',
-                                },
-                            }}
-                        >
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <PlayArrowIcon sx={{ color: 'primary.main', mr: 1 }} />
-                                <Typography sx={{ color: 'primary.main', fontWeight: 700, letterSpacing: '0.1em' }}>
-                                    START
-                                </Typography>
-                            </Box>
-                        </Box>
-                        <Box
-                            onClick={() => console.log('STOP')}
-                            sx={{
-                                p: 1.5,
-                                border: '2px solid',
-                                borderColor: 'error.main',
-                                borderRadius: 1,
-                                cursor: 'pointer',
-                                transition: 'all 0.3s',
-                                '&:hover': {
-                                    boxShadow: '0 0 20px rgba(255, 23, 68, 0.5)',
-                                    transform: 'scale(1.02)',
-                                },
-                            }}
-                        >
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <StopIcon sx={{ color: 'error.main', mr: 1 }} />
-                                <Typography sx={{ color: 'error.main', fontWeight: 700, letterSpacing: '0.1em' }}>
-                                    STOP
-                                </Typography>
-                            </Box>
-                        </Box>
-                    </Box>
-                </Box>
-            );
-        } else {
-            // System sub-tab
-            return (
-                <Box
-                    sx={{
-                        height: '100%',
-                        p: 2,
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        borderRadius: 2,
-                        bgcolor: 'rgba(20, 27, 45, 0.9)',
-                        overflow: 'auto',
-                    }}
-                >
-                    <Typography
-                        variant="h6"
-                        sx={{
-                            mb: 2,
-                            pb: 1,
-                            borderBottom: '2px solid',
-                            borderColor: 'primary.main',
-                            color: 'primary.main',
-                            textAlign: 'center',
-                            letterSpacing: '0.1em',
-                        }}
-                    >
-                        SYSTEM
-                    </Typography>
-                    <Box
-                        sx={{
-                            fontFamily: '"Source Code Pro", monospace',
-                            fontSize: '0.85rem',
-                            color: 'text.secondary',
-                            '& > div': { mb: 1 },
-                        }}
-                    >
-                        <Box>CPU: 12.5%</Box>
-                        <Box>MEM: 256MB/4GB</Box>
-                        <Box>TEMP: 42.5°C</Box>
-                        <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'primary.main' }}>
-                            UPTIME: 24h 15m
-                        </Box>
-                    </Box>
-                </Box>
-            );
-        }
-    };
-
-    // Render content for PLAYLIST sub-tabs
     const renderPlaylistContent = (subTab) => {
         if (subTab.id === 'playlists') {
-            return <PlaylistManager />;
+            return <PlaylistManager isPlaying={isPlaying} onTogglePlay={handleTogglePlay} onStop={handleStop} />;
         } else {
             return <VideoManager />;
+        }
+    };
+
+    const renderParamsContent = (subTab) => {
+        if (subTab.id === 'config') {
+            return <ConfigEditor />;
+        } else {
+            return <ParamsEditor />;
+        }
+    };
+
+    const renderControlContent = (subTab) => {
+        if (subTab.id === 'sphere_control') {
+            return <SphereControl />;
+        } else {
+            return <PatternControl />;
         }
     };
 
@@ -446,9 +288,11 @@ export const Dashboard = () => {
             sx={{
                 width: '100%',
                 height: '100dvh',
+                bgcolor: 'background.default',
+                color: 'text.primary',
                 display: 'flex',
                 flexDirection: 'column',
-                bgcolor: 'background.default',
+                overflow: 'hidden',
             }}
         >
             {/* HEADER */}
@@ -456,16 +300,15 @@ export const Dashboard = () => {
                 {...swipeHandlers}
                 sx={{
                     p: 2,
-                    pt: 'max(16px, env(safe-area-inset-top))', // Handle notch/safe area
-                    pb: 2,
+                    pt: 'max(12px, env(safe-area-inset-top))',
                     borderBottom: '2px solid',
                     borderColor: 'primary.main',
                     bgcolor: 'rgba(20, 27, 45, 0.95)',
-                    boxShadow: '0 2px 20px rgba(0, 229, 255, 0.3)',
-                    zIndex: 20, // Increase z-index
+                    boxShadow: '0 0 20px rgba(0, 229, 255, 0.3)',
+                    zIndex: 20,
                     cursor: 'grab',
                     touchAction: 'none',
-                    userSelect: 'none', // Prevent text selection
+                    userSelect: 'none',
                     '&:active': { cursor: 'grabbing' },
                 }}
             >
@@ -477,7 +320,7 @@ export const Dashboard = () => {
                         fontWeight: 700,
                         letterSpacing: '0.15em',
                         textShadow: '0 0 10px rgba(0, 229, 255, 0.8)',
-                        pointerEvents: 'none', // Pass events to parent Box
+                        pointerEvents: 'none',
                     }}
                 >
                     {TAB_CONFIG[currentTab].name} MODE
@@ -526,7 +369,7 @@ export const Dashboard = () => {
                                     transform: `rotateY(${tab.angle}deg) translateZ(50vw) scale(1.0)`,
                                     p: 2,
                                     boxSizing: 'border-box',
-                                    bgcolor: 'background.default', // Ensure background opacity to hide back faces
+                                    bgcolor: 'background.default',
                                 }}
                             >
                                 {tab.subTabs.length > 0 ? (
@@ -548,12 +391,12 @@ export const Dashboard = () => {
                 {...swipeHandlers}
                 sx={{
                     p: 1.5,
-                    pb: 'max(12px, env(safe-area-inset-bottom))', // Handle home bar area
+                    pb: 'max(12px, env(safe-area-inset-bottom))',
                     borderTop: '2px solid',
                     borderColor: 'primary.main',
                     bgcolor: 'rgba(20, 27, 45, 0.95)',
                     boxShadow: '0 -2px 20px rgba(0, 229, 255, 0.3)',
-                    zIndex: 20, // Increase z-index
+                    zIndex: 20,
                     cursor: 'grab',
                     touchAction: 'none',
                     userSelect: 'none',
@@ -562,16 +405,17 @@ export const Dashboard = () => {
             >
                 <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', pointerEvents: 'none' }}>
                     <Chip
-                        icon={<WifiIcon />}
-                        label="CONNECTED"
+                        icon={isConnected ? <WifiIcon /> : <WifiOffIcon />}
+                        label={isConnected ? "CONNECTED" : "DISCONNECTED"}
                         size="small"
                         sx={{
-                            bgcolor: 'rgba(0, 255, 0, 0.1)',
-                            border: '1px solid #00ff00',
-                            color: '#00ff00',
+                            bgcolor: isConnected ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 0, 0, 0.1)',
+                            border: '1px solid',
+                            borderColor: isConnected ? '#00ff00' : '#ff0000',
+                            color: isConnected ? '#00ff00' : '#ff0000',
                             fontSize: '0.7rem',
                             fontFamily: '"Source Code Pro", monospace',
-                            '& .MuiChip-icon': { color: '#00ff00' },
+                            '& .MuiChip-icon': { color: isConnected ? '#00ff00' : '#ff0000' },
                         }}
                     />
                     <Chip
