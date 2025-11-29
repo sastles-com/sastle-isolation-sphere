@@ -22,5 +22,7 @@ private:
   int scl_pin;
   Adafruit_BNO055 bno;
   imu::Quaternion quat;
+  bool initialized = false;
+  unsigned long lastUpdate = 0;
 };
 

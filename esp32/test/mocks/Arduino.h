@@ -10,6 +10,12 @@
 #include <vector>
 #include <cstdarg>
 
+// Add common Arduino types
+typedef uint8_t byte;
+
+// Add mock for millis()
+unsigned long millis();
+
 #ifndef PI
 #define PI 3.1415926535897932384626433832795
 // ESP Mock
@@ -47,6 +53,16 @@ public:
     size_t pos = find(c, fromIndex);
     return (pos == std::string::npos) ? -1 : (int)pos;
   }
+  
+  int indexOf(const char* str, int fromIndex = 0) const {
+    size_t pos = find(str, fromIndex);
+    return (pos == std::string::npos) ? -1 : (int)pos;
+  }
+  
+  int indexOf(const String &str, int fromIndex = 0) const {
+    size_t pos = find(str, fromIndex);
+    return (pos == std::string::npos) ? -1 : (int)pos;
+  }
 
   void trim() {
     // Simple trim
@@ -69,6 +85,14 @@ public:
     virtual void flush() {}
     virtual size_t write(uint8_t) { return 1; }
     virtual size_t write(const uint8_t *buffer, size_t size) { return size; }
+    
+    // Added for mocks
+    virtual String readString() { return ""; }
+    virtual void print(const char *msg) {}
+    virtual void print(String msg) {}
+    virtual void println(const char *msg) {}
+    virtual void println(String msg) {}
+    virtual void close() {} // Added close here for convenience, though usually on File
 };
 
 class SerialMock : public Stream {

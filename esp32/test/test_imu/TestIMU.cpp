@@ -4,13 +4,19 @@
 #include <Wire.h> // Include Wire mock
 
 // Mock Adafruit_BNO055
-bool mock_bno_begin_success;
-imu::Quaternion mock_bno_quat;
+extern bool mock_bno_begin_success;
+extern imu::Quaternion mock_bno_quat;
+
+// Mock Wire
+extern int mock_wire_sda;
+extern int mock_wire_scl;
 
 void setUp(void) {
   // set up for each test
   mock_bno_begin_success = true; // Reset mock to success for each test
   mock_bno_quat = imu::Quaternion(1.0, 0.0, 0.0, 0.0); // Reset mock quaternion
+  mock_wire_sda = -1; // Reset mock pins
+  mock_wire_scl = -1;
 }
 
 void tearDown(void) {
@@ -32,6 +38,16 @@ void test_imu_begin_failure() {
   IMU imu(10, 11);
   mock_bno_begin_success = false; // Simulate failed begin
   TEST_ASSERT_FALSE(imu.begin());
+}
+
+void test_imu_begin_initializes_wire_with_correct_pins() {
+    const int sda_pin = 21;
+    const int scl_pin = 22;
+    IMU imu(sda_pin, scl_pin);
+    imu.begin();
+
+    TEST_ASSERT_EQUAL(sda_pin, mock_wire_sda);
+    TEST_ASSERT_EQUAL(scl_pin, mock_wire_scl);
 }
 
 void test_imu_update_and_get_quaternion() {
@@ -60,6 +76,7 @@ void setup() {
   RUN_TEST(test_imu_constructor);
   RUN_TEST(test_imu_begin_success);
   RUN_TEST(test_imu_begin_failure);
+  RUN_TEST(test_imu_begin_initializes_wire_with_correct_pins);
   RUN_TEST(test_imu_update_and_get_quaternion);
   UNITY_END();
 }
