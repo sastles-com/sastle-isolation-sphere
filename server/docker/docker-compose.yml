@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  micro-ros-agent:
+    image: microros/micro-ros-agent:humble
+    network_mode: host
+    command: udp4 --port 8888 -v6
+    restart: always
+    devices:
+      - /dev/shm:/dev/shm
