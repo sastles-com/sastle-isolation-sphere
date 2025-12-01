@@ -1,0 +1,60 @@
+{
+  "system": {
+    "debug": true,
+    "PSRAM": true,
+    "ota": {
+      "enabled": true,
+      "username": "admin",
+      "password": "sphere",
+      "listen_port": 3232
+    }, 
+    "paths": {
+      "config": "/littlefs/config.json",
+      "images": "/littlefs/images/",
+      "opening": "/littlefs/images/opening/",
+      "layout": "/littlefs/led_layout.csv",
+      "logs": "/littlefs/logs/"
+    }
+  },
+  "wifi": {
+    "SSID": "ESP32-P2P-Direct",
+    "password": "isolation-sphere-p2p",
+    "enabled": true,
+    "broker": "192.168.49.1",
+    "mqtt_port": 1883, 
+    "udp_port": 8889
+  },
+  "image": {
+    "width": 320,
+    "height": 160,
+    "format": "RGB565",
+    "type": "JPEG"
+  },
+  "ui": {
+    "gesture_enabled": true,
+    "dim_on_entry": true,
+    "overlay_mode": "overlay",
+    "brightness_profile": "auto"
+  },
+
+  "sphere": {
+    "id": "sphere001",
+    "mac": "F0:9E:9E:32:67:D0",
+    "static_ip": "192.168.49.101",
+    "features": {
+      "LED": true,
+      "IMU": "BNO055",
+      "LCD": {
+        "width": 128,
+        "height": 128,
+        "rotation": 0,
+        "offset": [0, 0],
+        "color_depth": 16,
+        "switch": true,
+        "debug": true
+      },
+      "ui": true
+    }
+  }
+}
+
