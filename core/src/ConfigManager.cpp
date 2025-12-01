@@ -1,5 +1,8 @@
 #include "ConfigManager.h"
 
+// グローバルデバッグフラグ (main.cppで定義)
+extern bool g_debugEnabled;
+
 namespace sastle {
 
 ConfigManager::ConfigManager() : doc(8192) {
@@ -51,6 +54,10 @@ SystemConfig ConfigManager::getSystemConfig() {
     SystemConfig config;
     config.debug = doc["system"]["debug"] | false;
     config.PSRAM = doc["system"]["PSRAM"] | false;
+    
+    // グローバルデバッグフラグを設定
+    g_debugEnabled = config.debug;
+    
     return config;
 }
 

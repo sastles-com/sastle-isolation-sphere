@@ -5,27 +5,40 @@
 #include "NetworkManager.h"
 #include "MQTTManager.h"
 #include "IMUManager.h"
+#include "GestureManager.h"
+#include "SoundManager.h"
+#include "ImageManager.h"
+#include "LEDManager.h"
+#include "LCDManager.h"
 
 using namespace sastle;
+
+// グローバルデバッグフラグ (common.hでextern宣言)
+bool g_debugEnabled = false;
 
 ConfigManager config;
 NetworkManager network;
 MQTTManager mqtt;
 IMUManager imuSensor;
+GestureManager gesture;
+SoundManager sound;
+ImageManager imageManager;
+LEDManager ledManager;
+LCDManager lcdManager;
 
 unsigned long lastIMUPublish = 0;
 const unsigned long IMU_PUBLISH_INTERVAL = 100; // 100ms = 10Hz
 
 // MQTTメッセージ受信コールバック
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
-    Serial.printf("[MQTT] Message arrived [%s]: ", topic);
+    DEBUG_PRINTF("[MQTT] Message arrived [%s]: ", topic);
     
     // ペイロードを文字列として表示
     char message[256];
     int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
     memcpy(message, payload, len);
     message[len] = '\0';
-    Serial.println(message);
+    DEBUG_PRINTLN(message);
     
     // トピック別処理の例
     if (strstr(topic, "/command") != NULL) {
@@ -95,11 +108,70 @@ void setup() {
     }
     mqtt.printStatus();
     
+    // Sound初期化
+    if (!sound.begin(config)) {
+        Serial.println("Sound initialization failed (continuing without sound)");
+    } else {
+        // 起動音を再生
+        sound.playEffect(SoundEffect::STARTUP);
+    }
+    
     // IMU初期化
     if (!imuSensor.begin(config)) {
         Serial.println("IMU initialization failed (continuing without IMU)");
     } else {
         imuSensor.printStatus();
+    }
+    
+    // ジェスチャー初期化 (サウンドフィードバック付き)
+    if (imuSensor.isInitialized()) {
+        if (!gesture.begin(imuSensor, mqtt, &sound)) {
+            Serial.println("Gesture initialization failed");
+        }
+    } else {
+        Serial.println("Gesture disabled (IMU not available)");
+    }
+    
+    // ImageManager初期化
+    if (!imageManager.begin(config, network)) {
+        Serial.println("ImageManager initialization failed (continuing without image)");
+    } else {
+        imageManager.printStats();
+    }
+    
+    // LCDManager初期化 (デバッグモード)
+    if (!lcdManager.begin(&config)) {
+        DEBUG_PRINTLN("[Setup] LCDManager initialization failed");
+    }
+    
+    // LEDManager初期化 (IMUManager連携)
+    if (imageManager.isInitialized()) {
+        IMUManager* imuPtr = imuSensor.isInitialized() ? &imuSensor : nullptr;
+        if (!ledManager.begin(config, imageManager, imuPtr)) {
+            Serial.println("LEDManager initialization failed (continuing without LED)");
+        } else {
+            ledManager.printStatus();
+            
+            // 起動時LEDテスト: 赤→緑→青
+            ledManager.fillSolid(255, 0, 0);
+            ledManager.show();
+            delay(500);
+            ledManager.fillSolid(0, 255, 0);
+            ledManager.show();
+            delay(500);
+            ledManager.fillSolid(0, 0, 255);
+            ledManager.show();
+            delay(500);
+            ledManager.fillSolid(0, 0, 0);
+            ledManager.show();
+            
+            // レンダリングタスク開始 (Core 1)
+            if (!ledManager.startRenderTask(1, 2, 8192)) {
+                Serial.println("Failed to start LED render task");
+            }
+        }
+    } else {
+        Serial.println("LEDManager disabled (ImageManager not available)");
     }
     
     Serial.println("\n=== Setup Complete ===");
@@ -109,9 +181,27 @@ void loop() {
     // MQTT処理 (keep-alive & メッセージ受信)
     mqtt.loop();
     
+    // ImageManager更新 (UDP画像受信・デコード)
+    bool newFrameReceived = false;
+    if (imageManager.isInitialized()) {
+        if (imageManager.update()) {
+            newFrameReceived = true;
+            // 新フレームデコード完了 → LEDManagerに通知
+            // Note: LEDManager内部でセマフォ経由で通知される
+        }
+    }
+    
+    // LCD更新 (デバッグモード時のみ)
+    if (lcdManager.isDebugEnabled() && newFrameReceived) {
+        lcdManager.update(&imageManager);
+    }
+    
     // IMU更新
     if (imuSensor.isInitialized()) {
         imuSensor.update();
+        
+        // ジェスチャー検出更新
+        gesture.update();
         
         // 定期的にIMUデータをMQTT送信
         unsigned long now = millis();

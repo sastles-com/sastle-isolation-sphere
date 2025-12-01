@@ -9,11 +9,11 @@
       "listen_port": 3232
     }, 
     "paths": {
-      "config": "/littlefs/config.json",
-      "images": "/littlefs/images/",
-      "opening": "/littlefs/images/opening/",
-      "layout": "/littlefs/led_layout.csv",
-      "logs": "/littlefs/logs/"
+      "config": "/config.json",
+      "images": "/images/",
+      "opening": "/images/opening/",
+      "layout": "/led_layout.csv",
+      "logs": "/logs/"
     }
   },
   "wifi": {
@@ -36,7 +36,12 @@
     "overlay_mode": "overlay",
     "brightness_profile": "auto"
   },
-
+  "sound": {
+    "enabled": true,
+    "gpio": 39,
+    "volume": 50,
+    "startup_sound": true
+  },
   "sphere": {
     "id": "sphere001",
     "mac": "F0:9E:9E:32:67:D0",
