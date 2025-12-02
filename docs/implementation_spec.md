@@ -365,10 +365,23 @@ const fetchPlaylists = async () => {
 {
   "type": "SET_PARAMS",
   "payload": {
-    "brightness": 90
+    "brightness": 90,
+    "hue": 180
   }
 }
 ```
+
+#### Client → Server (SET_PLAYBACK)
+```json
+{
+  "type": "SET_PLAYBACK",
+  "payload": {
+    "action": "toggle"
+  }
+}
+```
+
+**Supported actions**: `"play"`, `"pause"`, `"stop"`, `"toggle"`
 
 ## 6. ビルド・デプロイ
 

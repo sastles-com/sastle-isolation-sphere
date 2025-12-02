@@ -27,40 +27,35 @@ export const Dashboard = () => {
     const [currentTab, setCurrentTab] = useState(0);
     const [rotation, setRotation] = useState(0);
     const [brightness, setBrightness] = useState(80);
-    const [speed, setSpeed] = useState(50);
     const [color, setColor] = useState(120);
-    const [isPlaying, setIsPlaying] = useState(false);
+    const [playbackStatus, setPlaybackStatus] = useState('stopped'); // "playing" | "paused" | "stopped"
 
     // Sync state from WebSocket
     useEffect(() => {
         if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
             const { playback, params } = lastMessage.payload;
             if (playback) {
-                setIsPlaying(playback.isPlaying);
+                setPlaybackStatus(playback.status || 'stopped');
             }
             if (params) {
                 setBrightness(params.brightness);
-                setSpeed(params.speed);
                 setColor(params.hue);
             }
         }
     }, [lastMessage]);
 
     const handleTogglePlay = () => {
-        const newState = !isPlaying;
-        setIsPlaying(newState);
-        sendMessage('SET_PLAYBACK', { isPlaying: newState });
+        // Send toggle command to StateManager
+        sendMessage('SET_PLAYBACK', { action: 'toggle' });
     };
 
     const handleStop = () => {
-        setIsPlaying(false);
-        sendMessage('SET_PLAYBACK', { isPlaying: false });
+        sendMessage('SET_PLAYBACK', { action: 'stop' });
     };
 
     const handleParamChange = (key, value) => {
         // Optimistic update
         if (key === 'brightness') setBrightness(value);
-        if (key === 'speed') setSpeed(value);
         if (key === 'hue') setColor(value);
 
         // Send to backend
@@ -111,7 +106,6 @@ export const Dashboard = () => {
                     <HoloSphere
                         rotation={rotation}
                         brightness={brightness}
-                        speed={speed}
                         color={color}
                     />
                 </Box>
@@ -130,16 +124,16 @@ export const Dashboard = () => {
                     }}
                 >
                     <Chip
-                        label={isPlaying ? "ONLINE (PLAYING)" : "ONLINE (IDLE)"}
+                        label={playbackStatus === "playing" ? "ONLINE (PLAYING)" : "ONLINE (IDLE)"}
                         size="small"
                         sx={{
-                            bgcolor: isPlaying ? '#00ff00' : '#555',
-                            color: isPlaying ? '#000' : '#ccc',
+                            bgcolor: playbackStatus === "playing" ? '#00ff00' : '#555',
+                            color: playbackStatus === "playing" ? '#000' : '#ccc',
                             fontWeight: 'bold',
                             height: 20,
                             fontSize: '0.65rem',
                             border: 'none',
-                            boxShadow: isPlaying ? '0 0 8px #00ff00' : 'none',
+                            boxShadow: playbackStatus === "playing" ? '0 0 8px #00ff00' : 'none',
                             transition: 'all 0.3s',
                         }}
                     />
@@ -196,14 +190,14 @@ export const Dashboard = () => {
                                     borderColor: 'primary.main',
                                     borderRadius: '50%',
                                     cursor: 'pointer',
-                                    bgcolor: isPlaying ? 'primary.main' : 'rgba(0, 229, 255, 0.1)',
-                                    color: isPlaying ? 'black' : 'primary.main',
-                                    boxShadow: isPlaying ? '0 0 15px rgba(0, 229, 255, 0.6)' : 'none',
+                                    bgcolor: playbackStatus === "playing" ? 'primary.main' : 'rgba(0, 229, 255, 0.1)',
+                                    color: playbackStatus === "playing" ? 'black' : 'primary.main',
+                                    boxShadow: playbackStatus === "playing" ? '0 0 15px rgba(0, 229, 255, 0.6)' : 'none',
                                     transition: 'all 0.3s',
                                     '&:active': { transform: 'scale(0.95)' }
                                 }}
                             >
-                                {isPlaying ? <PauseIcon fontSize="small" sx={{ color: 'inherit' }} /> : <PlayArrowIcon fontSize="small" sx={{ color: 'inherit' }} />}
+                                {playbackStatus === "playing" ? <PauseIcon fontSize="small" sx={{ color: 'inherit' }} /> : <PlayArrowIcon fontSize="small" sx={{ color: 'inherit' }} />}
                             </Box>
                             <Box
                                 onClick={handleStop}
@@ -232,13 +226,6 @@ export const Dashboard = () => {
                             onChange={(val) => handleParamChange('brightness', val)}
                         />
                         <CompactSlider
-                            label="SPEED"
-                            value={speed}
-                            min={0}
-                            max={100}
-                            onChange={(val) => handleParamChange('speed', val)}
-                        />
-                        <CompactSlider
                             label="HUE"
                             value={color}
                             min={0}
@@ -253,6 +240,7 @@ export const Dashboard = () => {
     };
 
     const renderPlaylistContent = (subTab) => {
+        const isPlaying = playbackStatus === 'playing';
         if (subTab.id === 'playlists') {
             return <PlaylistManager isPlaying={isPlaying} onTogglePlay={handleTogglePlay} onStop={handleStop} />;
         } else {
