@@ -218,11 +218,15 @@ sphere/
     │   ├── playback
     │   └── params
     │
-    ├── imu                    ← センサーデータ（既存）
+    ├── imu                    ← センサーデータ（StateManager管理外・直接配信）
     └── status                 ← デバイスステータス（既存）
 ```
 
-**重要**: `sphere/all/state` はStateManagerのみが配信する唯一の真実
+**重要な設計判断**:
+- `sphere/all/state` はStateManagerのみが配信する唯一の真実
+- **IMUデータは例外**: 高頻度（10Hz以上）のため、StateManagerを経由せず直接WebSocketに配信
+  - `sphere/{device_id}/imu` は状態管理の対象外
+  - MQTTブローカー → WebSocket Manager → フロントエンドの直接ルート
 
 ---
 

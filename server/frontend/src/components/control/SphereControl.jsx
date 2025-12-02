@@ -5,12 +5,45 @@ import CompassCalibrationIcon from '@mui/icons-material/CompassCalibration';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import { CompactSlider } from '../ui/CompactSlider';
 import { NeonJoystick } from '../ui/NeonJoystick';
+import { useWebSocket } from '../../contexts/WebSocketContext';
 
 export const SphereControl = () => {
     const [brightness, setBrightness] = useState(80);
     const [offset, setOffset] = useState({ pitch: 0, roll: 0 });
     const joystickVector = useRef({ x: 0, y: 0 });
     const requestRef = useRef();
+    const { lastMessage, isConnected } = useWebSocket();
+
+    // Listen for state updates from StateManager
+    useEffect(() => {
+        if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
+            const state = lastMessage.payload;
+            if (state.params && state.params.brightness !== undefined) {
+                setBrightness(state.params.brightness);
+            }
+        }
+    }, [lastMessage]);
+
+    // Send brightness command to MQTT
+    const handleBrightnessChange = async (value) => {
+        setBrightness(value);
+        
+        try {
+            const response = await fetch('/api/command/params', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ brightness: value }),
+            });
+            
+            if (!response.ok) {
+                console.error('Failed to send brightness command');
+            }
+        } catch (error) {
+            console.error('Error sending brightness command:', error);
+        }
+    };
 
     // Rate control loop
     const updateOffset = () => {
@@ -105,7 +138,7 @@ export const SphereControl = () => {
                         value={brightness}
                         min={0}
                         max={100}
-                        onChange={setBrightness}
+                        onChange={handleBrightnessChange}
                     />
                 </Box>
 

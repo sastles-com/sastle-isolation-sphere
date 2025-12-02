@@ -34,14 +34,33 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     DEBUG_PRINTF("[MQTT] Message arrived [%s]: ", topic);
     
     // ペイロードを文字列として表示
-    char message[256];
+    char message[512];  // Increased buffer for state messages
     int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
     memcpy(message, payload, len);
     message[len] = '\0';
     DEBUG_PRINTLN(message);
     
-    // トピック別処理の例
-    if (strstr(topic, "/command") != NULL) {
+    // トピック別処理
+    if (strstr(topic, "sphere/all/state") != NULL) {
+        // StateManagerからの状態更新
+        Serial.println("\n=== STATE UPDATE ===");
+        
+        // JSONパース (簡易版 - ArduinoJsonを使う方が良い)
+        // brightnessを抽出
+        const char* brightnessKey = "\"brightness\":";
+        const char* brightnessPtr = strstr(message, brightnessKey);
+        if (brightnessPtr) {
+            int brightness = atoi(brightnessPtr + strlen(brightnessKey));
+            Serial.printf("  Brightness: %d%%\n", brightness);
+            
+            // TODO: LEDManagerにbrightness設定を適用
+            // ledManager.setBrightness(brightness);
+        }
+        
+        // その他のパラメータも同様にパース可能
+        Serial.println("==================\n");
+        
+    } else if (strstr(topic, "/command") != NULL) {
         // コマンド処理
         if (strcmp(message, "status") == 0) {
             mqtt.publish("sphere/sphere001/response", "OK", false);

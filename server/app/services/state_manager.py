@@ -48,6 +48,10 @@ class StateManager:
                 "hue": 120,
                 "saturation": 100
             },
+            "led": {
+                "mode": "sphere",  # "sphere" | "pixels" | "off"
+                "pixels": []  # [{index: int, r: int, g: int, b: int}, ...]
+            },
             "system": {
                 "fps": 60,
                 "temp": 42.0
@@ -103,6 +107,8 @@ class StateManager:
                     await self._update_playback(payload)
                 elif command_type == 'params':
                     await self._update_params(payload)
+                elif command_type == 'led':
+                    await self._update_led(payload)
                 else:
                     logger.warning(f"Unknown command type: {command_type}")
             else:
@@ -161,6 +167,7 @@ class StateManager:
         - {"speed": 60, "hue": 180}
         - {"brightness": 100, "saturation": 80}
         """
+        logger.info(f"Params command received: {payload}")
         updated = False
         
         for key in ["brightness", "speed", "hue", "saturation"]:
@@ -172,14 +179,63 @@ class StateManager:
                 elif key == "hue":
                     value = max(0, min(360, value))
                 
+                logger.info(f"Setting {key} to {value}")
                 self._state["params"][key] = value
                 updated = True
         
         if updated:
-            logger.info(f"Params updated: {self._state['params']}")
+            logger.info(f"Params state updated: {self._state['params']}")
             await self._publish_state()
         else:
             logger.warning(f"No valid params in payload: {payload}")
+    
+    async def _update_led(self, payload: Dict[str, Any]):
+        """
+        LEDコマンドを処理
+        
+        コマンド例:
+        - {"mode": "sphere"}
+        - {"mode": "pixels", "pixels": [{"index": 0, "r": 255, "g": 0, "b": 0}, ...]}
+        - {"mode": "off"}
+        """
+        logger.info(f"LED command received: {payload}")
+        
+        if "mode" in payload:
+            mode = payload["mode"]
+            
+            if mode not in ["sphere", "pixels", "off"]:
+                logger.warning(f"Invalid LED mode: {mode}")
+                return
+            
+            logger.info(f"Setting LED mode to: {mode}")
+            self._state["led"]["mode"] = mode
+            
+            # pixelsモードの場合、ピクセルデータを更新
+            if mode == "pixels" and "pixels" in payload:
+                pixels = payload["pixels"]
+                logger.info(f"Processing {len(pixels) if isinstance(pixels, list) else 0} pixel data")
+                # バリデーション
+                if isinstance(pixels, list):
+                    validated_pixels = []
+                    for pixel in pixels:
+                        if isinstance(pixel, dict) and all(k in pixel for k in ["index", "r", "g", "b"]):
+                            validated_pixels.append({
+                                "index": int(pixel["index"]),
+                                "r": max(0, min(255, int(pixel["r"]))),
+                                "g": max(0, min(255, int(pixel["g"]))),
+                                "b": max(0, min(255, int(pixel["b"])))
+                            })
+                    self._state["led"]["pixels"] = validated_pixels
+                    logger.info(f"Validated {len(validated_pixels)} pixels")
+            elif mode != "pixels":
+                # sphere/offモードの場合はpixelsをクリア
+                self._state["led"]["pixels"] = []
+                logger.info(f"Cleared pixel data for mode: {mode}")
+            
+            logger.info(f"LED state updated: mode={self._state['led']['mode']}, pixels_count={len(self._state['led']['pixels'])}")
+            await self._publish_state()
+        else:
+            logger.warning(f"No mode in LED payload: {payload}")
     
     async def _publish_state(self):
         """

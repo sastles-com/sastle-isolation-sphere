@@ -90,10 +90,17 @@ bool MQTTManager::connect() {
     if (connected) {
         Serial.println("MQTT connected!");
         
-        // 接続時のデフォルト購読 (sphere名をベースにしたトピック)
+        // 接続時のデフォルト購読
+        // 1. デバイス固有のコマンドトピック
         char topic[64];
         snprintf(topic, sizeof(topic), "sphere/%s/command", _clientId);
         subscribe(topic);
+        
+        // 2. 全デバイス向けの状態トピック (StateManagerから配信)
+        subscribe("sphere/all/state");
+        
+        // 3. 全デバイス向けのコマンドトピック
+        subscribe("sphere/all/command/#");  // ワイルドカードで全コマンドを購読
         
         // ステータス送信
         snprintf(topic, sizeof(topic), "sphere/%s/status", _clientId);
