@@ -1,36 +1,51 @@
 # Server Development Tasks
 
-This document outlines the tasks for the server-side components based on the defined architecture.
+This document outlines the tasks for the server-side components based on the simplified MQTT+WebSocket architecture.
 
-## Phase 1: Core Service Implementation
+## Phase 1: Core Service Implementation (Completed ✅)
 
-### 1. Joystick Daemon
-- [ ] Create a Python script to read data from a USB joystick (e.g., using `evdev`).
-- [ ] Implement as a ROS2 node.
-- [ ] Define a custom ROS2 message for joystick state (`JoyState.msg`).
-- [ ] Publish joystick data to the `/joy_data` ROS2 topic.
+### 1. StateManager
+- ✅ Centralized state management
+- ✅ MQTT command processing
+- ✅ WebSocket message handling
+- ✅ State broadcasting
 
-### 2. Video Streaming Daemon
-- [ ] Create a Python script to be the daemon.
-- [ ] Implement as a ROS2 node that subscribes to the `/video_control` topic.
-- [ ] Implement logic to read a video file using OpenCV.
-- [ ] Implement UDP socket programming to stream video frames to the ESP32.
-- [ ] Define a ROS2 message for video control commands (`VideoControl.msg`).
+### 2. MQTT Service
+- ✅ MQTT client implementation
+- ✅ ESP32 connection handling
+- ✅ Topic subscription (imu, status, state)
+- ✅ Command publishing
 
 ### 3. FastAPI Server
-- [ ] **ROS2/MQTT Integration**:
-    - [ ] Implement ROS2 node initialization within the FastAPI application lifecycle.
-    - [ ] Implement an MQTT client (e.g., using `gmqtt`) that connects to the broker.
-- [ ] **Bridge Implementation**:
-    - [ ] Create a ROS2 subscriber for `/joy_data`.
-    - [ ] In the subscriber callback, convert ROS2 messages to a defined JSON payload and publish via MQTT to `/esp32/command`.
-    - [ ] Create an MQTT subscriber for `/esp32/status`.
-    - [ ] In the subscriber callback, forward status data to the Web UI via WebSocket.
-- [ ] **API & Control Endpoints**:
-    - [ ] Create a WebSocket endpoint for the Web UI to connect to.
-    - [ ] Create HTTP endpoints to trigger video playback (e.g., `/video/play`), which will publish messages to the `/video_control` ROS2 topic.
+- ✅ WebSocket endpoint
+- ✅ REST API endpoints
+- ✅ Frontend static file serving
+- ✅ StateManager integration
 
-### 4. Overall System
-- [ ] Define common ROS2 message types (`.msg` files) in a shared package.
-- [ ] Create `launch.py` files to start all the daemons and nodes together.
-- [ ] Write documentation for topic names, message formats, and API endpoints.
+## Phase 2: Video Streaming (In Progress)
+
+### 1. Video Daemon
+- [ ] MQTT subscription for playback commands
+- [ ] Playlist management
+- [ ] Video decoding (OpenCV)
+- [ ] Frame resizing (320x160)
+- [ ] JPEG compression
+- [ ] UDP transmission to ESP32
+
+### 2. Playlist API
+- [ ] Create/Read/Update/Delete playlists
+- [ ] Track management
+- [ ] Playback control endpoints
+
+## Phase 3: Joystick Support (Pending)
+
+### 1. Joystick Daemon
+- [ ] USB device detection (evdev)
+- [ ] PS4 controller support
+- [ ] Button mapping configuration
+- [ ] Direct MQTT publishing (no ROS2)
+
+## Documentation
+- ✅ Communication design specification
+- ✅ ROS2 removal plan
+- ✅ Architecture documentation updated

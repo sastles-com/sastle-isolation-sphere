@@ -15,8 +15,8 @@ Isolation Sphereは、M5Atom S3Rをベースとした球体型LEDディスプレ
 - 🎯 **IMU姿勢補正** (BNO055) による常に正立した映像表示
 - 🌐 **WebUI制御** - スマホ/タブレット/PCから操作可能
 - 🎮 **物理ジョイスティック対応** - USB接続による直感的操作
-- 🚀 **micro-ROS統合** - リアルタイム通信フレームワーク
-- 📡 **デュアルネットワーク** - WebUI用と専用ESP32通信の分離
+- 🚀 **MQTT+UDP通信** - 制御・状態はMQTT、映像はUDPで最適化
+- 📡 **WebSocket同期** - リアルタイムUI更新
 
 ## システム構成
 
@@ -34,11 +34,11 @@ Isolation Sphereは、M5Atom S3Rをベースとした球体型LEDディスプレ
 ├───────────────┤    ├────────────────┤    ├──────────────┤
 │• Smartphone   │───▶│• FastAPI       │───▶│• 800 LEDs    │
 │• Tablet       │    │• React UI      │    │• IMU (BNO055)│
-│• PC/Mac       │    │• ROS2 Humble   │    │• WiFi STA    │
-│               │    │• micro-ROS     │    │• UDP/MQTT    │
+│• PC/Mac       │    │• MQTT Broker   │    │• WiFi STA    │
+│               │    │• StateManager  │    │• UDP/MQTT    │
 │               │    │• Joystick      │    │• PSRAM 8MB   │
-└───────────────┘    │  Daemon        │    └──────────────┘
-                     │• Video Stream  │
+└───────────────┘    │  (Optional)    │    └──────────────┘
+                     │• Video Daemon  │
                      └────────────────┘
 ```
 
@@ -72,8 +72,8 @@ isolation-sphere/
 │   ├── app/                 # FastAPI アプリケーション
 │   │   ├── main.py          # サーバーエントリポイント
 │   │   ├── api/             # REST API エンドポイント
-│   │   ├── core/            # コア機能 (ROS2統合)
-│   │   └── services/        # ビジネスロジック
+│   │   ├── core/            # コア機能 (設定管理)
+│   │   └── services/        # ビジネスロジック (StateManager, MQTT)
 │   ├── frontend/            # React WebUI (Vite)
 │   │   ├── src/
 │   │   │   ├── components/  # UIコンポーネント
@@ -87,8 +87,8 @@ isolation-sphere/
 │   ├── scripts/             # セットアップスクリプト
 │   │   ├── setup_network.sh # AP設定
 │   │   └── setup_services.sh# systemd設定
-│   ├── docker/              # Docker構成
-│   │   └── docker-compose.yml # micro-ROS Agent
+│   ├── video/               # 映像配信デーモン (実装予定)
+│   │   └── daemon.py        # UDP映像ストリーミング
 │   ├── docs/                # サーバードキュメント
 │   ├── pyproject.toml       # Python依存関係
 │   └── README.md            # Server README
@@ -164,9 +164,8 @@ sudo scripts/setup_services.sh
 #### 開発モード
 
 ```bash
-# Terminal 1: micro-ROS Agent起動
-cd server/docker
-docker-compose up
+# Terminal 1: MQTTブローカー起動
+sudo systemctl start mosquitto
 
 # Terminal 2: FastAPIサーバー起動
 cd server
@@ -176,7 +175,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload
 cd server/frontend
 npm run dev
 
-# Terminal 4: ジョイスティックデーモン (ジョイスティック接続時)
+# Terminal 4: ジョイスティックデーモン (オプション、実装予定)
 cd server
 python -m joystick.daemon
 ```
@@ -185,9 +184,9 @@ python -m joystick.daemon
 
 ```bash
 # すべてのサービスを起動
+sudo systemctl start mosquitto
 sudo systemctl start isolation-sphere-server
-sudo systemctl start isolation-sphere-joystick
-sudo systemctl start micro-ros-agent
+# sudo systemctl start isolation-sphere-joystick  # 実装予定
 ```
 
 ### アクセス
@@ -212,10 +211,9 @@ sudo systemctl start micro-ros-agent
 - **言語**: Python 3.10+
 - **フレームワーク**: FastAPI (非同期Web)
 - **通信**:
-  - ROS2 Humble (rclpy)
-  - micro-ROS Agent (Docker)
-  - WebSocket (リアルタイム通信)
-  - MQTT (paho-mqtt)
+  - MQTT (paho-mqtt) - 制御・状態管理
+  - WebSocket - リアルタイムUI同期
+  - UDP - 映像ストリーミング (実装予定)
 
 ### Server Frontend
 - **フレームワーク**: React 18 (Vite)
@@ -226,12 +224,13 @@ sudo systemctl start micro-ros-agent
 
 ## 通信プロトコル
 
-### micro-ROS (XRCE-DDS)
-- **用途**: 主要な制御通信
+### MQTT
+- **用途**: 制御コマンド・状態管理・センサーデータ
+- **ブローカー**: 192.168.49.1:1883
 - **トピック**:
-  - `/joy_data` - ジョイスティック入力
-  - `/video_control` - ビデオ制御コマンド
-  - `/sphere/status` - デバイス状態
+  - `sphere/all/command/*` - 制御コマンド (Server → ESP32)
+  - `sphere/{id}/imu` - IMUデータ (ESP32 → Server, 10Hz)
+  - `sphere/{id}/state` - デバイス状態 (ESP32 → Server, retained)
 
 ### UDP
 - **用途**: 高速画像ストリーミング
@@ -325,14 +324,15 @@ pio run -t upload
 
 ### サーバーが起動しない
 ```bash
-# micro-ROS Agentの状態確認
-docker ps
+# MQTTブローカーの状態確認
+sudo systemctl status mosquitto
 
 # FastAPIログ確認
 journalctl -u isolation-sphere-server -f
 
 # ポートの使用状況確認
 sudo netstat -tulpn | grep 9000
+sudo netstat -tulpn | grep 1883  # MQTT
 ```
 
 ### WebUIにアクセスできない
@@ -414,15 +414,15 @@ npm test
 
 - M5Stack コミュニティ
 - FastLED ライブラリ開発者
-- ROS2 / micro-ROS チーム
+- MQTT / Mosquitto コミュニティ
 - React および Three.js コミュニティ
 
 ## 関連リンク
 
 - [M5Atom S3R 公式ドキュメント](https://docs.m5stack.com/en/core/AtomS3R)
 - [FastLED ライブラリ](https://fastled.io/)
-- [ROS2 Humble](https://docs.ros.org/en/humble/)
-- [micro-ROS](https://micro.ros.org/)
+- [Eclipse Mosquitto](https://mosquitto.org/)
+- [MQTT Protocol](https://mqtt.org/)
 - [React Three Fiber](https://docs.pmnd.rs/react-three-fiber/)
 
 ---
