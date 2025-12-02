@@ -39,8 +39,8 @@ graph TD
     JoystickDevice -- "USB Input" --> JoystickDaemon
     JoystickDaemon -- "Pub: /joy_data" --> ROS2
     FastAPI -- "Sub: /joy_data" --> ROS2
-    FastAPI -- "Pub: /esp32/command" --> MQTT
-    MQTT -- "esp32 command" --> ESP32
+    FastAPI -- "Pub: sphere/{device_id}/command" --> MQTT
+    MQTT -- "sphere command" --> ESP32
 
     %% Video Streaming Flow (FastAPI -> ROS2 -> Daemon -> UDP)
     FastAPI -- "Pub: /video_control" --> ROS2
@@ -48,9 +48,10 @@ graph TD
     VideoDaemon -- "Video Frames (UDP)" --> ESP32
 
     %% ESP32 Status Flow (MQTT -> FastAPI -> WebUI)
-    ESP32 -- "Pub: /esp32/status" --> MQTT
-    FastAPI -- "Sub: /esp32/status" --> MQTT
-    FastAPI -- "Status (WebSocket)" --> WebUI
+    ESP32 -- "Pub: sphere/{device_id}/status" --> MQTT
+    ESP32 -- "Pub: sphere/{device_id}/imu" --> MQTT
+    FastAPI -- "Sub: sphere/{device_id}/#" --> MQTT
+    FastAPI -- "Status/IMU (WebSocket)" --> WebUI
 
 ```
 
@@ -61,8 +62,8 @@ graph TD
 - **Functions**:
     - **Web Endpoint**: Serves the web UI and handles HTTP/WebSocket requests.
     - **Video Control**: Publishes control messages (e.g., play, stop) to the `/video_control` ROS2 topic based on user actions.
-    - **ROS2-to-MQTT Bridge**: Subscribes to the `/joy_data` ROS2 topic, translates joystick data into commands, and publishes them to the `/esp32/command` MQTT topic.
-    - **MQTT-to-Web Bridge**: Subscribes to the `/esp32/status` MQTT topic and forwards status updates to the Web UI via WebSocket.
+    - **ROS2-to-MQTT Bridge**: Subscribes to the `/joy_data` ROS2 topic, translates joystick data into commands, and publishes them to the `sphere/{device_id}/command` MQTT topic.
+    - **MQTT-to-Web Bridge**: Subscribes to the `sphere/{device_id}/#` MQTT topics (status, imu, gesture, response) and forwards updates to the Web UI via WebSocket.
 
 ### 2. Joystick Daemon
 - **Role**: Captures and publishes physical joystick input.

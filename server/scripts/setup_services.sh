@@ -2,9 +2,9 @@
 set -e
 
 USER="yakatano"
-WORKING_DIR="/home/yakatano/work/isolation-server/server"
-PYTHON_EXEC="/home/yakatano/work/isolation-server/server/.venv/bin/python"
-UVICORN_EXEC="/home/yakatano/work/isolation-server/server/.venv/bin/uvicorn"
+WORKING_DIR="/home/yakatano/work/m5atoms3r/repo/server"
+PYTHON_EXEC="/home/yakatano/work/m5atoms3r/repo/server/.venv/bin/python"
+UVICORN_EXEC="/home/yakatano/work/m5atoms3r/repo/server/.venv/bin/uvicorn"
 
 # Ensure virtualenv exists
 if [ ! -d "$WORKING_DIR/.venv" ]; then

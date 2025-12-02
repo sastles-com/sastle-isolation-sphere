@@ -22,13 +22,14 @@ sequenceDiagram
     
     ROS2->>FastAPI: Forward /joy_data message
     activate FastAPI
-    FastAPI->>FastAPI: Translate ROS2 msg to MQTT payload
-    FastAPI->>MQTT: Publish /esp32/command
+    FastAPI->>FastAPI: Translate ROS2 msg to command text
+    FastAPI->>MQTT: Publish sphere/{device_id}/command
     deactivate FastAPI
 
-    MQTT->>ESP32: Forward /esp32/command
+    MQTT->>ESP32: Forward sphere/{device_id}/command
     activate ESP32
-    ESP32->>ESP32: Execute command (e.g., move motors)
+    ESP32->>ESP32: Execute command (e.g., set LED pattern)
+    ESP32->>MQTT: Publish sphere/{device_id}/response
     deactivate ESP32
 ```
 
@@ -69,10 +70,14 @@ sequenceDiagram
     participant FastAPI
     participant WebUI
 
-    ESP32->>MQTT: Publish /esp32/status
+    loop Every 100ms
+        ESP32->>MQTT: Publish sphere/{device_id}/imu
+    end
     
-    MQTT->>FastAPI: Forward /esp32/status message
+    ESP32->>MQTT: Publish sphere/{device_id}/status (on connect)
+    
+    MQTT->>FastAPI: Forward messages
     activate FastAPI
-    FastAPI->>WebUI: Push status via WebSocket
+    FastAPI->>WebUI: Push status/IMU via WebSocket
     deactivate FastAPI
 ```

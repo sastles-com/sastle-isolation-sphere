@@ -4,8 +4,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SaveIcon from '@mui/icons-material/Save';
 import SettingsIcon from '@mui/icons-material/Settings';
 
-// API URL
-const API_URL = 'http://localhost:8000/api/config';
+// API URL - Use relative path to work with current host and port
+const API_URL = '/api/config';
 
 export const ConfigEditor = () => {
     const [config, setConfig] = useState(null);

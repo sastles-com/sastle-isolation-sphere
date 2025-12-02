@@ -7,8 +7,8 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
 
-// API URL
-const API_URL = 'http://localhost:8000/api/playlist/playlists';
+// API URL - Use relative path to work with current host and port
+const API_URL = '/api/playlist/playlists';
 
 export const PlaylistManager = ({ isPlaying, onTogglePlay, onStop }) => {
     const [playlists, setPlaylists] = useState([]);

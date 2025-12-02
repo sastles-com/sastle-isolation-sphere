@@ -12,7 +12,7 @@ export const WebSocketProvider = ({ children }) => {
         // Use hostname from window.location to support mobile testing on LAN
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.hostname;
-        const port = '8000'; // Assuming backend is always on 8000 for now
+        const port = window.location.port || '9000'; // Use same port as current page
         const url = `${protocol}//${host}:${port}/ws`;
 
         console.log(`Connecting to WebSocket: ${url}`);

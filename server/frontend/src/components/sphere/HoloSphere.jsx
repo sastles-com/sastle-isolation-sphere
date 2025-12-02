@@ -1,13 +1,27 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Sphere } from '@react-three/drei';
+import { Sphere } from '@react-three/drei';
+import { useWebSocket } from '../../contexts/WebSocketContext';
+import * as THREE from 'three';
 
-const RotatingSphere = () => {
+const IMUControlledSphere = () => {
     const meshRef = useRef();
+    const { lastMessage } = useWebSocket();
+    const quaternionRef = useRef(new THREE.Quaternion(0, 0, 0, 1)); // x, y, z, w
 
-    useFrame((state, delta) => {
+    useEffect(() => {
+        // Update quaternion when IMU data received
+        if (lastMessage && lastMessage.type === 'STATE_UPDATE' && lastMessage.payload?.imu) {
+            const { w, x, y, z } = lastMessage.payload.imu;
+            // Three.js uses (x, y, z, w) order
+            quaternionRef.current.set(x, y, z, w);
+        }
+    }, [lastMessage]);
+
+    useFrame(() => {
         if (meshRef.current) {
-            meshRef.current.rotation.y += delta * 0.1;
+            // Apply quaternion rotation from IMU
+            meshRef.current.quaternion.copy(quaternionRef.current);
         }
     });
 
@@ -31,8 +45,8 @@ export const HoloSphere = () => {
             <Canvas camera={{ position: [0, 0, 6] }}>
                 <ambientLight intensity={0.5} />
                 <pointLight position={[10, 10, 10]} />
-                <RotatingSphere />
-                <OrbitControls enableZoom={true} enablePan={false} minDistance={3} maxDistance={10} />
+                <IMUControlledSphere />
+                {/* OrbitControls removed - sphere controlled by IMU only */}
             </Canvas>
         </div>
     );

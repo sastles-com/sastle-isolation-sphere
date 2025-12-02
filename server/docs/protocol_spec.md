@@ -18,11 +18,16 @@ The system utilizes a hybrid communication model:
 
 ## 3. MQTT (Server-ESP32 Communication)
 - **Purpose**: Reliable, low-latency messaging for commands and status updates.
-- **Broker**: A central MQTT broker (e.g., Mosquitto) runs on the MiniPC.
+- **Broker**: A central MQTT broker (e.g., Mosquitto) runs on the MiniPC (192.168.49.1:1883).
 - **Key Topics**:
-    - `/esp32/command`: `FastAPI Server` publishes commands (originating from joystick or UI) for the ESP32 to execute.
-    - `/esp32/status`: The `ESP32` publishes its current state, sensor readings, or acknowledgements.
-- **Payload Format**: JSON (UTF-8 encoded).
+    - `sphere/{device_id}/command`: `FastAPI Server` publishes commands (originating from joystick or UI) for the ESP32 to execute.
+    - `sphere/{device_id}/status`: The `ESP32` publishes online/offline status.
+    - `sphere/{device_id}/imu`: The `ESP32` publishes IMU sensor data (quaternion) at 10Hz.
+    - `sphere/{device_id}/gesture`: The `ESP32` publishes gesture detection events.
+    - `sphere/{device_id}/response`: The `ESP32` publishes command responses.
+- **Payload Format**: 
+    - Commands: Plain text strings
+    - Responses/Data: JSON (UTF-8 encoded)
 
 ## 4. UDP (Server -> ESP32 Video Streaming)
 - **Purpose**: High-speed, one-way transfer of video frames. A connectionless protocol is chosen to prioritize throughput over reliability for video data.
