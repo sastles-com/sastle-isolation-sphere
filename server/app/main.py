@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.core.config import get_settings
-from app.core.ros_manager import ROSManager
 from app.services.state_manager import StateManager
 from app.services.mqtt_service import MQTTService
 from app.api.router import api_router
@@ -12,29 +11,24 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    # 1. Get event loop
     import asyncio
     loop = asyncio.get_event_loop()
     
-    # 2. StateManager初期化
+    # StateManager初期化
     state_manager = StateManager()
     
-    # 3. ROSManager初期化
-    ros_manager = ROSManager()
-    ros_manager.start()
-    
-    # 4. MQTTService初期化
+    # MQTTService初期化
     mqtt_service = MQTTService()
     
-    # 5. StateManager ↔ MQTTService 連携
+    # StateManager ↔ MQTTService 連携
     mqtt_service.state_manager = state_manager
-    mqtt_service.set_event_loop(loop)  # イベントループを設定
+    mqtt_service.set_event_loop(loop)
     state_manager.set_mqtt_client(mqtt_service.client)
     
-    # 6. MQTT接続開始
+    # MQTT接続開始
     mqtt_service.start()
     
-    # StateManagerとMQTTServiceをアプリケーション状態に保存
+    # アプリケーション状態に保存
     app.state.state_manager = state_manager
     app.state.mqtt_service = mqtt_service
     
@@ -42,7 +36,6 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     mqtt_service.stop()
-    ros_manager.stop()
 
 from fastapi.middleware.cors import CORSMiddleware
 

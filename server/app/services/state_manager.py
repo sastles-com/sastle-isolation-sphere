@@ -237,6 +237,30 @@ class StateManager:
         else:
             logger.warning(f"No mode in LED payload: {payload}")
     
+    async def handle_websocket_message(self, data: dict):
+        """
+        WebSocketメッセージを処理してMQTT送信
+        
+        Args:
+            data: {"type": "SET_PARAMS", "payload": {...}}
+        """
+        msg_type = data.get("type")
+        payload = data.get("payload", {})
+        
+        logger.info(f"[WebSocket] Processing message: type={msg_type}")
+        
+        if msg_type == "SET_PARAMS":
+            await self._update_params(payload)
+        
+        elif msg_type == "SET_PLAYBACK":
+            await self._update_playback(payload)
+        
+        elif msg_type == "SET_LED":
+            await self._update_led(payload)
+        
+        else:
+            logger.warning(f"Unknown WebSocket message type: {msg_type}")
+    
     async def _publish_state(self):
         """
         状態をMQTT(retained) + WebSocketで配信
