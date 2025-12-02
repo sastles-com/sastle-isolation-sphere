@@ -30,6 +30,63 @@ StateManager（調停者）: 唯一の状態決定者
    - ボタン、スライダー、LEDなどの状態は常に `sphere/all/state` と一致
    - 他のUIが操作しても自動的に同期される
 
+### 状態同期の原則（最重要）
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ 原則: すべてのUI・デバイスは自分の入力を無視する          │
+└──────────────────────────────────────────────────────────┘
+
+例: Web UIでPlayボタンをクリック
+
+❌ 間違った実装:
+  1. ボタンクリック
+  2. ボタンを即座に「再生中」表示に変更  ← NG!
+  3. MQTTコマンド送信
+  
+✅ 正しい実装:
+  1. ボタンクリック
+  2. MQTTコマンド送信のみ
+  3. sphere/all/state を受信
+  4. Stateに基づいてボタン表示を更新  ← OK!
+
+理由:
+- 自分の操作であっても、StateManagerを経由した状態のみを信頼
+- これにより、他のUIの操作と完全に同期
+- UIロジックがシンプルになる（State購読だけ実装すればよい）
+```
+
+### データの流れ（重要）
+
+```
+┌─────────┐
+│ Web UI  │ ボタンクリック
+└────┬────┘
+     │
+     ▼ Publish command
+sphere/all/command/playback
+     │
+     ▼ StateManager処理
+     │
+     ▼ Publish state (retained)
+sphere/all/state
+     │
+     ├─────────┬─────────┬─────────┐
+     ▼         ▼         ▼         ▼
+┌─────────┐ ┌──────┐ ┌──────┐ ┌──────┐
+│ Web UI  │ │ESP32 │ │ESP32 │ │Joy-  │
+│         │ │ -01  │ │ -02  │ │stick │
+└─────────┘ └──────┘ └──────┘ └──────┘
+     │
+     ▼ State購読
+ボタン表示を更新  ← 自分が押したボタンもStateから更新！
+```
+
+**ポイント**:
+- Web UIは自分が押したボタンでも、Stateを待ってから表示更新
+- これにより、他のUIが操作した場合も同じロジックで同期
+- すべてのUIが「Stateの表示装置」として機能
+
 ---
 
 ## システム構成
@@ -831,7 +888,27 @@ async def websocket_endpoint(websocket: WebSocket):
 **重要ポイント**:
 - JoystickはコマンドをPublishするだけ
 - StateManagerが状態を決定
-- ステート配信で全員が同期（Joystick自身も含む）
+- ステート配信で全員が同期（**Joystick自身も含む**）
+- **Joystick自身のLEDもStateを受信してから点灯** ✨
+
+**フロー詳細（Joystickの視点）**:
+```
+1. ユーザーがAボタン押下
+2. Joystick: MQTTコマンド送信
+   ↓
+   この時点ではJoystick自身のLEDはまだ変わらない
+   ↓
+3. StateManager: コマンド受信・処理
+4. StateManager: sphere/all/state 配信
+   ↓
+5. Joystick: sphere/all/state 受信
+6. Joystick: LEDを緑に点灯  ← ここで初めて自分のLEDを更新！
+```
+
+この実装により:
+- **自分が押したボタンでも、他人が押したボタンでも同じLED動作**
+- コードがシンプル（State購読ロジックだけでOK）
+- 完全な状態同期を保証
 
 ### シナリオ2: Sphereシェイク → トグル
 
@@ -866,8 +943,48 @@ async def websocket_endpoint(websocket: WebSocket):
 
 **重要ポイント**:
 - Sphere自身もステートをSubscribe
-- 自分が送ったコマンドの結果も、ステート経由で受け取る
+- **自分が送ったシェイクコマンドの結果も、ステート経由で受け取る**
 - これにより状態の一貫性が保証される
+
+**なぜこれが重要か**:
+```
+悪い実装例:
+  シェイク検知 → LED即座に変更 → MQTTコマンド送信
+  問題: StateManagerが拒否した場合、LEDだけ変わってしまう
+  
+良い実装:
+  シェイク検知 → MQTTコマンド送信のみ
+  State受信 → LED変更
+  結果: StateManagerの判断に完全に従う
+```
+
+**実装例（Sphere）**:
+```cpp
+void loop() {
+  // シェイク検知
+  if (imu.detectShake()) {
+    // ✅ 正しい: コマンド送信のみ
+    publishCommand("playback", "{\"action\":\"toggle\"}");
+    
+    // ❌ 間違い: ここでLED変更しない
+    // ledManager.toggle(); ← これはしない！
+  }
+  
+  // MQTTメッセージ処理
+  mqtt.loop();
+}
+
+// State受信時のコールバック
+void onStateReceived(JsonDocument& state) {
+  // ✅ 正しい: Stateに基づいてLED更新
+  const char* status = state["playback"]["status"];
+  if (strcmp(status, "playing") == 0) {
+    ledManager.setPlaying();
+  } else {
+    ledManager.setPaused();
+  }
+}
+```
 
 ### シナリオ3: 複数UIから同時操作
 
