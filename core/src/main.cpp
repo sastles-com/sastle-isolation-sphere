@@ -28,6 +28,8 @@ LCDManager lcdManager;
 
 unsigned long lastIMUPublish = 0;
 const unsigned long IMU_PUBLISH_INTERVAL = 100; // 100ms = 10Hz
+unsigned long lastIMULog = 0;
+const unsigned long IMU_LOG_INTERVAL = 3000; // 3秒に1回ログ出力
 
 // MQTTメッセージ受信コールバック
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
@@ -53,8 +55,10 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
             int brightness = atoi(brightnessPtr + strlen(brightnessKey));
             Serial.printf("  Brightness: %d%%\n", brightness);
             
-            // TODO: LEDManagerにbrightness設定を適用
-            // ledManager.setBrightness(brightness);
+            // LEDManagerにbrightness設定を適用 (0-100% → 0-255)
+            uint8_t ledBrightness = map(brightness, 0, 100, 0, 255);
+            ledManager.setBrightness(ledBrightness);
+            Serial.printf("  LED Brightness set to: %d/255\n", ledBrightness);
         }
         
         // その他のパラメータも同様にパース可能
@@ -234,6 +238,12 @@ void loop() {
                          "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}",
                          w, x, y, z);
                 mqtt.publish("sphere/sphere001/imu", payload, false);
+                
+                // 3秒に1回だけシリアルログ出力
+                if (now - lastIMULog >= IMU_LOG_INTERVAL) {
+                    lastIMULog = now;
+                    Serial.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
+                }
             }
         }
     }
