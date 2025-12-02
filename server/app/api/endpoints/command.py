@@ -54,12 +54,14 @@ async def send_params_command(command: ParamsCommand, request: Request):
     例: {"brightness": 85}
     """
     try:
+        print(f"[API] Received params command: {command}")
         mqtt_service = request.app.state.mqtt_service
         payload = command.dict(exclude_none=True)
         
         if not payload:
             raise HTTPException(status_code=400, detail="No parameters provided")
         
+        print(f"[API] Publishing to sphere/all/command/params: {payload}")
         mqtt_service.client.publish(
             "sphere/all/command/params",
             json.dumps(payload),
@@ -67,6 +69,7 @@ async def send_params_command(command: ParamsCommand, request: Request):
         )
         
         logger.info(f"Params command sent: {payload}")
+        print(f"[API] Params command published successfully")
         return {"status": "ok", "command": payload}
     except Exception as e:
         logger.error(f"Failed to send params command: {e}")

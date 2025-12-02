@@ -134,22 +134,20 @@ class MQTTService:
 
     def _handle_command(self, topic: str, payload: dict):
         """Handle command messages - delegate to StateManager"""
+        logger.info(f"[MQTT] Received command on {topic}: {payload}")
+        
         if self.state_manager:
             try:
-                # MQTT callback runs in different thread, schedule coroutine properly
+                # MQTT callback runs in different thread, use run_coroutine_threadsafe
                 import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                if loop.is_running():
-                    # If event loop is already running, schedule as task
-                    asyncio.create_task(self.state_manager.handle_command(topic, payload))
+                if hasattr(self, '_loop') and self._loop:
+                    asyncio.run_coroutine_threadsafe(
+                        self.state_manager.handle_command(topic, payload),
+                        self._loop
+                    )
+                    logger.info(f"[MQTT] Command delegated to StateManager")
                 else:
-                    # Otherwise run synchronously
-                    loop.run_until_complete(self.state_manager.handle_command(topic, payload))
+                    logger.warning("Event loop not set, cannot handle command")
             except Exception as e:
                 logger.error(f"Error delegating command to StateManager: {e}")
         else:
@@ -164,65 +162,29 @@ class MQTTService:
         try:
             # ESP32 sends format: {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}
             # (without "quaternion" wrapper)
+            quat = None
             if "w" in payload and "x" in payload:
-                # Direct quaternion values
                 quat = payload
-                # MQTT callback runs in different thread
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                if loop.is_running():
-                    asyncio.create_task(
-                        self.state_manager.update_state("imu", {
-                            "w": quat.get("w", 1.0),
-                            "x": quat.get("x", 0.0),
-                            "y": quat.get("y", 0.0),
-                            "z": quat.get("z", 0.0)
-                        })
-                    )
-                else:
-                    loop.run_until_complete(
-                        self.state_manager.update_state("imu", {
-                            "w": quat.get("w", 1.0),
-                            "x": quat.get("x", 0.0),
-                            "y": quat.get("y", 0.0),
-                            "z": quat.get("z", 0.0)
-                        })
-                    )
-                logger.debug(f"Updated IMU quaternion: {quat}")
             elif "quaternion" in payload:
                 # Alternative format with wrapper
                 quat = payload["quaternion"]
+            
+            if quat:
+                # MQTT callback runs in different thread, use run_coroutine_threadsafe
                 import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                if loop.is_running():
-                    asyncio.create_task(
+                if hasattr(self, '_loop') and self._loop:
+                    asyncio.run_coroutine_threadsafe(
                         self.state_manager.update_state("imu", {
                             "w": quat.get("w", 1.0),
                             "x": quat.get("x", 0.0),
                             "y": quat.get("y", 0.0),
                             "z": quat.get("z", 0.0)
-                        })
+                        }),
+                        self._loop
                     )
+                    logger.debug(f"Updated IMU quaternion: {quat}")
                 else:
-                    loop.run_until_complete(
-                        self.state_manager.update_state("imu", {
-                            "w": quat.get("w", 1.0),
-                            "x": quat.get("x", 0.0),
-                            "y": quat.get("y", 0.0),
-                            "z": quat.get("z", 0.0)
-                        })
-                    )
-                logger.debug(f"Updated IMU quaternion: {quat}")
+                    logger.warning("Event loop not set, cannot update IMU")
         except Exception as e:
             logger.error(f"Error handling IMU data: {e}")
 
@@ -260,6 +222,11 @@ class MQTTService:
         except Exception as e:
             logger.error(f"Error handling status data: {e}")
 
+    def set_event_loop(self, loop):
+        """Set event loop for async operations (called from main.py)"""
+        self._loop = loop
+        logger.info("Event loop set in MQTTService")
+    
     def start(self):
         """Start MQTT client connection"""
         if not MQTT_AVAILABLE:

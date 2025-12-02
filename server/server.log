@@ -1,1 +1,31 @@
 nohup: ignoring input
+INFO:     Will watch for changes in these directories: ['/home/yakatano/work/m5atoms3r/repo/server']
+INFO:     Uvicorn running on http://0.0.0.0:9000 (Press CTRL+C to quit)
+INFO:     Started reloader process [394100] using WatchFiles
+INFO:     Started server process [394103]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Failed to decode MQTT message: Expecting value: line 1 column 1 (char 0)
+INFO:     ('100.88.207.117', 38944) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     ('100.89.59.118', 60337) - "WebSocket /ws" [accepted]
+INFO:     connection open
+WARNING: rclpy not found. Using Mock ROS2 implementation.
+Initializing ROS2...
+MOCK ROS2 Node started.
+INFO:     127.0.0.1:37500 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50376 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59146 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46840 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46654 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46490 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54308 - "GET / HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     connection closed
+INFO:     connection closed
+INFO:     Waiting for application shutdown.
+Disconnected from MQTT broker. Return code: 0
+INFO:     Application shutdown complete.
+INFO:     Finished server process [394103]
+ROS2 Node stopped.
+INFO:     Stopping reloader process [394100]

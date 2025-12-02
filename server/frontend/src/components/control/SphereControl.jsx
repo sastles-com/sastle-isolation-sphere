@@ -12,37 +12,38 @@ export const SphereControl = () => {
     const [offset, setOffset] = useState({ pitch: 0, roll: 0 });
     const joystickVector = useRef({ x: 0, y: 0 });
     const requestRef = useRef();
-    const { lastMessage, isConnected } = useWebSocket();
+    const brightnessTimeoutRef = useRef(null);
+    const { lastMessage, isConnected, sendMessage } = useWebSocket();
 
     // Listen for state updates from StateManager
     useEffect(() => {
         if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
             const state = lastMessage.payload;
             if (state.params && state.params.brightness !== undefined) {
+                console.log('[SphereControl] Received state update, brightness:', state.params.brightness);
                 setBrightness(state.params.brightness);
             }
         }
     }, [lastMessage]);
 
-    // Send brightness command to MQTT
-    const handleBrightnessChange = async (value) => {
+    // Send brightness command to MQTT (debounced)
+    const handleBrightnessChange = (value) => {
+        console.log('[SphereControl] Brightness slider changed to:', value);
         setBrightness(value);
         
-        try {
-            const response = await fetch('/api/command/params', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ brightness: value }),
-            });
-            
-            if (!response.ok) {
-                console.error('Failed to send brightness command');
-            }
-        } catch (error) {
-            console.error('Error sending brightness command:', error);
+        // Clear previous timeout
+        if (brightnessTimeoutRef.current) {
+            clearTimeout(brightnessTimeoutRef.current);
         }
+        
+        // Debounce: send command after 300ms of inactivity
+        brightnessTimeoutRef.current = setTimeout(() => {
+            console.log('[SphereControl] Sending brightness command via WebSocket:', value);
+            sendMessage('COMMAND', {
+                command: 'params',
+                params: { brightness: value }
+            });
+        }, 300);
     };
 
     // Rate control loop

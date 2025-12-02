@@ -159,11 +159,10 @@ bool MQTTManager::publish(const char* topic, const char* payload, bool retained)
     }
     
     bool result = _mqttClient.publish(topic, payload, retained);
-    if (result) {
-        Serial.printf("[MQTT] Published to %s: %s\n", topic, payload);
-    } else {
+    if (!result) {
         Serial.printf("[MQTT] Publish failed to %s\n", topic);
     }
+    // IMUなど高頻度のログは出力しない（必要に応じてコマンド受信時のみログ出力）
     return result;
 }
 
