@@ -102,9 +102,13 @@ bool MQTTManager::connect() {
         // 3. 全デバイス向けのコマンドトピック
         subscribe("sphere/all/command/#");  // ワイルドカードで全コマンドを購読
         
-        // ステータス送信
+        // ステータス送信（JSON形式）
         snprintf(topic, sizeof(topic), "sphere/%s/status", _clientId);
-        publish(topic, "online", true);
+        char statusPayload[128];
+        snprintf(statusPayload, sizeof(statusPayload), 
+                 "{\"status\":\"online\",\"uptime\":%lu,\"timestamp\":%lu}",
+                 millis() / 1000, millis());
+        publish(topic, statusPayload, true);
         
         return true;
     } else {
