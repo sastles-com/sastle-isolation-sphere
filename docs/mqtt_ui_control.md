@@ -1,4 +1,4 @@
-# MQTT UI制御設計書
+# MQTT UI制御設計書（コマンド・ステート分離型）
 
 最終更新: 2025-12-02
 
@@ -6,14 +6,25 @@
 
 Isolation Sphereシステムにおける、複数UI（Web、Joystick、Sphere本体）からの統一的な制御を実現するMQTT設計。
 
+## アーキテクチャパターン: コマンド・ステート分離型
+
 ### 核心原則
 
 ```
-入力方法に依存しない統一状態管理
-すべてのUI入力 → MQTT統一コマンド → 全デバイス・全UI同期
+コマンド層（入力）: 誰でも送信可能
+      ↓
+StateManager（調停者）: 唯一の状態決定者
+      ↓
+ステート層（出力）: StateManagerのみが配信
+      ↓
+全デバイス・全UIが同期
 ```
 
-**重要**: どのUIから操作しても、MQTTに流れる信号は同じ。すべてのUI・デバイスは同一の状態に同期する。
+**設計思想**:
+1. **コマンドとステートを完全分離**: 入力（command）と出力（state）は別のトピック
+2. **StateManagerが唯一の真実**: 状態の決定権はStateManagerのみ
+3. **Retained Stateで自動同期**: 新規接続・再接続時に最新状態を自動取得
+4. **入力源は無関係**: どのUIから操作しても同じコマンド形式
 
 ---
 
@@ -27,98 +38,130 @@ Isolation Sphereシステムにおける、複数UI（Web、Joystick、Sphere本
 | **Joystick** | リアルタイム操作、パラメータ調整 | アナログスティック、ボタン | LEDインジケータ、バイブレーション |
 | **Sphere本体** | ジェスチャー入力、単体操作 | シェイク、傾き、タップ | LED、LCD表示 |
 
-### データフロー図
+### システムアーキテクチャ図
 
 ```
-┌──────────────────────────────────────────────────────┐
-│         任意のUI入力（Web/Joystick/Sphere）            │
-└────────────┬─────────────────────────────────────────┘
-             │
-             ▼ 統一コマンドに変換
-  ┌──────────────────────────────────┐
-  │   MQTT Broker (192.168.49.1)      │
-  │                                   │
-  │ sphere/all/command/playback       │
-  │   {"action": "play"}              │
-  │                                   │
-  │ sphere/all/command/params         │
-  │   {"brightness": 85}              │
-  └────────┬──────────────────────────┘
-           │
-           │ Subscribe (全員)
-           ▼
-    ┌──────────────┐
-    │  Server      │
-    │ StateManager │
-    └──────┬───────┘
-           │
-           ▼ 状態更新 + Publish (retained)
-  ┌──────────────────────────────────┐
-  │ sphere/all/state                  │
-  │ {"playback": {"status": "playing"},│
-  │  "params": {"brightness": 85}}   │
-  └────────┬──────────────────────────┘
-           │
-           │ Subscribe (全員)
-           ▼
-    ┌──────┴──────┬──────────┬──────────┐
-    │             │          │          │
-    ▼             ▼          ▼          ▼
-┌────────┐  ┌────────┐  ┌───────┐  ┌─────────┐
-│ESP32-01│  │ESP32-02│  │Web UI │  │Joystick │
-│LED更新 │  │LED更新 │  │ボタン  │  │LED      │
-│        │  │        │  │表示更新│  │インジケータ│
-└────────┘  └────────┘  └───────┘  └─────────┘
-     ▲           ▲          ▲          ▲
-     └───────────┴──────────┴──────────┘
-            すべて同じ状態に同期
+┌─────────────────────────────────────────────────────────────┐
+│          入力層: コマンド（複数のPublisher）                   │
+│                                                             │
+│  Web UI ────┐    Joystick ────┐    Sphere ────┐            │
+│             │                  │                │            │
+│             ▼                  ▼                ▼            │
+│       sphere/all/command/playback                           │
+│       sphere/all/command/params                             │
+│       sphere/{id}/command/*                                 │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ Subscribe
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  調停層: StateManager                        │
+│                                                             │
+│  1. コマンド受信                                             │
+│  2. 状態遷移処理（play/pause/stop）                          │
+│  3. パラメータ更新（brightness/speed/hue）                   │
+│  4. 整合性チェック                                           │
+│  5. ステート配信                                             │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ Publish (retained, QoS 0)
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│          出力層: ステート（単一のPublisher）                   │
+│                                                             │
+│              sphere/all/state (retained)                    │
+│              {"playback": {...}, "params": {...}}           │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ Subscribe (全員)
+         ┌──────────────┼──────────────┬──────────────┐
+         │              │              │              │
+         ▼              ▼              ▼              ▼
+    ┌────────┐    ┌────────┐    ┌────────┐    ┌─────────┐
+    │ESP32-01│    │ESP32-02│    │ Web UI │    │Joystick │
+    │LED反映 │    │LED反映 │    │UI更新  │    │LED更新  │
+    └────────┘    └────────┘    └────────┘    └─────────┘
+         ▲              ▲              ▲              ▲
+         └──────────────┴──────────────┴──────────────┘
+                   全員が同一状態に同期
+```
+
+### データフロー
+
+```
+任意のUI → コマンド送信 (sphere/all/command/*)
+                ↓
+         StateManager受信
+                ↓
+         状態遷移・更新処理
+                ↓
+   sphere/all/state配信 (retained)
+                ↓
+    全デバイス・全UIが自動同期
 ```
 
 ---
 
-## Topic設計
+## Topic設計（コマンド・ステート分離）
 
-### コマンドトピック（入力）
+### 基本原則
 
-すべてのUI入力は以下のトピックに統一される：
+| 層 | Topic | Publisher | Subscriber | Retained | QoS |
+|----|-------|-----------|------------|----------|-----|
+| **入力** | `sphere/all/command/*` | 複数（Web/Joystick/Sphere） | StateManager | No | 1 |
+| **出力** | `sphere/all/state` | StateManager**のみ** | 全員 | **Yes** | 0 |
+
+### コマンドトピック（入力層）
+
+**Publisher**: 任意のUI・デバイス  
+**Subscriber**: StateManager
 
 ```
 sphere/all/command/playback      # 全デバイスの再生制御
 sphere/all/command/params        # 全デバイスのパラメータ制御
-sphere/{device_id}/command/playback   # 個別デバイス制御
-sphere/{device_id}/command/params     # 個別デバイスパラメータ
+sphere/{device_id}/command/playback   # 個別デバイス制御（将来拡張）
+sphere/{device_id}/command/params     # 個別パラメータ（将来拡張）
 ```
 
-### 状態トピック（出力）
+**特徴**:
+- 複数のPublisherが存在
+- **Retainedなし**: コマンドは一度きり
+- **QoS 1**: 確実に届く必要がある
+- StateManagerのみがSubscribe
 
-すべてのUI・デバイスが購読する真実の単一ソース：
+### ステートトピック（出力層）
+
+**Publisher**: StateManager**のみ**  
+**Subscriber**: 全デバイス・全UI
 
 ```
-sphere/all/state                 # 全体の統一状態（retained）
-sphere/{device_id}/state         # 個別デバイス状態（retained）
+sphere/all/state                 # 唯一の真実（retained）
 ```
 
-### Topic構成図
+**特徴**:
+- **単一Publisher**: StateManagerのみが配信
+- **Retained**: 新規接続時に最新状態を自動取得
+- **QoS 0**: 最新のみ重要、配信遅延より速度優先
+- 全員がSubscribe
+
+### Topic階層構造
 
 ```
 sphere/
 ├── all/
-│   ├── command/
-│   │   ├── playback            # 全デバイス再生制御
-│   │   └── params              # 全デバイスパラメータ
-│   └── state                   # 全体統一状態 (retained)
+│   ├── command/               ← 入力層（複数Publisher）
+│   │   ├── playback          
+│   │   └── params            
+│   │
+│   └── state                  ← 出力層（StateManagerのみ）★
 │
-└── {device_id}/                # 例: sphere001
-    ├── command/
-    │   ├── playback            # 個別再生制御
-    │   └── params              # 個別パラメータ
-    ├── state                   # 個別状態 (retained)
-    ├── input/                  # デバイスからの入力
-    │   ├── shake              # シェイクイベント
-    │   └── gesture            # ジェスチャー
-    ├── imu                     # IMUデータ
-    └── status                  # ステータス
+└── {device_id}/               
+    ├── command/               ← 将来拡張用
+    │   ├── playback
+    │   └── params
+    │
+    ├── imu                    ← センサーデータ（既存）
+    └── status                 ← デバイスステータス（既存）
 ```
+
+**重要**: `sphere/all/state` はStateManagerのみが配信する唯一の真実
 
 ---
 
@@ -218,19 +261,41 @@ Topic: sphere/sphere001/input/gesture
 
 ## QoS・Retained設定
 
-| Topic Pattern | QoS | Retained | 理由 |
-|--------------|-----|----------|------|
-| `sphere/all/command/*` | 1 | No | コマンドは確実に届く必要があるが、古いものは不要 |
-| `sphere/{id}/command/*` | 1 | No | 同上 |
-| `sphere/all/state` | 0 | **Yes** | 新規接続時に最新状態を即座に取得 ✨ |
-| `sphere/{id}/state` | 0 | **Yes** | 同上 |
-| `sphere/{id}/input/*` | 0 | No | イベントデータ、リアルタイムのみ重要 |
-| `sphere/{id}/imu` | 0 | No | リアルタイムデータ、最新のみ |
+| Topic Pattern | QoS | Retained | Publisher | Subscriber | 理由 |
+|--------------|-----|----------|-----------|------------|------|
+| `sphere/all/command/*` | 1 | No | 複数（UI/デバイス） | StateManager | コマンドは確実に届く、古いものは不要 |
+| `sphere/all/state` | 0 | **Yes** | **StateManagerのみ** | 全員 | 最新状態のみ重要、新規接続時に自動取得 ✨ |
+| `sphere/{id}/imu` | 0 | No | ESP32 | Server/UI | リアルタイムデータ、最新のみ |
+| `sphere/{id}/status` | 0 | Yes | ESP32 | Server/UI | デバイスステータス、接続時に取得 |
 
-**Retainedの重要性**:
-- 新規接続したUI・デバイスが即座に最新状態を取得
-- ネットワーク再接続時に状態が自動復元
-- すべてのUIが常に同じ状態を表示
+### 設定理由の詳細
+
+**コマンド層 (QoS 1, Retained: No)**:
+- **QoS 1**: コマンドは確実にStateManagerに届く必要がある
+- **Retainedなし**: 古いコマンドを再実行すると意図しない動作
+- **例**: `{"action": "play"}` を再接続時に再実行すると二重再生
+
+**ステート層 (QoS 0, Retained: Yes)**:
+- **QoS 0**: 最新の状態のみ重要、途中のパケットロスは許容
+- **Retained**: 新規接続時に最新状態を自動取得 ← **最重要**
+- **例**: Web UI再接続時に最新の再生状態・パラメータが即座に反映
+
+### Retainedの効果
+
+```
+シナリオ: Web UIを再読み込み
+
+Retainedなしの場合:
+1. Web UI再接続
+2. 状態が分からない（デフォルト値で表示）
+3. StateManagerが次回配信するまで待機（最大1秒）
+4. ボタン表示が間違っている可能性
+
+Retainedありの場合:
+1. Web UI再接続
+2. MQTT Brokerから最新のsphere/all/stateを即座に受信
+3. 正しい状態で即座に表示 ✅
+```
 
 ---
 
@@ -425,32 +490,74 @@ void onMQTTMessage(char* topic, byte* payload, unsigned int length) {
 
 ## Server実装（Python）
 
-### StateManager
+### StateManager（完全実装）
 
 ```python
+from typing import Dict, Any, List
+from datetime import datetime
+import json
+import asyncio
+
 class StateManager:
+    """
+    StateManager: 唯一の状態管理者
+    
+    責務:
+    1. MQTTコマンドを受信して状態遷移
+    2. sphere/all/state を配信（retained）
+    3. WebSocketで接続中のUIに配信
+    """
+    
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(StateManager, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self):
+        if self._initialized:
+            return
+        
+        # 状態の初期値
         self._state = {
             "playback": {
-                "status": "stopped",
+                "status": "stopped",      # playing | paused | stopped
                 "playlist": None,
                 "track": None,
-                "position": 0,
-                "duration": 0
+                "position": 0.0,
+                "duration": 0.0
             },
             "params": {
                 "brightness": 80,
                 "speed": 50,
                 "hue": 120,
                 "saturation": 100
+            },
+            "system": {
+                "fps": 60,
+                "temp": 42.0
             }
         }
-        self._observers = []  # WebSocket connections
-        self._mqtt_client = None
+        
+        self._observers = []      # WebSocket connections
+        self._mqtt_client = None  # MQTTServiceから設定される
         self._seq = 0
+        self._initialized = True
+    
+    def set_mqtt_client(self, mqtt_client):
+        """MQTTServiceから呼ばれる"""
+        self._mqtt_client = mqtt_client
     
     async def handle_mqtt_command(self, topic: str, payload: dict):
-        """MQTTコマンドを受信して状態を更新"""
+        """
+        MQTTコマンドを受信して状態を更新
+        
+        Args:
+            topic: sphere/all/command/playback など
+            payload: {"action": "play"} など
+        """
         if 'playback' in topic:
             await self._update_playback(payload)
         elif 'params' in topic:
@@ -466,24 +573,29 @@ class StateManager:
             self._state['playback']['status'] = 'paused'
         elif action == 'stop':
             self._state['playback']['status'] = 'stopped'
-            self._state['playback']['position'] = 0
+            self._state['playback']['position'] = 0.0
         elif action == 'toggle':
+            # 現在の状態を反転
             current = self._state['playback']['status']
             self._state['playback']['status'] = (
                 'playing' if current != 'playing' else 'paused'
             )
         
-        # プレイリスト・トラック情報
+        # オプション情報
         if 'playlist' in payload:
             self._state['playback']['playlist'] = payload['playlist']
         if 'track' in payload:
             self._state['playback']['track'] = payload['track']
         
-        # 状態をMQTT・WebSocketに配信
+        # 状態を配信
         await self._publish_state()
     
     async def _update_params(self, payload: dict):
-        """パラメータを更新（指定されたもののみ）"""
+        """
+        パラメータを更新
+        
+        指定されたパラメータのみ更新（部分更新）
+        """
         for key in ['brightness', 'speed', 'hue', 'saturation']:
             if key in payload:
                 self._state['params'][key] = payload[key]
@@ -491,8 +603,14 @@ class StateManager:
         await self._publish_state()
     
     async def _publish_state(self):
-        """統一状態をMQTT・WebSocketに配信"""
+        """
+        状態をMQTT・WebSocketに配信
+        
+        MQTT: sphere/all/state (retained)
+        WebSocket: STATE_UPDATE
+        """
         self._seq += 1
+        
         state_message = {
             **self._state,
             "timestamp": datetime.utcnow().isoformat(),
@@ -500,50 +618,131 @@ class StateManager:
         }
         
         # MQTT配信（retained）
-        self._mqtt_client.publish(
-            'sphere/all/state',
-            json.dumps(state_message),
-            qos=0,
-            retain=True  # 新規接続が最新状態を取得
-        )
+        if self._mqtt_client:
+            self._mqtt_client.publish(
+                'sphere/all/state',
+                json.dumps(state_message),
+                qos=0,
+                retain=True  # ← 最重要: 新規接続が最新状態を取得
+            )
         
-        # WebSocket配信（Web UI用）
+        # WebSocket配信
+        await self._notify_observers(state_message)
+    
+    def get_state(self) -> Dict[str, Any]:
+        """現在の状態を取得"""
+        return self._state
+    
+    def add_observer(self, observer):
+        """WebSocket接続を追加"""
+        self._observers.append(observer)
+    
+    def remove_observer(self, observer):
+        """WebSocket接続を削除"""
+        if observer in self._observers:
+            self._observers.remove(observer)
+    
+    async def _notify_observers(self, state_message: dict):
+        """WebSocketで接続中のUIに配信"""
+        message = {"type": "STATE_UPDATE", "payload": state_message}
+        
         for observer in self._observers:
             try:
-                await observer.send_json({
-                    "type": "STATE_UPDATE",
-                    "payload": state_message
-                })
-            except:
+                await observer.send_json(message)
+            except Exception:
+                # 切断されたクライアントは無視
                 pass
 ```
 
-### MQTTService
+### MQTTService（コマンド購読専用）
 
 ```python
+import paho.mqtt.client as mqtt
+import json
+import asyncio
+from .state_manager import StateManager
+
 class MQTTService:
-    def _setup_subscriptions(self):
-        """コマンドトピックを購読"""
-        self.client.subscribe('sphere/all/command/#')
-        self.client.subscribe('sphere/+/command/#')
-        self.client.subscribe('sphere/+/input/#')  # デバイス入力
+    """
+    MQTTService: MQTTとの通信を管理
+    
+    購読:
+    - sphere/all/command/#  ← コマンドのみ
+    
+    配信:
+    - StateManagerに委譲（sphere/all/state）
+    """
+    
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(MQTTService, cls).__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        self.client = None
+        self.state_manager = StateManager()
+        self.broker_host = "192.168.49.1"
+        self.broker_port = 1883
+    
+    def _setup_client(self):
+        """MQTTクライアント設定"""
+        self.client = mqtt.Client()
+        self.client.on_connect = self._on_connect
+        self.client.on_message = self._on_message
+        
+        # StateManagerにMQTTクライアントを渡す
+        self.state_manager.set_mqtt_client(self.client)
+    
+    def _on_connect(self, client, userdata, flags, rc):
+        """接続時のコールバック"""
+        if rc == 0:
+            print(f"Connected to MQTT Broker: {self.broker_host}")
+            
+            # コマンドトピックのみ購読
+            self.client.subscribe('sphere/all/command/#', qos=1)
+            self.client.subscribe('sphere/+/command/#', qos=1)
+            
+            print("Subscribed to command topics")
+        else:
+            print(f"Failed to connect, return code {rc}")
     
     def _on_message(self, client, userdata, msg):
-        """MQTTメッセージ受信"""
-        topic = msg.topic
-        payload = json.loads(msg.payload.decode())
+        """
+        MQTTメッセージ受信
         
+        コマンドのみ処理、ステートは配信のみで受信しない
+        """
+        topic = msg.topic
+        
+        try:
+            payload = json.loads(msg.payload.decode())
+        except json.JSONDecodeError:
+            print(f"Invalid JSON: {msg.payload}")
+            return
+        
+        # コマンド処理
         if '/command/' in topic:
-            # コマンド処理 → StateManager
+            # StateManagerに処理を委譲
+            # asyncio.new_event_loop() で同期的に実行
             loop = asyncio.new_event_loop()
             loop.run_until_complete(
                 self.state_manager.handle_mqtt_command(topic, payload)
             )
             loop.close()
-        
-        elif '/input/' in topic:
-            # デバイス入力をログ・処理
-            logger.info(f"Device input: {topic} - {payload}")
+    
+    def start(self):
+        """MQTTサービス開始"""
+        self._setup_client()
+        self.client.connect(self.broker_host, self.broker_port, 60)
+        self.client.loop_start()
+    
+    def stop(self):
+        """MQTTサービス停止"""
+        if self.client:
+            self.client.loop_stop()
+            self.client.disconnect()
 ```
 
 ### WebSocket Bridge
@@ -585,170 +784,255 @@ async def websocket_endpoint(websocket: WebSocket):
 
 ---
 
-## 動作シナリオ
+## 動作シナリオ（コマンド・ステート分離型）
 
-### シナリオ1: Joystickで再生開始 → 全UI同期
-
-```
-1. Joystick: Aボタン押下
-   ↓
-2. Joystick → MQTT Publish
-   Topic: sphere/all/command/playback
-   {"action": "play", "timestamp": "2025-12-02T12:34:56.123Z"}
-   ↓
-3. Server: コマンド受信
-   ↓
-4. Server: StateManager.handle_mqtt_command()
-   state.playback.status = "playing"
-   ↓
-5. Server → MQTT Publish (retained)
-   Topic: sphere/all/state
-   {"playback": {"status": "playing"}, "params": {...}}
-   ↓
-6. 全員が受信して状態反映:
-   ├─ ESP32-01: LED → 再生中表示
-   ├─ ESP32-02: LED → 再生中表示
-   ├─ Web UI: 再生ボタン → 停止アイコンに変更
-   └─ Joystick: LED → 緑色に点灯
-   ↓
-7. すべてのUI・デバイスが同期完了 ✅
-```
-
-### シナリオ2: Sphereシェイク → トグル → Web UI反映
+### シナリオ1: Joystickで再生開始
 
 ```
-1. Sphere: シェイク検知
-   ↓
-2. Sphere → MQTT Publish
-   Topic: sphere/all/command/playback
-   {"action": "toggle", "timestamp": "..."}
-   ↓
-3. Server: 現在の状態を確認
-   current_status = "playing"
-   ↓
-4. Server: トグル実行
-   new_status = "paused"
-   ↓
-5. Server → MQTT Publish
-   Topic: sphere/all/state
-   {"playback": {"status": "paused"}, ...}
-   ↓
-6. 全員が受信:
-   ├─ Sphere自身: LED → 一時停止表示
-   ├─ Web UI: 再生ボタン → 再生アイコンに変更
-   └─ Joystick: LED → 黄色に変更
-   ↓
-7. シェイクした本人も含めて全員同期 ✅
+┌─────────────────────────────────────────────────────┐
+│ 1. Joystick: Aボタン押下                             │
+└───────────────────┬─────────────────────────────────┘
+                    │
+                    ▼ Publish (QoS 1)
+         ┌──────────────────────────┐
+         │ sphere/all/command/      │
+         │   playback               │
+         │ {"action": "play"}       │
+         └──────────┬───────────────┘
+                    │
+                    ▼ Subscribe
+         ┌──────────────────────────┐
+         │ StateManager             │
+         │  - action受信             │
+         │  - status = "playing"    │
+         └──────────┬───────────────┘
+                    │
+                    ▼ Publish (QoS 0, retained)
+         ┌──────────────────────────┐
+         │ sphere/all/state         │
+         │ {"playback": {           │
+         │   "status": "playing"    │
+         │ }}                       │
+         └──────────┬───────────────┘
+                    │
+        ┌───────────┼───────────┬───────────┐
+        │           │           │           │
+        ▼           ▼           ▼           ▼
+   ┌────────┐ ┌────────┐ ┌────────┐ ┌─────────┐
+   │ESP32-01│ │ESP32-02│ │ Web UI │ │Joystick │
+   │LED点灯 │ │LED点灯 │ │再生表示│ │LED緑   │
+   └────────┘ └────────┘ └────────┘ └─────────┘
 ```
 
-### シナリオ3: Web UIスライダー → ESP32の明るさ変更
+**重要ポイント**:
+- JoystickはコマンドをPublishするだけ
+- StateManagerが状態を決定
+- ステート配信で全員が同期（Joystick自身も含む）
+
+### シナリオ2: Sphereシェイク → トグル
 
 ```
-1. Web UI: 明るさスライダーを85に変更
-   ↓
-2. Web UI → MQTT Publish
-   Topic: sphere/all/command/params
-   {"brightness": 85, "timestamp": "..."}
-   ↓
-3. Server: パラメータ更新
-   state.params.brightness = 85
-   ↓
-4. Server → MQTT Publish
-   Topic: sphere/all/state
-   {"params": {"brightness": 85, ...}}
-   ↓
-5. 全員が受信:
-   ├─ ESP32-01: LED明るさ → 85%
-   ├─ ESP32-02: LED明るさ → 85%
-   ├─ Web UI: スライダー表示 → 85（確認）
-   └─ Joystick: バイブレーション強度 → 85%
-   ↓
-6. リアルタイムパラメータ同期完了 ✅
+┌─────────────────────────────────────────────────────┐
+│ 1. Sphere: シェイク検知                              │
+└───────────────────┬─────────────────────────────────┘
+                    │
+                    ▼ Publish
+         sphere/all/command/playback
+         {"action": "toggle"}
+                    │
+                    ▼
+         ┌──────────────────────────┐
+         │ StateManager             │
+         │  - 現在: "playing"        │
+         │  - 判断: toggle → "paused"│
+         └──────────┬───────────────┘
+                    │
+                    ▼ Publish (retained)
+         sphere/all/state
+         {"playback": {"status": "paused"}}
+                    │
+        ┌───────────┼───────────┬───────────┐
+        │           │           │           │
+        ▼           ▼           ▼           ▼
+   ┌────────┐ ┌────────┐ ┌────────┐ ┌─────────┐
+   │Sphere  │ │ESP32-02│ │ Web UI │ │Joystick │
+   │LED変化 │ │LED変化 │ │一時停止│ │LED黄   │
+   └────────┘ └────────┘ └────────┘ └─────────┘
 ```
+
+**重要ポイント**:
+- Sphere自身もステートをSubscribe
+- 自分が送ったコマンドの結果も、ステート経由で受け取る
+- これにより状態の一貫性が保証される
+
+### シナリオ3: 複数UIから同時操作
+
+```
+時刻: 12:34:56.100
+┌──────────────┐
+│ Joystick:    │ → sphere/all/command/playback
+│ "play"       │    {"action": "play", "timestamp": "...100"}
+└──────────────┘
+
+時刻: 12:34:56.120  
+┌──────────────┐
+│ Web UI:      │ → sphere/all/command/playback
+│ "pause"      │    {"action": "pause", "timestamp": "...120"}
+└──────────────┘
+
+         ↓ StateManagerが順次処理
+         
+処理1 (12:34:56.100):
+  StateManager: status = "playing"
+  → sphere/all/state {"status": "playing"} 配信
+  
+処理2 (12:34:56.120):
+  StateManager: status = "paused"
+  → sphere/all/state {"status": "paused"} 配信
+
+最終結果:
+  全員が "paused" に同期 ✅
+```
+
+**競合解決**:
+- StateManagerが順次処理
+- 最新のコマンドが最終的に反映される
+- タイムスタンプで順序保証（オプション）
 
 ---
 
 ## 競合解決
 
-### 基本原則
+### 基本方針: StateManagerが唯一の決定者
 
-**Server（StateManager）が唯一の真実**
+**原則**:
+- StateManagerが唯一の状態決定権を持つ
+- 複数のコマンドが来ても順次処理
+- 最終的な状態は `sphere/all/state` のみが真実
 
-- 複数UIから同時にコマンドが来ても、Serverが最終的な状態を決定
-- タイムスタンプで順序付け（最新が優先）
-- すべてのUIはMQTT stateに従う → 自動的に収束
+### パターン1: 時系列順の処理
 
-### 例: 同時操作
-
-```
-時刻 12:34:56.100 - Joystick: "play" 送信
-時刻 12:34:56.120 - Web UI: "pause" 送信
-
-Server処理:
-1. "play" 受信 → 状態を "playing" に
-2. 状態配信 → 全員が "playing" になる
-3. "pause" 受信（より新しい） → 状態を "paused" に
-4. 状態配信 → 全員が "paused" になる
-
-結果: 最新のコマンド（pause）が反映される ✅
+```python
+# StateManager内部
+async def handle_mqtt_command(self, topic: str, payload: dict):
+    # コマンドは受信順に処理される
+    # 非同期だが、awaitで順序保証
+    
+    if 'playback' in topic:
+        await self._update_playback(payload)  # ← ここで待機
+    
+    # 次のコマンド処理まで待つ
 ```
 
-### UI Locking（将来機能）
+**結果**: 最後のコマンドが最終状態になる
 
-特定のUIがデバイスを占有する場合の設計（Phase 4）:
+### パターン2: タイムスタンプによる順序保証（オプション）
+
+```python
+async def handle_mqtt_command(self, topic: str, payload: dict):
+    # タイムスタンプをチェック
+    incoming_ts = payload.get('timestamp', '')
+    last_ts = self._state.get('last_command_timestamp', '')
+    
+    if incoming_ts < last_ts:
+        # 古いコマンドは無視
+        return
+    
+    self._state['last_command_timestamp'] = incoming_ts
+    
+    # 処理継続
+    if 'playback' in topic:
+        await self._update_playback(payload)
+```
+
+**メリット**: ネットワーク遅延による順序逆転を防ぐ
+
+### パターン3: UI Locking（Phase 4: 将来機能）
+
+特定のUIが占有する場合:
 
 ```json
+// ロック取得
 Topic: sphere/sphere001/lock
 {
   "locked_by": "web",
   "session_id": "abc123",
-  "duration": 60  // 秒、0=無制限
+  "duration": 60
 }
+
+// 他のUIからのコマンドは拒否
+StateManager: コマンド受信 → ロック確認 → 拒否
 ```
+
+**現時点では不要**: 通常の運用では順次処理で十分
 
 ---
 
-## 実装チェックリスト
+## 推奨アーキテクチャまとめ
 
-### Phase 1: 基本コマンド + 状態同期 ⏳
+### Topic構造（最終版）
 
-- [ ] Server: StateManager拡張
-  - [ ] handle_mqtt_command()実装
-  - [ ] _publish_state() with retained
-- [ ] Server: MQTTService拡張
-  - [ ] sphere/all/command/# 購読
-  - [ ] sphere/+/command/# 購読
-- [ ] ESP32: コマンド購読
-  - [ ] sphere/all/command/# 購読
-  - [ ] sphere/{id}/command/# 購読
-- [ ] ESP32: 状態購読・反映
+```
+入力層（複数Publisher）:
+  sphere/all/command/playback    # QoS 1, No Retained
+  sphere/all/command/params      # QoS 1, No Retained
+  
+調停層（StateManager）:
+  ← コマンド受信
+  ← 状態遷移・更新
+  → ステート配信
+  
+出力層（単一Publisher: StateManager）:
+  sphere/all/state               # QoS 0, Retained ★
+```
+
+### 責務分離
+
+| コンポーネント | 責務 | MQTTアクション |
+|---------------|------|---------------|
+| **UI/デバイス** | コマンド送信、ステート受信 | Publish command, Subscribe state |
+| **StateManager** | 状態管理、ステート配信 | Subscribe command, Publish state |
+| **WebSocket** | Web UIへの配信 | - |
+
+### データフロー（簡潔版）
+
+```
+UI → コマンド → StateManager → ステート → 全員同期
+```
+
+### 実装チェックリスト
+
+#### Phase 1: 基本実装 ✅
+
+- [x] StateManager
+  - [x] handle_mqtt_command()
+  - [x] _update_playback()
+  - [x] _update_params()
+  - [x] _publish_state() with retained
+  - [x] set_mqtt_client()
+  
+- [x] MQTTService
+  - [x] コマンドトピック購読
+  - [x] StateManager連携
+  
+- [ ] ESP32
   - [ ] sphere/all/state 購読
-  - [ ] LED状態反映ロジック
-- [ ] Web UI: MQTT統合
-  - [ ] コマンド送信実装
-  - [ ] 状態購読・UI反映
+  - [ ] LED状態反映
+  
+- [ ] Web UI
+  - [ ] コマンド送信
+  - [ ] ステート購読・UI更新
 
-### Phase 2: Joystick統合 ⏳
+#### Phase 2: UI統合
 
-- [ ] Joystick Controller開発
-  - [ ] アナログ入力 → MQTTコマンド
-  - [ ] ボタン入力 → MQTTコマンド
-  - [ ] 状態購読 → LEDフィードバック
+- [ ] Joystick Controller
+- [ ] Sphere入力（シェイク/ジェスチャー）
 
-### Phase 3: Sphere入力 ⏳
+#### Phase 3: 高度な機能
 
-- [ ] ESP32: シェイク検知
-  - [ ] IMU閾値設定
-  - [ ] シェイク → MQTTコマンド
-- [ ] ESP32: ジェスチャー入力
-  - [ ] 傾き → パラメータマッピング
-  - [ ] input/shake, input/gesture送信
-
-### Phase 4: 高度な機能 ⏳
-
-- [ ] UI Locking機能
-- [ ] 同期再生（マスター/スレーブ）
-- [ ] コマンド履歴・Undo
+- [ ] タイムスタンプ順序保証
+- [ ] UI Locking
+- [ ] コマンド履歴
 
 ---
 
