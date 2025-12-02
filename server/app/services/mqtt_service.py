@@ -36,7 +36,9 @@ class MQTTService:
             
         self.client: Optional[mqtt.Client] = None
         self.state_manager = StateManager()
-        self.broker_host = "192.168.100.1"  # Default from config
+        
+        # Load config from config.json
+        self.broker_host = self._load_broker_config()
         self.broker_port = 1883
         self.device_id = "sphere001"  # Default device ID
         self.is_connected = False
@@ -46,6 +48,30 @@ class MQTTService:
             self._setup_client()
         else:
             logger.warning("MQTT client not available. Using mock data.")
+    
+    def _load_broker_config(self):
+        """Load MQTT broker address from config.json"""
+        try:
+            import json
+            import os
+            # Try to load from shared data directory (server is run from server/ dir)
+            config_paths = [
+                "../core/data/config.json",
+                "data/config.json",
+                "../data/config.json"
+            ]
+            for path in config_paths:
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        config = json.load(f)
+                        broker = config.get("wifi", {}).get("broker", "localhost")
+                        logger.info(f"Loaded MQTT broker from config: {broker}")
+                        return broker
+            logger.warning("Config file not found, using localhost")
+            return "localhost"
+        except Exception as e:
+            logger.error(f"Failed to load config: {e}, using localhost")
+            return "localhost"
 
     def _setup_client(self):
         """Initialize MQTT client"""
@@ -100,11 +126,16 @@ class MQTTService:
     def _handle_imu_data(self, payload):
         """Handle IMU quaternion data"""
         try:
-            # Expected format: {"quaternion": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, ...}
-            if "quaternion" in payload:
-                quat = payload["quaternion"]
-                # Update state asynchronously
-                asyncio.create_task(
+            # ESP32 sends format: {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}
+            # (without "quaternion" wrapper)
+            if "w" in payload and "x" in payload:
+                # Direct quaternion values
+                quat = payload
+                # MQTT callback runs in different thread, can't use asyncio.create_task
+                # Update state synchronously instead
+                import asyncio
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(
                     self.state_manager.update_state("imu", {
                         "w": quat.get("w", 1.0),
                         "x": quat.get("x", 0.0),
@@ -112,6 +143,22 @@ class MQTTService:
                         "z": quat.get("z", 0.0)
                     })
                 )
+                loop.close()
+                logger.debug(f"Updated IMU quaternion: {quat}")
+            elif "quaternion" in payload:
+                # Alternative format with wrapper
+                quat = payload["quaternion"]
+                import asyncio
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(
+                    self.state_manager.update_state("imu", {
+                        "w": quat.get("w", 1.0),
+                        "x": quat.get("x", 0.0),
+                        "y": quat.get("y", 0.0),
+                        "z": quat.get("z", 0.0)
+                    })
+                )
+                loop.close()
                 logger.debug(f"Updated IMU quaternion: {quat}")
         except Exception as e:
             logger.error(f"Error handling IMU data: {e}")
