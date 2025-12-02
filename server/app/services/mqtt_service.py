@@ -35,7 +35,7 @@ class MQTTService:
             return
             
         self.client: Optional[mqtt.Client] = None
-        self.state_manager = StateManager()
+        self.state_manager: Optional[StateManager] = None  # 外部からセット
         
         # Load config from config.json
         self.broker_host = self._load_broker_config()
@@ -85,6 +85,7 @@ class MQTTService:
         if rc == 0:
             logger.info(f"Connected to MQTT broker at {self.broker_host}:{self.broker_port}")
             self.is_connected = True
+            
             # Subscribe to IMU topic
             topic = f"sphere/{self.device_id}/imu"
             client.subscribe(topic)
@@ -94,6 +95,11 @@ class MQTTService:
             status_topic = f"sphere/{self.device_id}/status"
             client.subscribe(status_topic)
             logger.info(f"Subscribed to topic: {status_topic}")
+            
+            # Subscribe to command topics (wildcard for all command types)
+            command_topic = "sphere/all/command/#"
+            client.subscribe(command_topic)
+            logger.info(f"Subscribed to command topic: {command_topic}")
         else:
             logger.error(f"Failed to connect to MQTT broker. Return code: {rc}")
             self.is_connected = False
@@ -111,8 +117,11 @@ class MQTTService:
             
             logger.debug(f"Received MQTT message on {topic}: {payload}")
             
+            # Handle command topics
+            if "/command/" in topic:
+                self._handle_command(topic, payload)
             # Handle IMU data
-            if topic.endswith("/imu"):
+            elif topic.endswith("/imu"):
                 self._handle_imu_data(payload)
             # Handle status data
             elif topic.endswith("/status"):
@@ -123,57 +132,131 @@ class MQTTService:
         except Exception as e:
             logger.error(f"Error handling MQTT message: {e}")
 
+    def _handle_command(self, topic: str, payload: dict):
+        """Handle command messages - delegate to StateManager"""
+        if self.state_manager:
+            try:
+                # MQTT callback runs in different thread, schedule coroutine properly
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                if loop.is_running():
+                    # If event loop is already running, schedule as task
+                    asyncio.create_task(self.state_manager.handle_command(topic, payload))
+                else:
+                    # Otherwise run synchronously
+                    loop.run_until_complete(self.state_manager.handle_command(topic, payload))
+            except Exception as e:
+                logger.error(f"Error delegating command to StateManager: {e}")
+        else:
+            logger.warning("StateManager not set, cannot handle command")
+    
     def _handle_imu_data(self, payload):
         """Handle IMU quaternion data"""
+        if not self.state_manager:
+            logger.warning("StateManager not set, skipping IMU update")
+            return
+            
         try:
             # ESP32 sends format: {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}
             # (without "quaternion" wrapper)
             if "w" in payload and "x" in payload:
                 # Direct quaternion values
                 quat = payload
-                # MQTT callback runs in different thread, can't use asyncio.create_task
-                # Update state synchronously instead
+                # MQTT callback runs in different thread
                 import asyncio
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    self.state_manager.update_state("imu", {
-                        "w": quat.get("w", 1.0),
-                        "x": quat.get("x", 0.0),
-                        "y": quat.get("y", 0.0),
-                        "z": quat.get("z", 0.0)
-                    })
-                )
-                loop.close()
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                if loop.is_running():
+                    asyncio.create_task(
+                        self.state_manager.update_state("imu", {
+                            "w": quat.get("w", 1.0),
+                            "x": quat.get("x", 0.0),
+                            "y": quat.get("y", 0.0),
+                            "z": quat.get("z", 0.0)
+                        })
+                    )
+                else:
+                    loop.run_until_complete(
+                        self.state_manager.update_state("imu", {
+                            "w": quat.get("w", 1.0),
+                            "x": quat.get("x", 0.0),
+                            "y": quat.get("y", 0.0),
+                            "z": quat.get("z", 0.0)
+                        })
+                    )
                 logger.debug(f"Updated IMU quaternion: {quat}")
             elif "quaternion" in payload:
                 # Alternative format with wrapper
                 quat = payload["quaternion"]
                 import asyncio
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    self.state_manager.update_state("imu", {
-                        "w": quat.get("w", 1.0),
-                        "x": quat.get("x", 0.0),
-                        "y": quat.get("y", 0.0),
-                        "z": quat.get("z", 0.0)
-                    })
-                )
-                loop.close()
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                if loop.is_running():
+                    asyncio.create_task(
+                        self.state_manager.update_state("imu", {
+                            "w": quat.get("w", 1.0),
+                            "x": quat.get("x", 0.0),
+                            "y": quat.get("y", 0.0),
+                            "z": quat.get("z", 0.0)
+                        })
+                    )
+                else:
+                    loop.run_until_complete(
+                        self.state_manager.update_state("imu", {
+                            "w": quat.get("w", 1.0),
+                            "x": quat.get("x", 0.0),
+                            "y": quat.get("y", 0.0),
+                            "z": quat.get("z", 0.0)
+                        })
+                    )
                 logger.debug(f"Updated IMU quaternion: {quat}")
         except Exception as e:
             logger.error(f"Error handling IMU data: {e}")
 
     def _handle_status_data(self, payload):
         """Handle device status data"""
+        if not self.state_manager:
+            logger.warning("StateManager not set, skipping status update")
+            return
+            
         try:
             # Update system state with device status
-            asyncio.create_task(
-                self.state_manager.update_state("system", {
-                    **self.state_manager.get_state().get("system", {}),
-                    "device_status": payload.get("status", "unknown"),
-                    "last_update": payload.get("timestamp", "")
-                })
-            )
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            if loop.is_running():
+                asyncio.create_task(
+                    self.state_manager.update_state("system", {
+                        **self.state_manager.get_state().get("system", {}),
+                        "device_status": payload.get("status", "unknown"),
+                        "last_update": payload.get("timestamp", "")
+                    })
+                )
+            else:
+                loop.run_until_complete(
+                    self.state_manager.update_state("system", {
+                        **self.state_manager.get_state().get("system", {}),
+                        "device_status": payload.get("status", "unknown"),
+                        "last_update": payload.get("timestamp", "")
+                    })
+                )
         except Exception as e:
             logger.error(f"Error handling status data: {e}")
 

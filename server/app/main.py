@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.core.config import get_settings
 from app.core.ros_manager import ROSManager
+from app.services.state_manager import StateManager
 from app.services.mqtt_service import MQTTService
 from app.api.router import api_router
 from app.api.endpoints import websocket
@@ -11,12 +12,26 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    # 1. StateManager初期化
+    state_manager = StateManager()
+    
+    # 2. ROSManager初期化
     ros_manager = ROSManager()
     ros_manager.start()
     
-    # Start MQTT service for IMU data
+    # 3. MQTTService初期化
     mqtt_service = MQTTService()
+    
+    # 4. StateManager ↔ MQTTService 連携
+    mqtt_service.state_manager = state_manager
+    state_manager.set_mqtt_client(mqtt_service.client)
+    
+    # 5. MQTT接続開始
     mqtt_service.start()
+    
+    # StateManagerとMQTTServiceをアプリケーション状態に保存
+    app.state.state_manager = state_manager
+    app.state.mqtt_service = mqtt_service
     
     yield
     
