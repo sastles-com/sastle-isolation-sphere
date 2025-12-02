@@ -10,6 +10,7 @@
 #include "ImageManager.h"
 #include "LEDManager.h"
 #include "LCDManager.h"
+#include "CommandHandler.h"
 
 using namespace sastle;
 
@@ -25,53 +26,29 @@ SoundManager sound;
 ImageManager imageManager;
 LEDManager ledManager;
 LCDManager lcdManager;
+CommandHandler commandHandler;
 
 unsigned long lastIMUPublish = 0;
 const unsigned long IMU_PUBLISH_INTERVAL = 100; // 100ms = 10Hz
 unsigned long lastIMULog = 0;
 const unsigned long IMU_LOG_INTERVAL = 3000; // 3秒に1回ログ出力
+unsigned long lastStatePublish = 0;
+const unsigned long STATE_PUBLISH_INTERVAL = 5000; // 5秒に1回状態パブリッシュ
 
 // MQTTメッセージ受信コールバック
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
-    DEBUG_PRINTF("[MQTT] Message arrived [%s]: ", topic);
+    Serial.printf("\n[MQTT] ← Message on topic: %s\n", topic);
     
-    // ペイロードを文字列として表示
-    char message[512];  // Increased buffer for state messages
-    int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
-    memcpy(message, payload, len);
-    message[len] = '\0';
-    DEBUG_PRINTLN(message);
-    
-    // トピック別処理
-    if (strstr(topic, "sphere/all/state") != NULL) {
-        // StateManagerからの状態更新
-        Serial.println("\n=== STATE UPDATE ===");
-        
-        // JSONパース (簡易版 - ArduinoJsonを使う方が良い)
-        // brightnessを抽出
-        const char* brightnessKey = "\"brightness\":";
-        const char* brightnessPtr = strstr(message, brightnessKey);
-        if (brightnessPtr) {
-            int brightness = atoi(brightnessPtr + strlen(brightnessKey));
-            Serial.printf("  Brightness: %d%%\n", brightness);
-            
-            // LEDManagerにbrightness設定を適用 (0-100% → 0-255)
-            uint8_t ledBrightness = map(brightness, 0, 100, 0, 255);
-            ledManager.setBrightness(ledBrightness);
-            Serial.printf("  LED Brightness set to: %d/255\n", ledBrightness);
-        }
-        
-        // その他のパラメータも同様にパース可能
-        Serial.println("==================\n");
-        
-    } else if (strstr(topic, "/command") != NULL) {
-        // コマンド処理
-        if (strcmp(message, "status") == 0) {
-            mqtt.publish("sphere/sphere001/response", "OK", false);
-        } else if (strcmp(message, "restart") == 0) {
-            Serial.println("Restart command received!");
-            ESP.restart();
-        }
+    // CommandHandlerに処理を委譲
+    if (strstr(topic, "/command/") != NULL) {
+        commandHandler.handleMessage(topic, payload, length);
+    } else {
+        // その他のトピック（例: sphere/all/state）
+        char message[512];
+        int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
+        memcpy(message, payload, len);
+        message[len] = '\0';
+        Serial.printf("[MQTT] Unhandled topic: %s\n", message);
     }
 }
 
@@ -130,6 +107,15 @@ void setup() {
         Serial.println("MQTT initialization failed (will retry)");
     }
     mqtt.printStatus();
+    
+    // MQTTトピックをサブスクライブ
+    mqtt.subscribe("sphere/all/command/params");
+    mqtt.subscribe("sphere/all/command/playback");
+    mqtt.subscribe("sphere/all/command/led");
+    mqtt.subscribe("sphere/all/command/system");
+    Serial.println("MQTT topics subscribed");
+    
+    // CommandHandler初期化 (LEDManager初期化後に移動)
     
     // Sound初期化
     if (!sound.begin(config)) {
@@ -197,6 +183,11 @@ void setup() {
         Serial.println("LEDManager disabled (ImageManager not available)");
     }
     
+    // CommandHandler初期化
+    if (!commandHandler.begin(&ledManager, &config)) {
+        Serial.println("CommandHandler initialization failed");
+    }
+    
     Serial.println("\n=== Setup Complete ===");
 }
 
@@ -244,6 +235,29 @@ void loop() {
                     lastIMULog = now;
                     Serial.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
                 }
+            }
+        }
+        
+        // 定期的に状態をパブリッシュ (retained)
+        if (now - lastStatePublish >= STATE_PUBLISH_INTERVAL) {
+            lastStatePublish = now;
+            
+            char stateBuffer[512];
+            if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
+                mqtt.publish("sphere/sphere001/state", stateBuffer, true); // retained = true
+                Serial.println("[MQTT] → Published state (retained)");
+            }
+        }
+    } else {
+        // IMUが無効な場合も状態はパブリッシュ
+        unsigned long now = millis();
+        if (now - lastStatePublish >= STATE_PUBLISH_INTERVAL) {
+            lastStatePublish = now;
+            
+            char stateBuffer[512];
+            if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
+                mqtt.publish("sphere/sphere001/state", stateBuffer, true);
+                Serial.println("[MQTT] → Published state (retained)");
             }
         }
     }
