@@ -205,6 +205,8 @@ export const VideoManager = () => {
                     flex: 1, 
                     overflow: 'auto',
                     p: 2,
+                    // Prevent parent swipe handlers
+                    touchAction: 'pan-y', // Only allow vertical panning
                     // Custom scrollbar
                     '&::-webkit-scrollbar': {
                         width: '8px'
@@ -219,6 +221,14 @@ export const VideoManager = () => {
                             background: 'rgba(0, 229, 255, 0.5)'
                         }
                     }
+                }}
+                onTouchStart={(e) => {
+                    // Stop event propagation to parent swipe handlers
+                    e.stopPropagation();
+                }}
+                onTouchMove={(e) => {
+                    // Allow vertical scrolling, prevent horizontal swipe
+                    e.stopPropagation();
                 }}
             >
                 {filteredVideos.length === 0 ? (
