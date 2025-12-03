@@ -51,11 +51,13 @@ export const VideoCard = ({
                 overflow: 'hidden',
                 transition: 'all 0.2s ease',
                 boxShadow: selected ? '0 0 20px rgba(0, 229, 255, 0.4)' : 'none',
-                mb: 2,
                 '&:active': {
                     transform: 'scale(0.98)'
                 },
-                position: 'relative'
+                position: 'relative',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column'
             }}
         >
             {/* Thumbnail */}
@@ -63,7 +65,7 @@ export const VideoCard = ({
                 sx={{
                     position: 'relative',
                     width: '100%',
-                    paddingTop: '56.25%', // 16:9 aspect ratio
+                    paddingTop: '100%', // 1:1 aspect ratio for grid
                     bgcolor: 'rgba(0, 0, 0, 0.5)',
                     cursor: 'pointer',
                     overflow: 'hidden',
@@ -101,7 +103,7 @@ export const VideoCard = ({
                             justifyContent: 'center'
                         }}
                     >
-                        <MovieIcon sx={{ fontSize: 64, color: 'rgba(0, 229, 255, 0.3)' }} />
+                        <MovieIcon sx={{ fontSize: 48, color: 'rgba(0, 229, 255, 0.3)' }} />
                     </Box>
                 )}
 
@@ -122,7 +124,7 @@ export const VideoCard = ({
                         transition: 'opacity 0.2s'
                     }}
                 >
-                    <PlayArrowIcon sx={{ fontSize: 64, color: '#00E5FF' }} />
+                    <PlayArrowIcon sx={{ fontSize: 48, color: '#00E5FF' }} />
                 </Box>
 
                 {/* Scanline effect */}
@@ -141,103 +143,83 @@ export const VideoCard = ({
                         }
                     }}
                 />
+
+                {/* Selected indicator */}
+                {selected && (
+                    <Box
+                        sx={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            bgcolor: 'primary.main',
+                            borderRadius: '50%',
+                            width: 24,
+                            height: 24,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                        }}
+                    >
+                        <CheckCircleIcon sx={{ fontSize: 20, color: '#000' }} />
+                    </Box>
+                )}
             </Box>
 
             {/* Content */}
-            <CardContent sx={{ p: 2 }}>
+            <CardContent sx={{ p: 1, flex: 1, display: 'flex', flexDirection: 'column' }}>
                 {/* Title */}
                 <Typography
-                    variant="h6"
+                    variant="body2"
                     sx={{
                         color: '#fff',
-                        fontWeight: 700,
-                        letterSpacing: '0.05em',
-                        mb: 1.5,
-                        textTransform: 'uppercase',
-                        fontSize: '1rem',
+                        fontWeight: 600,
+                        mb: 0.5,
+                        fontSize: '0.75rem',
                         fontFamily: '"Source Code Pro", monospace',
-                        borderBottom: '2px solid rgba(0, 229, 255, 0.3)',
-                        pb: 0.5
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
                     }}
                 >
                     {video.title}
                 </Typography>
 
-                {/* Metadata row with icons */}
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1.5 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <AccessTimeIcon sx={{ fontSize: 16, color: 'primary.main' }} />
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {formatDuration(video.duration_ms)}
-                        </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <StorageIcon sx={{ fontSize: 16, color: 'primary.main' }} />
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {formatSize(video.size_bytes)}
-                        </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <AspectRatioIcon sx={{ fontSize: 16, color: 'primary.main' }} />
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {video.width}x{video.height}
-                        </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <MovieIcon sx={{ fontSize: 16, color: 'primary.main' }} />
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {video.fps || 30}fps
-                        </Typography>
-                    </Box>
+                {/* Metadata - compact */}
+                <Box sx={{ display: 'flex', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
+                        {formatDuration(video.duration_ms)}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
+                        {formatSize(video.size_bytes)}
+                    </Typography>
                 </Box>
 
-                {/* Tags */}
-                {video.tags && video.tags.length > 0 && (
-                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1.5 }}>
-                        {video.tags.map((tag, index) => (
-                            <Chip
-                                key={index}
-                                label={`#${tag}`}
-                                size="small"
-                                sx={{
-                                    bgcolor: 'rgba(0, 229, 255, 0.1)',
-                                    color: 'primary.main',
-                                    border: '1px solid rgba(0, 229, 255, 0.3)',
-                                    fontSize: '0.7rem',
-                                    height: 20,
-                                    fontFamily: '"Source Code Pro", monospace'
-                                }}
-                            />
-                        ))}
-                    </Box>
-                )}
-
-                {/* Action buttons */}
-                <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                    <Button
-                        variant="outlined"
+                {/* Action buttons - compact */}
+                <Box sx={{ display: 'flex', gap: 0.5, mt: 'auto' }}>
+                    <IconButton
                         size="small"
-                        startIcon={selected ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
                         onClick={onSelect}
                         sx={{
                             flex: 1,
+                            borderRadius: 1,
+                            bgcolor: selected ? 'rgba(0, 229, 255, 0.2)' : 'transparent',
+                            border: '1px solid',
                             borderColor: selected ? 'primary.main' : 'rgba(0, 229, 255, 0.3)',
                             color: selected ? 'primary.main' : 'text.secondary',
-                            bgcolor: selected ? 'rgba(0, 229, 255, 0.1)' : 'transparent',
                             '&:hover': {
-                                borderColor: 'primary.main',
-                                bgcolor: 'rgba(0, 229, 255, 0.2)'
+                                bgcolor: 'rgba(0, 229, 255, 0.1)'
                             }
                         }}
                     >
-                        {selected ? 'Selected' : 'Select'}
-                    </Button>
+                        {selected ? <CheckCircleIcon fontSize="small" /> : <RadioButtonUncheckedIcon fontSize="small" />}
+                    </IconButton>
                     <IconButton
                         size="small"
                         onClick={onInfo}
                         sx={{
-                            color: 'primary.main',
+                            borderRadius: 1,
                             border: '1px solid rgba(0, 229, 255, 0.3)',
+                            color: 'primary.main',
                             '&:hover': {
                                 bgcolor: 'rgba(0, 229, 255, 0.1)'
                             }
@@ -249,8 +231,9 @@ export const VideoCard = ({
                         size="small"
                         onClick={onDelete}
                         sx={{
-                            color: 'error.main',
+                            borderRadius: 1,
                             border: '1px solid rgba(255, 23, 68, 0.3)',
+                            color: 'error.main',
                             '&:hover': {
                                 bgcolor: 'rgba(255, 23, 68, 0.1)'
                             }
@@ -258,14 +241,6 @@ export const VideoCard = ({
                     >
                         <DeleteIcon fontSize="small" />
                     </IconButton>
-                </Box>
-
-                {/* Upload timestamp */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <CalendarTodayIcon sx={{ fontSize: 12, color: 'text.disabled' }} />
-                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem' }}>
-                        {formatDate(video.uploaded_at)}
-                    </Typography>
                 </Box>
             </CardContent>
         </Card>

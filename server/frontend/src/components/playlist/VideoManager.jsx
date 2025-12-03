@@ -197,7 +197,7 @@ export const VideoManager = () => {
                 />
             </Box>
 
-            {/* Video List */}
+            {/* Video List - Grid Layout */}
             <Box 
                 sx={{ 
                     flex: 1, 
@@ -253,16 +253,27 @@ export const VideoManager = () => {
                         )}
                     </Box>
                 ) : (
-                    filteredVideos.map((video) => (
-                        <VideoCard
-                            key={video.id}
-                            video={video}
-                            selected={selectedVideos.includes(video.id)}
-                            onSelect={() => handleSelect(video.id)}
-                            onInfo={() => handleInfo(video)}
-                            onDelete={() => handleDelete(video.id)}
-                        />
-                    ))
+                    <Box
+                        sx={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: 2,
+                            '@media (min-width: 600px)': {
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))'
+                            }
+                        }}
+                    >
+                        {filteredVideos.map((video) => (
+                            <VideoCard
+                                key={video.id}
+                                video={video}
+                                selected={selectedVideos.includes(video.id)}
+                                onSelect={() => handleSelect(video.id)}
+                                onInfo={() => handleInfo(video)}
+                                onDelete={() => handleDelete(video.id)}
+                            />
+                        ))}
+                    </Box>
                 )}
             </Box>
 
