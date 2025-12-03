@@ -3,7 +3,11 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#141b2d" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <title>Isolation Sphere Server</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -16,6 +20,17 @@
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
+  <script>
+    // Auto-hide address bar on mobile browsers
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        window.scrollTo(0, 1);
+      }, 0);
+    });
+    
+    // Prevent pull-to-refresh on mobile
+    document.body.style.overscrollBehavior = 'none';
+  </script>
 </body>
 
 </html>

@@ -26,8 +26,16 @@ const hueToRgb = (hue) => {
 
 const IMUControlledSphere = ({ hue, brightness }) => {
     const meshRef = useRef();
-    const { lastMessage } = useWebSocket();
     const quaternionRef = useRef(new THREE.Quaternion(0, 0, 0, 1)); // x, y, z, w
+    
+    // Safe WebSocket usage with error handling
+    let lastMessage = null;
+    try {
+        const wsContext = useWebSocket();
+        lastMessage = wsContext?.lastMessage;
+    } catch (error) {
+        console.warn('WebSocket context not available:', error);
+    }
 
     useEffect(() => {
         // Update quaternion when IMU data received

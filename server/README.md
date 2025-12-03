@@ -44,9 +44,12 @@ Ubuntu MiniPC/Raspberry Pi上で動作するIsolation Sphereプロジェクト�
 
 - **React フロントエンド** (Viteベース)
   - Material-UIコンポーネントを使用したモダンUI
-  - React Three Fiberを使用した3D可視化
+  - React Three Fiberを使用した3D可視化（IMUクォータニオン制御）
   - WebSocketによるリアルタイム制御
   - モバイル/タブレット/デスクトップ対応のレスポンシブデザイン
+  - スワイプジェスチャーによる直感的なタブナビゲーション
+  - モバイル最適化（URLバー自動非表示、viewport対応）
+  - 上下移動ボタンと縦フリックによる垂直タブ切り替え
 
 - **ジョイスティックデーモン**
   - `evdev`経由での物理USBジョイスティックサポート
@@ -67,8 +70,8 @@ Ubuntu MiniPC/Raspberry Pi上で動作するIsolation Sphereプロジェクト�
 
 ### 通信プロトコル
 - **micro-ROS (XRCE-DDS)**: ESP32との主要通信
-- **MQTT**: ステータス/コマンドメッセージング用レガシーサポート
-- **WebSocket**: WebUIのリアルタイム更新
+- **MQTT**: ステータス/コマンドメッセージング、IMUクォータニオンデータ受信
+- **WebSocket**: WebUIのリアルタイム更新、IMUデータのブリッジ
 - **UDP**: 高スループットビデオストリーミング
 
 ## 前提条件
