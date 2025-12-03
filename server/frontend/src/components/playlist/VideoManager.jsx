@@ -111,11 +111,12 @@ export const VideoManager = () => {
     return (
         <Box 
             sx={{ 
+                width: '100%',
                 height: '100%', 
                 display: 'flex', 
                 flexDirection: 'column',
                 bgcolor: 'rgba(20, 27, 45, 0.9)',
-                overflow: 'hidden'
+                position: 'relative'
             }}
         >
             {/* Header */}
@@ -123,7 +124,8 @@ export const VideoManager = () => {
                 sx={{ 
                     p: 2, 
                     borderBottom: '1px solid rgba(0, 229, 255, 0.2)',
-                    bgcolor: 'rgba(20, 27, 45, 0.95)'
+                    bgcolor: 'rgba(20, 27, 45, 0.95)',
+                    flexShrink: 0
                 }}
             >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -282,7 +284,8 @@ export const VideoManager = () => {
                 sx={{ 
                     p: 2, 
                     borderTop: '1px solid rgba(0, 229, 255, 0.2)',
-                    bgcolor: 'rgba(20, 27, 45, 0.95)'
+                    bgcolor: 'rgba(20, 27, 45, 0.95)',
+                    flexShrink: 0
                 }}
             >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
