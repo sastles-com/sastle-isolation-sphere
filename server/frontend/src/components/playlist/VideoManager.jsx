@@ -113,7 +113,7 @@ export const VideoManager = () => {
                 height: '100%', 
                 display: 'flex', 
                 flexDirection: 'column',
-                bgcolor: '#0A0E1A',
+                bgcolor: 'rgba(20, 27, 45, 0.9)',
                 overflow: 'hidden'
             }}
         >
