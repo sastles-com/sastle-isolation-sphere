@@ -76,8 +76,8 @@ export const Dashboard = () => {
         onSwipedLeft: handleSwipeLeft,
         onSwipedRight: handleSwipeRight,
         trackMouse: true,
-        preventScrollOnSwipe: true,
-        delta: 10,
+        preventScrollOnSwipe: false, // Allow vertical scrolling
+        delta: 50, // Increase threshold to avoid accidental swipes
         trackTouch: true,
     });
 
