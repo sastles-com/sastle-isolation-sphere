@@ -3,6 +3,7 @@ import { Box, Typography, Button, TextField, InputAdornment, IconButton, Chip } 
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import MovieIcon from '@mui/icons-material/Movie';
 import { VideoCard } from './VideoCard';
 
 // Mock Data (モバイルテック感)
