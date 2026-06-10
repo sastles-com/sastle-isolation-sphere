@@ -9,30 +9,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import StorageIcon from '@mui/icons-material/Storage';
 import AspectRatioIcon from '@mui/icons-material/AspectRatio';
 import MovieIcon from '@mui/icons-material/Movie';
-import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
-
-const formatDuration = (ms) => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${minutes}:${secs.toString().padStart(2, '0')}`;
-};
-
-const formatSize = (bytes) => {
-    if (!bytes) return '0 B';
-    const mb = bytes / (1024 * 1024);
-    return mb.toFixed(1) + ' MB';
-};
-
-const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleString('ja-JP', { 
-        month: '2-digit', 
-        day: '2-digit', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-    });
-};
+import { formatDuration, formatSize } from '../../lib/format';
 
 export const VideoCard = ({ 
     video, 
