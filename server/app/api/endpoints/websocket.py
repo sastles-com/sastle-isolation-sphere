@@ -1,15 +1,15 @@
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from app.services.state_manager import StateManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-state_manager = StateManager()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # lifespan で生成・登録された StateManager を参照する
+    state_manager = websocket.app.state.state_manager
     await websocket.accept()
     state_manager.add_observer(websocket)
     

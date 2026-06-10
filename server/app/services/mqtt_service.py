@@ -4,6 +4,7 @@ MQTT Service for receiving IMU data from ESP32 devices
 import asyncio
 import json
 import os
+import threading
 from typing import Optional
 import logging
 
@@ -31,11 +32,15 @@ class MQTTService:
     MQTT Client Service for subscribing to ESP32 IMU data
     """
     _instance = None
-    
+    _instance_lock = threading.Lock()
+
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(MQTTService, cls).__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    instance = super(MQTTService, cls).__new__(cls)
+                    instance._initialized = False
+                    cls._instance = instance
         return cls._instance
 
     def __init__(self):

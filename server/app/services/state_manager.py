@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -23,11 +24,15 @@ class StateManager:
     - 変更された状態はMQTT(retained) + WebSocketで配信
     """
     _instance = None
-    
+    _instance_lock = threading.Lock()
+
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(StateManager, cls).__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    instance = super(StateManager, cls).__new__(cls)
+                    instance._initialized = False
+                    cls._instance = instance
         return cls._instance
 
     def __init__(self):
