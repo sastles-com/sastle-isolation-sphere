@@ -32,8 +32,8 @@ async def send_playback_command(command: PlaybackCommand, request: Request):
     """
     try:
         mqtt_service = request.app.state.mqtt_service
-        payload = command.dict(exclude_none=True)
-        
+        payload = command.model_dump(exclude_none=True)
+
         mqtt_service.client.publish(
             "sphere/all/command/playback",
             json.dumps(payload),
@@ -54,22 +54,19 @@ async def send_params_command(command: ParamsCommand, request: Request):
     例: {"brightness": 85}
     """
     try:
-        print(f"[API] Received params command: {command}")
         mqtt_service = request.app.state.mqtt_service
-        payload = command.dict(exclude_none=True)
-        
+        payload = command.model_dump(exclude_none=True)
+
         if not payload:
             raise HTTPException(status_code=400, detail="No parameters provided")
-        
-        print(f"[API] Publishing to sphere/all/command/params: {payload}")
+
         mqtt_service.client.publish(
             "sphere/all/command/params",
             json.dumps(payload),
             qos=1
         )
-        
+
         logger.info(f"Params command sent: {payload}")
-        print(f"[API] Params command published successfully")
         return {"status": "ok", "command": payload}
     except Exception as e:
         logger.error(f"Failed to send params command: {e}")
@@ -84,8 +81,8 @@ async def send_led_command(command: LEDCommand, request: Request):
     """
     try:
         mqtt_service = request.app.state.mqtt_service
-        payload = command.dict(exclude_none=True)
-        
+        payload = command.model_dump(exclude_none=True)
+
         mqtt_service.client.publish(
             "sphere/all/command/led",
             json.dumps(payload),

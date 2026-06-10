@@ -1,5 +1,9 @@
+import logging
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.services.state_manager import StateManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 state_manager = StateManager()
@@ -18,7 +22,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            print(f"[WebSocket] Received from client: {data}")
+            logger.info(f"Received from client: {data}")
             
             # StateManagerに処理を委譲
             await state_manager.handle_websocket_message(data)
