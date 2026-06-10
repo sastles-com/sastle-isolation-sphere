@@ -6,6 +6,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import { CompactSlider } from '../ui/CompactSlider';
 import { NeonJoystick } from '../ui/NeonJoystick';
 import { useWebSocket } from '../../contexts/WebSocketContext';
+import { useStateUpdate } from '../../hooks/useSphereState';
 
 export const SphereControl = () => {
     const [brightness, setBrightness] = useState(80);
@@ -13,17 +14,14 @@ export const SphereControl = () => {
     const joystickVector = useRef({ x: 0, y: 0 });
     const requestRef = useRef();
     const brightnessTimeoutRef = useRef(null);
-    const { lastMessage, isConnected, sendMessage } = useWebSocket();
+    const { sendMessage } = useWebSocket();
 
     // Listen for state updates from StateManager
-    useEffect(() => {
-        if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
-            const state = lastMessage.payload;
-            if (state.params && state.params.brightness !== undefined) {
-                setBrightness(state.params.brightness);
-            }
+    useStateUpdate((state) => {
+        if (state.params && state.params.brightness !== undefined) {
+            setBrightness(state.params.brightness);
         }
-    }, [lastMessage]);
+    });
 
     // Send brightness command to MQTT (debounced)
     const handleBrightnessChange = (value) => {

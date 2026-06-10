@@ -22,9 +22,10 @@ import { ConfigEditor } from '../components/params/ConfigEditor';
 import { ParamsEditor } from '../components/params/ParamsEditor';
 import { TAB_CONFIG } from '../config/tabConfig';
 import { useWebSocket } from '../contexts/WebSocketContext';
+import { useStateUpdate } from '../hooks/useSphereState';
 
 export const Dashboard = () => {
-    const { isConnected, lastMessage, sendMessage } = useWebSocket();
+    const { isConnected, sendMessage } = useWebSocket();
 
     const [currentTab, setCurrentTab] = useState(0);
     const [rotation, setRotation] = useState(0);
@@ -33,18 +34,15 @@ export const Dashboard = () => {
     const [playbackStatus, setPlaybackStatus] = useState('stopped'); // "playing" | "paused" | "stopped"
 
     // Sync state from WebSocket
-    useEffect(() => {
-        if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
-            const { playback, params } = lastMessage.payload;
-            if (playback) {
-                setPlaybackStatus(playback.status || 'stopped');
-            }
-            if (params) {
-                setBrightness(params.brightness);
-                setColor(params.hue);
-            }
+    useStateUpdate(({ playback, params }) => {
+        if (playback) {
+            setPlaybackStatus(playback.status || 'stopped');
         }
-    }, [lastMessage]);
+        if (params) {
+            setBrightness(params.brightness);
+            setColor(params.hue);
+        }
+    });
 
     const handleTogglePlay = () => {
         // Send toggle command to StateManager
