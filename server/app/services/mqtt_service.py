@@ -3,6 +3,7 @@ MQTT Service for receiving IMU data from ESP32 devices
 """
 import asyncio
 import json
+import os
 from typing import Optional
 import logging
 
@@ -43,7 +44,8 @@ class MQTTService:
             
         self.client: Optional[mqtt.Client] = None
         self.state_manager: Optional[StateManager] = None  # 外部からセット
-        
+        self._loop = None  # set_event_loop() でセットされる
+
         # Load config from config.json
         self.broker_host = self._load_broker_config()
         self.broker_port = MQTT_BROKER_PORT
@@ -131,33 +133,38 @@ class MQTTService:
         except Exception as e:
             logger.error(f"Error handling MQTT message: {e}")
 
+    def _submit_coroutine(self, coro, context: str) -> bool:
+        """MQTTスレッドからイベントループにコルーチンを投入する共通処理"""
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+            return True
+        coro.close()
+        logger.warning(f"Event loop not set, cannot {context}")
+        return False
+
     def _handle_command(self, topic: str, payload: dict):
         """Handle command messages - delegate to StateManager"""
         logger.info(f"[MQTT] Received command on {topic}: {payload}")
-        
+
         if self.state_manager:
             try:
                 # MQTT callback runs in different thread, use run_coroutine_threadsafe
-                import asyncio
-                if hasattr(self, '_loop') and self._loop:
-                    asyncio.run_coroutine_threadsafe(
-                        self.state_manager.handle_command(topic, payload),
-                        self._loop
-                    )
+                if self._submit_coroutine(
+                    self.state_manager.handle_command(topic, payload),
+                    "handle command"
+                ):
                     logger.info(f"[MQTT] Command delegated to StateManager")
-                else:
-                    logger.warning("Event loop not set, cannot handle command")
             except Exception as e:
                 logger.error(f"Error delegating command to StateManager: {e}")
         else:
             logger.warning("StateManager not set, cannot handle command")
-    
+
     def _handle_imu_data(self, payload):
         """Handle IMU quaternion data"""
         if not self.state_manager:
             logger.warning("StateManager not set, skipping IMU update")
             return
-            
+
         try:
             # ESP32 sends format: {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}
             # (without "quaternion" wrapper)
@@ -167,35 +174,33 @@ class MQTTService:
             elif "quaternion" in payload:
                 # Alternative format with wrapper
                 quat = payload["quaternion"]
-            
+
             if quat:
                 # MQTT callback runs in different thread, use run_coroutine_threadsafe
-                import asyncio
-                if hasattr(self, '_loop') and self._loop:
-                    asyncio.run_coroutine_threadsafe(
-                        self.state_manager.update_state("imu", {
-                            "w": quat.get("w", 1.0),
-                            "x": quat.get("x", 0.0),
-                            "y": quat.get("y", 0.0),
-                            "z": quat.get("z", 0.0)
-                        }),
-                        self._loop
-                    )
+                if self._submit_coroutine(
+                    self.state_manager.update_state("imu", {
+                        "w": quat.get("w", 1.0),
+                        "x": quat.get("x", 0.0),
+                        "y": quat.get("y", 0.0),
+                        "z": quat.get("z", 0.0)
+                    }),
+                    "update IMU"
+                ):
                     logger.debug(f"Updated IMU quaternion: {quat}")
-                else:
-                    logger.warning("Event loop not set, cannot update IMU")
         except Exception as e:
             logger.error(f"Error handling IMU data: {e}")
 
     def _handle_status_data(self, payload):
         """Handle device status data"""
+        # TODO: MQTTスレッド内で新しいイベントループを生成しており、
+        # メインループ上の observers/_state と競合しうる。
+        # _submit_coroutine() に統一すべきだが挙動が変わるため別タスクで対応。
         if not self.state_manager:
             logger.warning("StateManager not set, skipping status update")
             return
-            
+
         try:
             # Update system state with device status
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
