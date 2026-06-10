@@ -7,6 +7,18 @@
 
 namespace sastle {
 
+// JSONペイロードの deserialize + エラーログの共通処理
+// ドキュメントサイズはコマンドごとに異なるためテンプレートで吸収する
+template<size_t N>
+static bool parseJsonPayload(const char* payload, StaticJsonDocument<N>& doc) {
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+        Serial.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
+        return false;
+    }
+    return true;
+}
+
 CommandHandler::CommandHandler()
     : _ledManager(nullptr)
     , _config(nullptr) {
@@ -66,13 +78,10 @@ bool CommandHandler::handleMessage(const char* topic, const uint8_t* payload, un
 
 bool CommandHandler::_handleParams(const char* payload) {
     StaticJsonDocument<256> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    
-    if (error) {
-        Serial.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
+    if (!parseJsonPayload(payload, doc)) {
         return false;
     }
-    
+
     Serial.println("[CommandHandler] === PARAMS UPDATE ===");
     
     bool updated = false;
@@ -120,13 +129,10 @@ bool CommandHandler::_handleParams(const char* payload) {
 
 bool CommandHandler::_handlePlayback(const char* payload) {
     StaticJsonDocument<256> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    
-    if (error) {
-        Serial.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
+    if (!parseJsonPayload(payload, doc)) {
         return false;
     }
-    
+
     Serial.println("[CommandHandler] === PLAYBACK CONTROL ===");
     
     if (doc.containsKey("action")) {
@@ -169,13 +175,10 @@ bool CommandHandler::_handlePlayback(const char* payload) {
 
 bool CommandHandler::_handleLed(const char* payload) {
     StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    
-    if (error) {
-        Serial.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
+    if (!parseJsonPayload(payload, doc)) {
         return false;
     }
-    
+
     Serial.println("[CommandHandler] === LED CONTROL ===");
     
     if (doc.containsKey("mode")) {
@@ -207,13 +210,10 @@ bool CommandHandler::_handleLed(const char* payload) {
 
 bool CommandHandler::_handleSystem(const char* payload) {
     StaticJsonDocument<128> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    
-    if (error) {
-        Serial.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
+    if (!parseJsonPayload(payload, doc)) {
         return false;
     }
-    
+
     Serial.println("[CommandHandler] === SYSTEM COMMAND ===");
     
     if (doc.containsKey("action")) {
