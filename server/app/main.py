@@ -2,7 +2,7 @@ import logging
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.core.config import get_settings
+from app.core.config import get_settings, CORS_ORIGINS
 from app.services.state_manager import StateManager
 from app.services.mqtt_service import MQTTService
 from app.api.router import api_router
@@ -55,7 +55,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"], # Allow all for dev convenience
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -13,6 +13,13 @@ except ImportError:
     MQTT_AVAILABLE = False
     logging.warning("paho-mqtt not installed. MQTT functionality disabled.")
 
+from app.core.config import (
+    CONFIG_SEARCH_PATHS,
+    MQTT_BROKER_PORT,
+    MQTT_CLIENT_ID,
+    MQTT_COMMAND_TOPIC_WILDCARD,
+    MQTT_DEVICE_ID,
+)
 from app.services.state_manager import StateManager
 
 logger = logging.getLogger(__name__)
@@ -39,8 +46,8 @@ class MQTTService:
         
         # Load config from config.json
         self.broker_host = self._load_broker_config()
-        self.broker_port = 1883
-        self.device_id = "sphere001"  # Default device ID
+        self.broker_port = MQTT_BROKER_PORT
+        self.device_id = MQTT_DEVICE_ID
         self.is_connected = False
         self._initialized = True
         
@@ -52,15 +59,7 @@ class MQTTService:
     def _load_broker_config(self):
         """Load MQTT broker address from config.json"""
         try:
-            import json
-            import os
-            # Try to load from shared data directory (server is run from server/ dir)
-            config_paths = [
-                "../core/data/config.json",
-                "data/config.json",
-                "../data/config.json"
-            ]
-            for path in config_paths:
+            for path in CONFIG_SEARCH_PATHS:
                 if os.path.exists(path):
                     with open(path, 'r') as f:
                         config = json.load(f)
@@ -75,7 +74,7 @@ class MQTTService:
 
     def _setup_client(self):
         """Initialize MQTT client"""
-        self.client = mqtt.Client(client_id="isolation-server")
+        self.client = mqtt.Client(client_id=MQTT_CLIENT_ID)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
@@ -97,7 +96,7 @@ class MQTTService:
             logger.info(f"Subscribed to topic: {status_topic}")
             
             # Subscribe to command topics (wildcard for all command types)
-            command_topic = "sphere/all/command/#"
+            command_topic = MQTT_COMMAND_TOPIC_WILDCARD
             client.subscribe(command_topic)
             logger.info(f"Subscribed to command topic: {command_topic}")
         else:

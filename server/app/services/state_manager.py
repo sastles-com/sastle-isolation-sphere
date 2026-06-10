@@ -4,6 +4,8 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
+from app.core.config import MQTT_STATE_TOPIC
+
 logger = logging.getLogger(__name__)
 
 class StateManager:
@@ -278,7 +280,7 @@ class StateManager:
             try:
                 state_json = json.dumps(self._state)
                 self._mqtt_client.publish(
-                    "sphere/all/state",
+                    MQTT_STATE_TOPIC,
                     state_json,
                     qos=1,
                     retain=True  # 重要: 新規接続時に最新状態を自動取得

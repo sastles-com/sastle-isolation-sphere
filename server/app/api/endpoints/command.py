@@ -4,6 +4,8 @@ from typing import Optional, Dict, Any
 import logging
 import json
 
+from app.core.config import MQTT_COMMAND_TOPIC_PREFIX
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -35,7 +37,7 @@ async def send_playback_command(command: PlaybackCommand, request: Request):
         payload = command.model_dump(exclude_none=True)
 
         mqtt_service.client.publish(
-            "sphere/all/command/playback",
+            f"{MQTT_COMMAND_TOPIC_PREFIX}/playback",
             json.dumps(payload),
             qos=1
         )
@@ -61,7 +63,7 @@ async def send_params_command(command: ParamsCommand, request: Request):
             raise HTTPException(status_code=400, detail="No parameters provided")
 
         mqtt_service.client.publish(
-            "sphere/all/command/params",
+            f"{MQTT_COMMAND_TOPIC_PREFIX}/params",
             json.dumps(payload),
             qos=1
         )
@@ -84,7 +86,7 @@ async def send_led_command(command: LEDCommand, request: Request):
         payload = command.model_dump(exclude_none=True)
 
         mqtt_service.client.publish(
-            "sphere/all/command/led",
+            f"{MQTT_COMMAND_TOPIC_PREFIX}/led",
             json.dumps(payload),
             qos=1
         )
