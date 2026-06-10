@@ -20,7 +20,6 @@ export const SphereControl = () => {
         if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
             const state = lastMessage.payload;
             if (state.params && state.params.brightness !== undefined) {
-                console.log('[SphereControl] Received state update, brightness:', state.params.brightness);
                 setBrightness(state.params.brightness);
             }
         }
@@ -28,7 +27,6 @@ export const SphereControl = () => {
 
     // Send brightness command to MQTT (debounced)
     const handleBrightnessChange = (value) => {
-        console.log('[SphereControl] Brightness slider changed to:', value);
         setBrightness(value);
         
         // Clear previous timeout
@@ -38,7 +36,6 @@ export const SphereControl = () => {
         
         // Debounce: send command after 300ms of inactivity
         brightnessTimeoutRef.current = setTimeout(() => {
-            console.log('[SphereControl] Sending brightness command via WebSocket:', value);
             sendMessage('COMMAND', {
                 command: 'params',
                 params: { brightness: value }

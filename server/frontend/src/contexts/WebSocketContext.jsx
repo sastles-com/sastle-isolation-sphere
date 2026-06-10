@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 
 const WebSocketContext = createContext(null);
 
+// 開発サーバー(vite等)でポートが取れない場合のフォールバック先
+const DEFAULT_WS_PORT = '9000';
+
 export const WebSocketProvider = ({ children }) => {
     const [isConnected, setIsConnected] = useState(false);
     const [lastMessage, setLastMessage] = useState(null);
@@ -12,7 +15,7 @@ export const WebSocketProvider = ({ children }) => {
         // Use hostname from window.location to support mobile testing on LAN
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.hostname;
-        const port = window.location.port || '9000'; // Use same port as current page
+        const port = window.location.port || DEFAULT_WS_PORT; // Use same port as current page
         const url = `${protocol}//${host}:${port}/ws`;
 
         console.log(`Connecting to WebSocket: ${url}`);
@@ -81,7 +84,6 @@ export const WebSocketProvider = ({ children }) => {
 
 export const useWebSocket = () => {
     const context = useContext(WebSocketContext);
-    console.log('useWebSocket context:', context);
     if (!context) {
         throw new Error('useWebSocket must be used within a WebSocketProvider');
     }
