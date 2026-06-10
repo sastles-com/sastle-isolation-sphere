@@ -1,4 +1,5 @@
 #include "NetworkManager.h"
+#include "BoardConfig.h"
 
 namespace sastle {
 
@@ -62,8 +63,8 @@ bool NetworkManager::connectWiFi(const String& ssid, const String& password,
     
     // 接続待ち（最大10秒）
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-        delay(250);
+    while (WiFi.status() != WL_CONNECTED && attempts < kWifiConnectRetries) {
+        delay(kWifiRetryDelayMs);
         Serial.print(".");
         attempts++;
     }

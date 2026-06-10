@@ -7,18 +7,16 @@
 #include "FileManager.h"
 #include "common.h"
 #include "FastMath.h"
+#include "BoardConfig.h"
 #include <FS.h>
 #include <LittleFS.h>
 #include <math.h>
 
 namespace sastle {
 
-// LED設定定数
-#define MAX_LEDS 800
+// LED設定定数 (値は BoardConfig.h に集約)
 #define LED_TYPE WS2812B
 #define COLOR_ORDER GRB
-#define TARGET_FPS 30
-#define FRAME_DELAY_MS (1000 / TARGET_FPS)
 
 // 静的メンバー初期化
 LEDManager* LEDManager::_instance = nullptr;
@@ -101,11 +99,11 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     
     Serial.printf("[LEDManager] Allocated LED buffer: %d bytes\n", _numLEDs * sizeof(CRGB));
     
-    // GPIO設定 (仕様書から)
-    _stripPins[0] = 5;  // Strip 0 -> GPIO 5
-    _stripPins[1] = 6;  // Strip 1 -> GPIO 6
-    _stripPins[2] = 7;  // Strip 2 -> GPIO 7
-    _stripPins[3] = 8;  // Strip 3 -> GPIO 8
+    // GPIO設定 (BoardConfig.h で一元管理)
+    _stripPins[0] = kLedPin0;
+    _stripPins[1] = kLedPin1;
+    _stripPins[2] = kLedPin2;
+    _stripPins[3] = kLedPin3;
     
     // FastLED初期化 (4ストリップ)
     // ストリップ毎のLED数とオフセットを計算
@@ -138,12 +136,12 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     
     // FastLED初期化 (RMT DMA自動使用)
     // 各ストリップは独立したRMTチャンネルで並列出力される
-    FastLED.addLeds<LED_TYPE, 5, COLOR_ORDER>(_stripBuffers[0], _ledsPerStrip[0]);
-    FastLED.addLeds<LED_TYPE, 6, COLOR_ORDER>(_stripBuffers[1], _ledsPerStrip[1]);
-    FastLED.addLeds<LED_TYPE, 7, COLOR_ORDER>(_stripBuffers[2], _ledsPerStrip[2]);
-    FastLED.addLeds<LED_TYPE, 8, COLOR_ORDER>(_stripBuffers[3], _ledsPerStrip[3]);
-    
-    FastLED.setBrightness(128);  // デフォルト輝度 50%
+    FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(_stripBuffers[0], _ledsPerStrip[0]);
+    FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(_stripBuffers[1], _ledsPerStrip[1]);
+    FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(_stripBuffers[2], _ledsPerStrip[2]);
+    FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(_stripBuffers[3], _ledsPerStrip[3]);
+
+    FastLED.setBrightness(kLedDefaultBrightness);
     FastLED.clear();
     FastLED.show();
     
@@ -187,7 +185,7 @@ bool LEDManager::loadLayout(const char* path) {
         }
     }
     
-    if (ledCount == 0 || ledCount > MAX_LEDS) {
+    if (ledCount == 0 || ledCount > kMaxLeds) {
         Serial.printf("[LEDManager] Invalid LED count: %d\n", ledCount);
         file.close();
         return false;
@@ -348,7 +346,7 @@ void LEDManager::stopRenderTask() {
 
 void LEDManager::renderTaskFunction(void* parameter) {
     LEDManager* manager = static_cast<LEDManager*>(parameter);
-    const TickType_t frameDelay = pdMS_TO_TICKS(FRAME_DELAY_MS);
+    const TickType_t frameDelay = pdMS_TO_TICKS(kFrameDelayMs);
     
     Serial.printf("[LED_Render] Task started on core %d\n", xPortGetCoreID());
     

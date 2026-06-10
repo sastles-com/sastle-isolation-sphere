@@ -12,11 +12,7 @@
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
 #include "ConfigManager.h"
-
-/// I2C SDAピン番号
-#define IMU_I2C_SDA 2
-/// I2C SCLピン番号
-#define IMU_I2C_SCL 1
+#include "BoardConfig.h"
 
 namespace sastle {
 
@@ -36,11 +32,11 @@ public:
     /**
      * @brief IMUセンサーを初期化
      * @param config 設定マネージャー参照
-     * @param sda I2C SDAピン番号 (デフォルト: IMU_I2C_SDA)
-     * @param scl I2C SCLピン番号 (デフォルト: IMU_I2C_SCL)
+     * @param sda I2C SDAピン番号 (デフォルト: kImuI2cSda)
+     * @param scl I2C SCLピン番号 (デフォルト: kImuI2cScl)
      * @return true 初期化成功, false 初期化失敗
      */
-    bool begin(ConfigManager& config, uint8_t sda = IMU_I2C_SDA, uint8_t scl = IMU_I2C_SCL);
+    bool begin(ConfigManager& config, uint8_t sda = kImuI2cSda, uint8_t scl = kImuI2cScl);
     
     /**
      * @brief センサーデータを更新
