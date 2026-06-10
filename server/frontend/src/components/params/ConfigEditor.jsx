@@ -3,6 +3,7 @@ import { Box, Typography, Button, Accordion, AccordionSummary, AccordionDetails,
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SaveIcon from '@mui/icons-material/Save';
 import SettingsIcon from '@mui/icons-material/Settings';
+import { apiGet, apiPost } from '../../lib/api';
 
 // API URL - Use relative path to work with current host and port
 const API_URL = '/api/config';
@@ -17,7 +18,7 @@ export const ConfigEditor = () => {
 
     const fetchConfig = async () => {
         try {
-            const response = await fetch(API_URL);
+            const response = await apiGet(API_URL);
             if (response.ok) {
                 const data = await response.json();
                 setConfig(data);
@@ -38,11 +39,7 @@ export const ConfigEditor = () => {
         // The current API supports updating by section. Let's update all sections.
         try {
             for (const section of Object.keys(config)) {
-                await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ section, data: config[section] })
-                });
+                await apiPost(API_URL, { section, data: config[section] });
             }
             alert('Configuration Saved!');
         } catch (error) {

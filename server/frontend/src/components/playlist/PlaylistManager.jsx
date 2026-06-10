@@ -6,6 +6,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
+import { apiGet, apiPost } from '../../lib/api';
 
 // API URL - Use relative path to work with current host and port
 const API_URL = '/api/playlist/playlists';
@@ -20,7 +21,7 @@ export const PlaylistManager = ({ isPlaying, onTogglePlay, onStop }) => {
 
     const fetchPlaylists = async () => {
         try {
-            const response = await fetch(API_URL);
+            const response = await apiGet(API_URL);
             if (response.ok) {
                 const data = await response.json();
                 // Map API data to UI format if needed, or ensure API returns compatible format
@@ -48,11 +49,7 @@ export const PlaylistManager = ({ isPlaying, onTogglePlay, onStop }) => {
         };
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newPlaylist)
-            });
+            const response = await apiPost(API_URL, newPlaylist);
 
             if (response.ok) {
                 const savedPlaylist = await response.json();
