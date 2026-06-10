@@ -1,4 +1,5 @@
 #include "GestureManager.h"
+#include "MqttTopics.h"
 #include <ArduinoJson.h>
 #include <cmath>
 
@@ -282,7 +283,7 @@ void GestureManager::publishGestureEvent(const char* event) {
     String payload;
     serializeJson(doc, payload);
     
-    _mqtt->publish("sphere/sphere001/gesture", payload.c_str());
+    _mqtt->publish(topics::kDeviceGesture, payload.c_str());
 }
 
 void GestureManager::publishRotationEvent(Axis axis, Direction dir, float angle, const char* action) {
@@ -298,7 +299,7 @@ void GestureManager::publishRotationEvent(Axis axis, Direction dir, float angle,
     String payload;
     serializeJson(doc, payload);
     
-    _mqtt->publish("sphere/sphere001/gesture", payload.c_str());
+    _mqtt->publish(topics::kDeviceGesture, payload.c_str());
 }
 
 void GestureManager::publishUIModeEvent(const char* mode) {
@@ -311,7 +312,7 @@ void GestureManager::publishUIModeEvent(const char* mode) {
     String payload;
     serializeJson(doc, payload);
     
-    _mqtt->publish("sphere/sphere001/ui_mode", payload.c_str());
+    _mqtt->publish(topics::kDeviceUiMode, payload.c_str());
 }
 
 void GestureManager::setOnModeChange(std::function<void(Mode)> callback) {

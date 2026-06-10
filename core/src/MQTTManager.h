@@ -115,6 +115,14 @@ private:
      * @return true 再接続成功, false 再接続失敗
      */
     bool _reconnect();
+
+    /**
+     * @brief デバイス固有トピック "sphere/<clientId>/<suffix>" を生成
+     * @param suffix トピック末尾 (例: "command", "status")
+     * @param out 出力バッファ
+     * @param len 出力バッファ長
+     */
+    void _deviceTopic(const char* suffix, char* out, size_t len);
 };
 
 } // namespace sastle

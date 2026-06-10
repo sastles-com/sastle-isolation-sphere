@@ -1,7 +1,12 @@
 #include "MQTTManager.h"
+#include "MqttTopics.h"
 #include <Arduino.h>
 
 namespace sastle {
+
+void MQTTManager::_deviceTopic(const char* suffix, char* out, size_t len) {
+    snprintf(out, len, "sphere/%s/%s", _clientId, suffix);
+}
 
 MQTTManager::MQTTManager() 
     : _mqttClient(_wifiClient),
@@ -93,17 +98,17 @@ bool MQTTManager::connect() {
         // 接続時のデフォルト購読
         // 1. デバイス固有のコマンドトピック
         char topic[64];
-        snprintf(topic, sizeof(topic), "sphere/%s/command", _clientId);
+        _deviceTopic("command", topic, sizeof(topic));
         subscribe(topic);
-        
+
         // 2. 全デバイス向けの状態トピック (StateManagerから配信)
-        subscribe("sphere/all/state");
-        
+        subscribe(topics::kAllState);
+
         // 3. 全デバイス向けのコマンドトピック
-        subscribe("sphere/all/command/#");  // ワイルドカードで全コマンドを購読
-        
+        subscribe(topics::kAllCommandWild);  // ワイルドカードで全コマンドを購読
+
         // ステータス送信（JSON形式）
-        snprintf(topic, sizeof(topic), "sphere/%s/status", _clientId);
+        _deviceTopic("status", topic, sizeof(topic));
         char statusPayload[128];
         snprintf(statusPayload, sizeof(statusPayload), 
                  "{\"status\":\"online\",\"uptime\":%lu,\"timestamp\":%lu}",
@@ -135,7 +140,7 @@ void MQTTManager::disconnect() {
     if (_mqttClient.connected()) {
         // 切断前にオフラインステータス送信
         char topic[64];
-        snprintf(topic, sizeof(topic), "sphere/%s/status", _clientId);
+        _deviceTopic("status", topic, sizeof(topic));
         publish(topic, "offline", true);
         
         _mqttClient.disconnect();

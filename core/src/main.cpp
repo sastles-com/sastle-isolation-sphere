@@ -11,6 +11,7 @@
 #include "LEDManager.h"
 #include "LCDManager.h"
 #include "CommandHandler.h"
+#include "MqttTopics.h"
 
 using namespace sastle;
 
@@ -109,10 +110,10 @@ void setup() {
     mqtt.printStatus();
     
     // MQTTトピックをサブスクライブ
-    mqtt.subscribe("sphere/all/command/params");
-    mqtt.subscribe("sphere/all/command/playback");
-    mqtt.subscribe("sphere/all/command/led");
-    mqtt.subscribe("sphere/all/command/system");
+    mqtt.subscribe(topics::kCommandParams);
+    mqtt.subscribe(topics::kCommandPlayback);
+    mqtt.subscribe(topics::kCommandLed);
+    mqtt.subscribe(topics::kCommandSystem);
     Serial.println("MQTT topics subscribed");
     
     // CommandHandler初期化 (LEDManager初期化後に移動)
@@ -228,7 +229,7 @@ void loop() {
                 snprintf(payload, sizeof(payload), 
                          "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}",
                          w, x, y, z);
-                mqtt.publish("sphere/sphere001/imu", payload, false);
+                mqtt.publish(topics::kDeviceImu, payload, false);
                 
                 // 3秒に1回だけシリアルログ出力
                 if (now - lastIMULog >= IMU_LOG_INTERVAL) {
@@ -244,7 +245,7 @@ void loop() {
             
             char stateBuffer[512];
             if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
-                mqtt.publish("sphere/sphere001/state", stateBuffer, true); // retained = true
+                mqtt.publish(topics::kDeviceState, stateBuffer, true); // retained = true
                 Serial.println("[MQTT] → Published state (retained)");
             }
         }
@@ -256,7 +257,7 @@ void loop() {
             
             char stateBuffer[512];
             if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
-                mqtt.publish("sphere/sphere001/state", stateBuffer, true);
+                mqtt.publish(topics::kDeviceState, stateBuffer, true);
                 Serial.println("[MQTT] → Published state (retained)");
             }
         }
