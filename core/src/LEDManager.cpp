@@ -6,6 +6,7 @@
 #include "LEDManager.h"
 #include "FileManager.h"
 #include "common.h"
+#include "FastMath.h"
 #include <FS.h>
 #include <LittleFS.h>
 #include <math.h>
