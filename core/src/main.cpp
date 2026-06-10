@@ -192,6 +192,43 @@ void setup() {
     Serial.println("\n=== Setup Complete ===");
 }
 
+// 定期的にIMUデータをMQTT送信 (10Hz)
+static void publishImuIfDue(unsigned long now) {
+    if (now - lastIMUPublish < IMU_PUBLISH_INTERVAL) {
+        return;
+    }
+    lastIMUPublish = now;
+
+    float w, x, y, z;
+    if (imuSensor.getQuaternion(w, x, y, z)) {
+        char payload[128];
+        snprintf(payload, sizeof(payload),
+                 "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}",
+                 w, x, y, z);
+        mqtt.publish(topics::kDeviceImu, payload, false);
+
+        // 3秒に1回だけシリアルログ出力
+        if (now - lastIMULog >= IMU_LOG_INTERVAL) {
+            lastIMULog = now;
+            Serial.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
+        }
+    }
+}
+
+// 定期的に状態をパブリッシュ (retained, 5秒間隔)
+static void publishStateIfDue(unsigned long now) {
+    if (now - lastStatePublish < STATE_PUBLISH_INTERVAL) {
+        return;
+    }
+    lastStatePublish = now;
+
+    char stateBuffer[512];
+    if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
+        mqtt.publish(topics::kDeviceState, stateBuffer, true); // retained = true
+        Serial.println("[MQTT] → Published state (retained)");
+    }
+}
+
 void loop() {
     // MQTT処理 (keep-alive & メッセージ受信)
     mqtt.loop();
@@ -212,57 +249,20 @@ void loop() {
     }
     
     // IMU更新
+    unsigned long now = millis();
     if (imuSensor.isInitialized()) {
         imuSensor.update();
-        
+
         // ジェスチャー検出更新
         gesture.update();
-        
-        // 定期的にIMUデータをMQTT送信
-        unsigned long now = millis();
-        if (now - lastIMUPublish >= IMU_PUBLISH_INTERVAL) {
-            lastIMUPublish = now;
-            
-            float w, x, y, z;
-            if (imuSensor.getQuaternion(w, x, y, z)) {
-                char payload[128];
-                snprintf(payload, sizeof(payload), 
-                         "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}",
-                         w, x, y, z);
-                mqtt.publish(topics::kDeviceImu, payload, false);
-                
-                // 3秒に1回だけシリアルログ出力
-                if (now - lastIMULog >= IMU_LOG_INTERVAL) {
-                    lastIMULog = now;
-                    Serial.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
-                }
-            }
-        }
-        
-        // 定期的に状態をパブリッシュ (retained)
-        if (now - lastStatePublish >= STATE_PUBLISH_INTERVAL) {
-            lastStatePublish = now;
-            
-            char stateBuffer[512];
-            if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
-                mqtt.publish(topics::kDeviceState, stateBuffer, true); // retained = true
-                Serial.println("[MQTT] → Published state (retained)");
-            }
-        }
-    } else {
-        // IMUが無効な場合も状態はパブリッシュ
-        unsigned long now = millis();
-        if (now - lastStatePublish >= STATE_PUBLISH_INTERVAL) {
-            lastStatePublish = now;
-            
-            char stateBuffer[512];
-            if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
-                mqtt.publish(topics::kDeviceState, stateBuffer, true);
-                Serial.println("[MQTT] → Published state (retained)");
-            }
-        }
+
+        publishImuIfDue(now);
     }
-    
+
+    // 状態パブリッシュはIMUの有無にかかわらず実施 (retained)
+    publishStateIfDue(now);
+
+
     // UDP受信チェック
     int packetSize = network.parsePacket();
     if (packetSize) {
