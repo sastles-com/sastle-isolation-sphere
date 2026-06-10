@@ -5,6 +5,101 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
 /**
+ * NavArrowButton - Up/Down navigation button within a swipe rail
+ */
+const NavArrowButton = ({ direction, enabled, onClick }) => {
+    const Icon = direction === 'up' ? KeyboardArrowUpIcon : KeyboardArrowDownIcon;
+    return (
+        <Box
+            onClick={() => enabled && onClick()}
+            sx={{
+                width: 32,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '50%',
+                border: '1px solid',
+                borderColor: enabled ? 'primary.main' : 'rgba(255, 255, 255, 0.2)',
+                bgcolor: enabled ? 'rgba(0, 229, 255, 0.1)' : 'transparent',
+                cursor: enabled ? 'pointer' : 'default',
+                opacity: enabled ? 1 : 0.3,
+                pointerEvents: 'auto',
+                transition: 'all 0.3s',
+                '&:active': enabled ? {
+                    transform: 'scale(0.9)',
+                    bgcolor: 'rgba(0, 229, 255, 0.2)',
+                } : {},
+            }}
+        >
+            <Icon
+                sx={{
+                    color: enabled ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
+                    fontSize: '1.2rem',
+                }}
+            />
+        </Box>
+    );
+};
+
+/**
+ * SwipeNavRail - Vertical swipe area with up/down buttons and indicator dots
+ * @param {'left' | 'right'} side - Which side of the container the rail sits on
+ */
+const SwipeNavRail = ({ side, swipeHandlers, subTabs, currentSubTab, setCurrentSubTab }) => (
+    <Box
+        {...swipeHandlers}
+        sx={{
+            width: '40px',
+            flexShrink: 0,
+            background: side === 'left'
+                ? 'linear-gradient(to right, rgba(0, 229, 255, 0.05), transparent)'
+                : 'linear-gradient(to left, rgba(0, 229, 255, 0.05), transparent)',
+            ...(side === 'left'
+                ? { borderRight: '1px solid rgba(0, 229, 255, 0.1)' }
+                : { borderLeft: '1px solid rgba(0, 229, 255, 0.1)' }),
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            py: 1,
+            position: 'relative',
+            userSelect: 'none',
+            touchAction: 'none',
+        }}
+    >
+        <NavArrowButton
+            direction="up"
+            enabled={currentSubTab > 0}
+            onClick={() => setCurrentSubTab(prev => prev - 1)}
+        />
+
+        {/* Sub-tab Indicator Dots */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            {subTabs.map((_, index) => (
+                <Box
+                    key={index}
+                    sx={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        bgcolor: index === currentSubTab ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
+                        boxShadow: index === currentSubTab ? '0 0 8px rgba(0, 229, 255, 0.8)' : 'none',
+                        transition: 'all 0.3s',
+                    }}
+                />
+            ))}
+        </Box>
+
+        <NavArrowButton
+            direction="down"
+            enabled={currentSubTab < subTabs.length - 1}
+            onClick={() => setCurrentSubTab(prev => prev + 1)}
+        />
+    </Box>
+);
+
+/**
  * VerticalTabContainer - Handles vertical swipe navigation within a main tab
  * Uses side swipe areas to distinguish between scrolling and tab switching
  * @param {Array} subTabs - Array of sub-tab configurations
@@ -43,102 +138,13 @@ export const VerticalTabContainer = ({ subTabs, renderContent }) => {
             }}
         >
             {/* Left Swipe Area - Vertical Tab Navigation */}
-            <Box
-                {...verticalSwipeHandlers}
-                sx={{
-                    width: '40px',
-                    flexShrink: 0,
-                    background: 'linear-gradient(to right, rgba(0, 229, 255, 0.05), transparent)',
-                    borderRight: '1px solid rgba(0, 229, 255, 0.1)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    py: 1,
-                    position: 'relative',
-                    userSelect: 'none',
-                    touchAction: 'none',
-                }}
-            >
-                {/* Up Button */}
-                <Box
-                    onClick={() => currentSubTab > 0 && setCurrentSubTab(prev => prev - 1)}
-                    sx={{
-                        width: 32,
-                        height: 32,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: '50%',
-                        border: '1px solid',
-                        borderColor: currentSubTab > 0 ? 'primary.main' : 'rgba(255, 255, 255, 0.2)',
-                        bgcolor: currentSubTab > 0 ? 'rgba(0, 229, 255, 0.1)' : 'transparent',
-                        cursor: currentSubTab > 0 ? 'pointer' : 'default',
-                        opacity: currentSubTab > 0 ? 1 : 0.3,
-                        pointerEvents: 'auto',
-                        transition: 'all 0.3s',
-                        '&:active': currentSubTab > 0 ? {
-                            transform: 'scale(0.9)',
-                            bgcolor: 'rgba(0, 229, 255, 0.2)',
-                        } : {},
-                    }}
-                >
-                    <KeyboardArrowUpIcon 
-                        sx={{ 
-                            color: currentSubTab > 0 ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
-                            fontSize: '1.2rem',
-                        }} 
-                    />
-                </Box>
-                
-                {/* Sub-tab Indicator Dots */}
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    {subTabs.map((_, index) => (
-                        <Box
-                            key={index}
-                            sx={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                bgcolor: index === currentSubTab ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
-                                boxShadow: index === currentSubTab ? '0 0 8px rgba(0, 229, 255, 0.8)' : 'none',
-                                transition: 'all 0.3s',
-                            }}
-                        />
-                    ))}
-                </Box>
-
-                {/* Down Button */}
-                <Box
-                    onClick={() => currentSubTab < subTabs.length - 1 && setCurrentSubTab(prev => prev + 1)}
-                    sx={{
-                        width: 32,
-                        height: 32,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: '50%',
-                        border: '1px solid',
-                        borderColor: currentSubTab < subTabs.length - 1 ? 'primary.main' : 'rgba(255, 255, 255, 0.2)',
-                        bgcolor: currentSubTab < subTabs.length - 1 ? 'rgba(0, 229, 255, 0.1)' : 'transparent',
-                        cursor: currentSubTab < subTabs.length - 1 ? 'pointer' : 'default',
-                        opacity: currentSubTab < subTabs.length - 1 ? 1 : 0.3,
-                        pointerEvents: 'auto',
-                        transition: 'all 0.3s',
-                        '&:active': currentSubTab < subTabs.length - 1 ? {
-                            transform: 'scale(0.9)',
-                            bgcolor: 'rgba(0, 229, 255, 0.2)',
-                        } : {},
-                    }}
-                >
-                    <KeyboardArrowDownIcon 
-                        sx={{ 
-                            color: currentSubTab < subTabs.length - 1 ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
-                            fontSize: '1.2rem',
-                        }} 
-                    />
-                </Box>
-            </Box>
+            <SwipeNavRail
+                side="left"
+                swipeHandlers={verticalSwipeHandlers}
+                subTabs={subTabs}
+                currentSubTab={currentSubTab}
+                setCurrentSubTab={setCurrentSubTab}
+            />
 
             {/* Center Content Area - Scroll Only */}
             <Box
@@ -178,102 +184,13 @@ export const VerticalTabContainer = ({ subTabs, renderContent }) => {
             </Box>
 
             {/* Right Swipe Area - Vertical Tab Navigation (Mirror of Left) */}
-            <Box
-                {...verticalSwipeHandlers}
-                sx={{
-                    width: '40px',
-                    flexShrink: 0,
-                    background: 'linear-gradient(to left, rgba(0, 229, 255, 0.05), transparent)',
-                    borderLeft: '1px solid rgba(0, 229, 255, 0.1)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    py: 1,
-                    position: 'relative',
-                    userSelect: 'none',
-                    touchAction: 'none',
-                }}
-            >
-                {/* Up Button */}
-                <Box
-                    onClick={() => currentSubTab > 0 && setCurrentSubTab(prev => prev - 1)}
-                    sx={{
-                        width: 32,
-                        height: 32,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: '50%',
-                        border: '1px solid',
-                        borderColor: currentSubTab > 0 ? 'primary.main' : 'rgba(255, 255, 255, 0.2)',
-                        bgcolor: currentSubTab > 0 ? 'rgba(0, 229, 255, 0.1)' : 'transparent',
-                        cursor: currentSubTab > 0 ? 'pointer' : 'default',
-                        opacity: currentSubTab > 0 ? 1 : 0.3,
-                        pointerEvents: 'auto',
-                        transition: 'all 0.3s',
-                        '&:active': currentSubTab > 0 ? {
-                            transform: 'scale(0.9)',
-                            bgcolor: 'rgba(0, 229, 255, 0.2)',
-                        } : {},
-                    }}
-                >
-                    <KeyboardArrowUpIcon 
-                        sx={{ 
-                            color: currentSubTab > 0 ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
-                            fontSize: '1.2rem',
-                        }} 
-                    />
-                </Box>
-                
-                {/* Sub-tab Indicator Dots */}
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    {subTabs.map((_, index) => (
-                        <Box
-                            key={index}
-                            sx={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                bgcolor: index === currentSubTab ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
-                                boxShadow: index === currentSubTab ? '0 0 8px rgba(0, 229, 255, 0.8)' : 'none',
-                                transition: 'all 0.3s',
-                            }}
-                        />
-                    ))}
-                </Box>
-
-                {/* Down Button */}
-                <Box
-                    onClick={() => currentSubTab < subTabs.length - 1 && setCurrentSubTab(prev => prev + 1)}
-                    sx={{
-                        width: 32,
-                        height: 32,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: '50%',
-                        border: '1px solid',
-                        borderColor: currentSubTab < subTabs.length - 1 ? 'primary.main' : 'rgba(255, 255, 255, 0.2)',
-                        bgcolor: currentSubTab < subTabs.length - 1 ? 'rgba(0, 229, 255, 0.1)' : 'transparent',
-                        cursor: currentSubTab < subTabs.length - 1 ? 'pointer' : 'default',
-                        opacity: currentSubTab < subTabs.length - 1 ? 1 : 0.3,
-                        pointerEvents: 'auto',
-                        transition: 'all 0.3s',
-                        '&:active': currentSubTab < subTabs.length - 1 ? {
-                            transform: 'scale(0.9)',
-                            bgcolor: 'rgba(0, 229, 255, 0.2)',
-                        } : {},
-                    }}
-                >
-                    <KeyboardArrowDownIcon 
-                        sx={{ 
-                            color: currentSubTab < subTabs.length - 1 ? 'primary.main' : 'rgba(255, 255, 255, 0.3)',
-                            fontSize: '1.2rem',
-                        }} 
-                    />
-                </Box>
-            </Box>
+            <SwipeNavRail
+                side="right"
+                swipeHandlers={verticalSwipeHandlers}
+                subTabs={subTabs}
+                currentSubTab={currentSubTab}
+                setCurrentSubTab={setCurrentSubTab}
+            />
         </Box>
     );
 };
