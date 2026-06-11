@@ -64,7 +64,16 @@ class MQTTService:
             logger.warning("MQTT client not available. Using mock data.")
     
     def _load_broker_config(self):
-        """Load MQTT broker address from config.json"""
+        """Load MQTT broker address.
+
+        優先順位: 環境変数 SPHERE_MQTT_BROKER > config.json(wifi.broker) > localhost。
+        env override はローカル検証やデプロイ時に config.json を書き換えず
+        ブローカーを差し替えるために使う。
+        """
+        env_broker = os.environ.get("SPHERE_MQTT_BROKER")
+        if env_broker:
+            logger.info(f"Using MQTT broker from SPHERE_MQTT_BROKER env: {env_broker}")
+            return env_broker
         try:
             for path in CONFIG_SEARCH_PATHS:
                 if os.path.exists(path):
