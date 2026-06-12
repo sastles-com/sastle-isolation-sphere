@@ -29,12 +29,18 @@ bool LCDManager::begin(ConfigManager* config) {
     
     _config = config;
     _debugEnabled = _config->getLCDDebugEnabled();
-    
+
+#if !BOARD_HAS_LCD
+    // LCD非搭載ボード: 常に無効・no-op (update() 等は呼ばれない)
+    _debugEnabled = false;
+    DEBUG_PRINTLN("[LCDManager] No LCD on this board (no-op)");
+    return true;
+#else
     if (!_debugEnabled) {
         DEBUG_PRINTLN("[LCDManager] LCD debug disabled");
         return true;  // デバッグ無効時も成功扱い
     }
-    
+
     // M5Unified LCD初期化
     auto cfg = M5.config();
     M5.begin(cfg);
@@ -57,8 +63,9 @@ bool LCDManager::begin(ConfigManager* config) {
     drawText("LCD Ready", 10, 50, 2, TFT_GREEN);
     delay(1000);
     clear();
-    
+
     return true;
+#endif // BOARD_HAS_LCD
 }
 
 void LCDManager::update(ImageManager* imageManager) {
@@ -66,9 +73,10 @@ void LCDManager::update(ImageManager* imageManager) {
         return;
     }
     
+#if BOARD_HAS_LCD
     uint16_t imgWidth = imageManager->getWidth();
     uint16_t imgHeight = imageManager->getHeight();
-    
+
     // 画像データをLCDに描画
     // ImageManagerのRGB565データを直接転送
     // スケーリング: 320x160 → 128x128 (アスペクト比無視で全画面表示)
@@ -90,27 +98,30 @@ void LCDManager::update(ImageManager* imageManager) {
             M5.Display.writePixel(x, y, color);
         }
     }
-    
+
     M5.Display.endWrite();
+#endif // BOARD_HAS_LCD
 }
 
 void LCDManager::drawText(const char* text, int16_t x, int16_t y, uint8_t textSize, uint16_t color) {
     if (!_initialized || !_debugEnabled) {
         return;
     }
-    
+#if BOARD_HAS_LCD
     M5.Display.setTextSize(textSize);
     M5.Display.setTextColor(color);
     M5.Display.setCursor(x, y);
     M5.Display.print(text);
+#endif
 }
 
 void LCDManager::clear(uint16_t color) {
     if (!_initialized || !_debugEnabled) {
         return;
     }
-    
+#if BOARD_HAS_LCD
     M5.Display.fillScreen(color);
+#endif
 }
 
 } // namespace sastle

@@ -10,7 +10,21 @@
 #define LCDMANAGER_H
 
 #include <Arduino.h>
+#include "BoardConfig.h"
+#if BOARD_HAS_LCD
 #include <M5Unified.h>
+#else
+// LCD非搭載ボード: 関数シグネチャ維持のための色定数フォールバック (RGB565)
+#ifndef TFT_WHITE
+#define TFT_WHITE 0xFFFF
+#endif
+#ifndef TFT_BLACK
+#define TFT_BLACK 0x0000
+#endif
+#ifndef TFT_GREEN
+#define TFT_GREEN 0x07E0
+#endif
+#endif
 #include "ConfigManager.h"
 #include "ImageManager.h"
 

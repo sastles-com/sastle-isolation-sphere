@@ -50,7 +50,14 @@ bool SoundManager::begin(ConfigManager& config, uint8_t gpio) {
         Serial.println("[SoundManager] Already initialized");
         return true;
     }
-    
+
+#if !BOARD_HAS_BUZZER
+    // ブザー非搭載ボード: 無効化 (main 側は false を「サウンド無しで継続」として扱う)
+    (void)config;
+    (void)gpio;
+    Serial.println("[SoundManager] No buzzer on this board (disabled)");
+    return false;
+#else
     _gpio = gpio;
     
     // config.jsonからサウンド設定を読み込み (将来の拡張用)
@@ -65,8 +72,9 @@ bool SoundManager::begin(ConfigManager& config, uint8_t gpio) {
     
     _initialized = true;
     Serial.println("[SoundManager] Initialized successfully");
-    
+
     return true;
+#endif // BOARD_HAS_BUZZER
 }
 
 void SoundManager::end() {

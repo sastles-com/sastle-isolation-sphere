@@ -10,11 +10,12 @@
 #include <Arduino.h>
 #include "driver/ledc.h"
 #include "ConfigManager.h"
+#include "BoardConfig.h"
 
 namespace sastle {
 
-/// デフォルトGPIOピン番号 (回路図: G39 -> LS1 SPEAKER)
-constexpr uint8_t BUZZER_DEFAULT_GPIO = 39;
+/// デフォルトGPIOピン番号 (ボード別ヘッダ src/boards/board_*.h で定義)
+constexpr uint8_t BUZZER_DEFAULT_GPIO = kBuzzerGpio;
 /// LEDCチャンネル番号
 constexpr uint8_t BUZZER_LEDC_CHANNEL = 1;
 /// LEDC基本周波数
