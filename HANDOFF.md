@@ -6,6 +6,11 @@
 プロジェクト全体像・現状・環境構築・検証手順・次の作業をまとめる。
 詳細は各 `README.md` / `core/doc/` / `docs/` を参照。
 
+> **追補 (2026-06-13)**: ボード抽象化 (M5AtomS3R/XIAO)、Mac→Ubuntu の OTG 書き込みフロー、
+> ESP32 専用 P2P AP の実構築と device↔broker↔server 疎通までを完了。
+> 詳細は [`docs/HANDOFF_2026-06-13_bench_bringup.md`](docs/HANDOFF_2026-06-13_bench_bringup.md)、
+> AP 再現は [`server/scripts/setup_p2p_ap.sh`](server/scripts/setup_p2p_ap.sh)。
+
 ---
 
 ## 1. プロジェクト全体像
