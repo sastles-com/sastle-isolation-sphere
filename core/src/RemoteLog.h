@@ -22,11 +22,12 @@ class MQTTManager;  // 前方宣言 (実体は RemoteLog.cpp で include)
 class RemoteLog : public Print {
 public:
     /**
-     * @brief 送信先 MQTT とトピックを登録する
-     * @param mqtt  MQTTManager インスタンス (接続前でも可)
-     * @param topic ログを publish するトピック
+     * @brief 送信先 MQTT とトピックサフィックスを登録する
+     * @param mqtt   MQTTManager インスタンス (接続前でも可)
+     * @param suffix デバイストピックの末尾 (例 "log")。実際の宛先は
+     *               接続後に sphere/<id>/<suffix> へ動的解決される。
      */
-    void begin(MQTTManager* mqtt, const char* topic);
+    void begin(MQTTManager* mqtt, const char* suffix);
 
     // Print インターフェース: 全出力を Serial にミラーしつつ行を組み立てる
     size_t write(uint8_t c) override;
@@ -42,7 +43,7 @@ private:
     void pushBacklog(const char* line, size_t len);
 
     MQTTManager* _mqtt = nullptr;
-    const char* _topic = nullptr;
+    const char* _suffix = nullptr;
 
     char _line[240];           ///< 組み立て中の1行
     size_t _lineLen = 0;

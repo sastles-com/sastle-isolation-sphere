@@ -54,7 +54,7 @@ class MQTTService:
         # Load config from config.json
         self.broker_host = self._load_broker_config()
         self.broker_port = MQTT_BROKER_PORT
-        self.device_id = MQTT_DEVICE_ID
+        self.device_id = self._load_device_id()
         self.is_connected = False
         self._initialized = True
         
@@ -87,6 +87,27 @@ class MQTTService:
         except Exception as e:
             logger.error(f"Failed to load config: {e}, using localhost")
             return "localhost"
+
+    def _load_device_id(self):
+        """Load device ID from config.json (sphere.id).
+
+        ファームと同じ config.json を読み、デバイス ID を一致させる。
+        見つからなければ従来のハードコード値 MQTT_DEVICE_ID にフォールバック。
+        """
+        try:
+            for path in CONFIG_SEARCH_PATHS:
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        config = json.load(f)
+                        device_id = config.get("sphere", {}).get("id")
+                        if device_id:
+                            logger.info(f"Loaded device ID from config: {device_id}")
+                            return device_id
+                        break
+        except Exception as e:
+            logger.error(f"Failed to load device ID: {e}, using default")
+        logger.info(f"Using default device ID: {MQTT_DEVICE_ID}")
+        return MQTT_DEVICE_ID
 
     def _setup_client(self):
         """Initialize MQTT client"""

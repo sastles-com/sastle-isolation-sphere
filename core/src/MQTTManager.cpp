@@ -8,6 +8,12 @@ void MQTTManager::_deviceTopic(const char* suffix, char* out, size_t len) {
     snprintf(out, len, "sphere/%s/%s", _clientId, suffix);
 }
 
+bool MQTTManager::publishDevice(const char* suffix, const char* payload, bool retained) {
+    char topic[64];
+    _deviceTopic(suffix, topic, sizeof(topic));
+    return publish(topic, payload, retained);
+}
+
 MQTTManager::MQTTManager() 
     : _mqttClient(_wifiClient),
       _port(1883),

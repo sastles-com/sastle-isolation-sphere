@@ -62,7 +62,8 @@ void setup() {
     delay(2000);  // シリアルモニタ接続待ち
 
     // tee ロガーを初期化 (MQTT 接続前のログはバッファされ、接続後に送出される)
-    sastle::Log.begin(&mqtt, topics::kDeviceLog);
+    // 宛先トピックは接続後に sphere/<id>/log へ動的解決される
+    sastle::Log.begin(&mqtt, "log");
 
     sastle::Log.println("\n\n=== M5Atom S3R Network Test ===");
     
@@ -215,7 +216,7 @@ static void publishImuIfDue(unsigned long now) {
         snprintf(payload, sizeof(payload),
                  "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}",
                  w, x, y, z);
-        mqtt.publish(topics::kDeviceImu, payload, false);
+        mqtt.publishDevice("imu", payload, false);
 
         // 3秒に1回だけシリアルログ出力
         if (now - lastIMULog >= IMU_LOG_INTERVAL) {
@@ -234,7 +235,7 @@ static void publishStateIfDue(unsigned long now) {
 
     char stateBuffer[512];
     if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
-        mqtt.publish(topics::kDeviceState, stateBuffer, true); // retained = true
+        mqtt.publishDevice("state", stateBuffer, true); // retained = true
         sastle::Log.println("[MQTT] → Published state (retained)");
     }
 }

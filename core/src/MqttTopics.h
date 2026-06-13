@@ -19,12 +19,11 @@ constexpr const char* kCommandPlayback   = "sphere/all/command/playback";
 constexpr const char* kCommandLed        = "sphere/all/command/led";
 constexpr const char* kCommandSystem     = "sphere/all/command/system";
 
-// 配信 (デバイス → サーバー)
-constexpr const char* kDeviceImu         = "sphere/sphere001/imu";
-constexpr const char* kDeviceState       = "sphere/sphere001/state";
-constexpr const char* kDeviceGesture     = "sphere/sphere001/gesture";
-constexpr const char* kDeviceUiMode      = "sphere/sphere001/ui_mode";
-constexpr const char* kDeviceLog         = "sphere/sphere001/log";  // デバッグログ (USBレス時の確認用)
+// 配信 (デバイス → サーバー) はデバイス ID を含むため定数にしない。
+// MQTTManager::publishDevice("<suffix>", ...) が config.json の sphere.id から
+// "sphere/<id>/<suffix>" を実行時生成する。使用中の suffix:
+//   imu / state / gesture / ui_mode / status / log
+// サーバー側 (server/app/services/mqtt_service.py) も sphere.id を読んで対応する。
 
 } // namespace topics
 } // namespace sastle

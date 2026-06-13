@@ -63,7 +63,17 @@ public:
      * @return true パブリッシュ成功, false パブリッシュ失敗
      */
     bool publish(const char* topic, const char* payload, bool retained = false);
-    
+
+    /**
+     * @brief デバイス固有トピック "sphere/<id>/<suffix>" へパブリッシュ
+     * @param suffix トピック末尾 (例: "imu", "state", "log")
+     * @param payload ペイロード
+     * @param retained retain フラグ (デフォルト: false)
+     * @return true 成功, false 失敗
+     * @note <id> は config.json の sphere.id (= clientId)。ハードコードしない。
+     */
+    bool publishDevice(const char* suffix, const char* payload, bool retained = false);
+
     /**
      * @brief トピックをサブスクライブ
      * @param topic サブスクライブするトピック名

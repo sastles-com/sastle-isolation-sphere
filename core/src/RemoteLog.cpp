@@ -6,9 +6,9 @@ namespace sastle {
 
 RemoteLog Log;
 
-void RemoteLog::begin(MQTTManager* mqtt, const char* topic) {
+void RemoteLog::begin(MQTTManager* mqtt, const char* suffix) {
     _mqtt = mqtt;
-    _topic = topic;
+    _suffix = suffix;
 }
 
 size_t RemoteLog::write(uint8_t c) {
@@ -44,7 +44,7 @@ size_t RemoteLog::write(const uint8_t* buffer, size_t size) {
 }
 
 bool RemoteLog::publishLine(const char* line) {
-    if (!_mqtt || !_topic) {
+    if (!_mqtt || !_suffix) {
         return false;
     }
     if (_busy) {
@@ -55,7 +55,8 @@ bool RemoteLog::publishLine(const char* line) {
     _busy = true;
     bool ok = false;
     if (_mqtt->isConnected()) {
-        ok = _mqtt->publish(_topic, line, false);
+        // 宛先は接続後の clientId (config の sphere.id) から動的解決
+        ok = _mqtt->publishDevice(_suffix, line, false);
     }
     _busy = false;
     return ok;
@@ -74,7 +75,7 @@ void RemoteLog::pushBacklog(const char* line, size_t len) {
 }
 
 void RemoteLog::loop() {
-    if (_backlogLen == 0 || !_mqtt || !_topic || !_mqtt->isConnected()) {
+    if (_backlogLen == 0 || !_mqtt || !_suffix || !_mqtt->isConnected()) {
         return;
     }
     // 退避済みログを行ごとに送出
