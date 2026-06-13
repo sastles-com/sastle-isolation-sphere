@@ -1,6 +1,11 @@
-# Name,Type,SubType,Offset,Size
-nvs,data,nvs,0x9000,0x6000
-phy_init,data,phy,0xf000,0x1000
-ota_0,app,ota_0,0x10000,0x180000
-ota_1,app,ota_1,0x190000,0x180000
-spiffs,data,spiffs,0x310000,0x300000
+# Name,    Type, SubType,  Offset,   Size
+# OTA 動作には otadata (data/ota) が必須。これが無いと esp_ota_set_boot_partition が
+# 起動選択を記録できず、OTA 転送完了後の End で失敗する (OTA_END_ERROR)。
+# ota_0/ota_1/spiffs のオフセットは従来どおりに保ち、LittleFS(spiffs) のデータを温存する。
+# nvs を 0x6000→0x4000 に縮小し、空いた 0xd000 に otadata(0x2000) を挿入する。
+nvs,       data, nvs,      0x9000,   0x4000
+otadata,   data, ota,      0xd000,   0x2000
+phy_init,  data, phy,      0xf000,   0x1000
+ota_0,     app,  ota_0,    0x10000,  0x180000
+ota_1,     app,  ota_1,    0x190000, 0x180000
+spiffs,    data, spiffs,   0x310000, 0x300000

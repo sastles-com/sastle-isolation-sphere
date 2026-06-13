@@ -12,6 +12,8 @@
 #include "LCDManager.h"
 #include "CommandHandler.h"
 #include "MqttTopics.h"
+#include "RemoteLog.h"
+#include "OtaManager.h"
 
 using namespace sastle;
 
@@ -28,6 +30,7 @@ ImageManager imageManager;
 LEDManager ledManager;
 LCDManager lcdManager;
 CommandHandler commandHandler;
+OtaManager ota;
 
 unsigned long lastIMUPublish = 0;
 const unsigned long IMU_PUBLISH_INTERVAL = 100; // 100ms = 10Hz
@@ -38,7 +41,7 @@ const unsigned long STATE_PUBLISH_INTERVAL = 5000; // 5秒に1回状態パブリ
 
 // MQTTメッセージ受信コールバック
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
-    Serial.printf("\n[MQTT] ← Message on topic: %s\n", topic);
+    sastle::Log.printf("\n[MQTT] ← Message on topic: %s\n", topic);
     
     // CommandHandlerに処理を委譲
     if (strstr(topic, "/command/") != NULL) {
@@ -49,7 +52,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
         memcpy(message, payload, len);
         message[len] = '\0';
-        Serial.printf("[MQTT] Unhandled topic: %s\n", message);
+        sastle::Log.printf("[MQTT] Unhandled topic: %s\n", message);
     }
 }
 
@@ -57,28 +60,31 @@ void setup() {
     // シリアル初期化
     Serial.begin(115200);
     delay(2000);  // シリアルモニタ接続待ち
-    
-    Serial.println("\n\n=== M5Atom S3R Network Test ===");
+
+    // tee ロガーを初期化 (MQTT 接続前のログはバッファされ、接続後に送出される)
+    sastle::Log.begin(&mqtt, topics::kDeviceLog);
+
+    sastle::Log.println("\n\n=== M5Atom S3R Network Test ===");
     
     // PSRAM初期化確認
     if (psramFound()) {
-        Serial.printf("PSRAM found: %d bytes\n", ESP.getPsramSize());
-        Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
+        sastle::Log.printf("PSRAM found: %d bytes\n", ESP.getPsramSize());
+        sastle::Log.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
     } else {
-        Serial.println("PSRAM not found");
+        sastle::Log.println("PSRAM not found");
     }
     
     // LittleFS初期化
-    Serial.println("\n=== Initializing LittleFS ===");
+    sastle::Log.println("\n=== Initializing LittleFS ===");
     if (!FileManager::begin()) {
-        Serial.println("FileManager initialization FAILED!");
+        sastle::Log.println("FileManager initialization FAILED!");
         while(1) delay(1000);
     }
     
     // ConfigManager初期化とロード
-    Serial.println("\n=== Loading Configuration ===");
+    sastle::Log.println("\n=== Loading Configuration ===");
     if (!config.loadConfig("/config.json")) {
-        Serial.println("Failed to load config!");
+        sastle::Log.println("Failed to load config!");
         while(1) delay(1000);
     }
     
@@ -87,7 +93,7 @@ void setup() {
     
     // NetworkManager初期化
     if (!network.begin(config)) {
-        Serial.println("Network initialization FAILED!");
+        sastle::Log.println("Network initialization FAILED!");
         while(1) delay(1000);
     }
     
@@ -97,15 +103,15 @@ void setup() {
     // UDP開始（configから取得したポートでリッスン）
     uint16_t udpPort = config.getUDPPort();
     if (!network.beginUDP(udpPort)) {
-        Serial.println("Failed to start UDP!");
+        sastle::Log.println("Failed to start UDP!");
     } else {
-        Serial.println("UDP ready for communication");
+        sastle::Log.println("UDP ready for communication");
     }
     
     // MQTT初期化
     mqtt.setCallback(mqttCallback);
     if (!mqtt.begin(config)) {
-        Serial.println("MQTT initialization failed (will retry)");
+        sastle::Log.println("MQTT initialization failed (will retry)");
     }
     mqtt.printStatus();
     
@@ -114,13 +120,13 @@ void setup() {
     mqtt.subscribe(topics::kCommandPlayback);
     mqtt.subscribe(topics::kCommandLed);
     mqtt.subscribe(topics::kCommandSystem);
-    Serial.println("MQTT topics subscribed");
+    sastle::Log.println("MQTT topics subscribed");
     
     // CommandHandler初期化 (LEDManager初期化後に移動)
     
     // Sound初期化
     if (!sound.begin(config)) {
-        Serial.println("Sound initialization failed (continuing without sound)");
+        sastle::Log.println("Sound initialization failed (continuing without sound)");
     } else {
         // 起動音を再生
         sound.playEffect(SoundEffect::STARTUP);
@@ -128,7 +134,7 @@ void setup() {
     
     // IMU初期化
     if (!imuSensor.begin(config)) {
-        Serial.println("IMU initialization failed (continuing without IMU)");
+        sastle::Log.println("IMU initialization failed (continuing without IMU)");
     } else {
         imuSensor.printStatus();
     }
@@ -136,15 +142,15 @@ void setup() {
     // ジェスチャー初期化 (サウンドフィードバック付き)
     if (imuSensor.isInitialized()) {
         if (!gesture.begin(imuSensor, mqtt, &sound)) {
-            Serial.println("Gesture initialization failed");
+            sastle::Log.println("Gesture initialization failed");
         }
     } else {
-        Serial.println("Gesture disabled (IMU not available)");
+        sastle::Log.println("Gesture disabled (IMU not available)");
     }
     
     // ImageManager初期化
     if (!imageManager.begin(config, network)) {
-        Serial.println("ImageManager initialization failed (continuing without image)");
+        sastle::Log.println("ImageManager initialization failed (continuing without image)");
     } else {
         imageManager.printStats();
     }
@@ -158,7 +164,7 @@ void setup() {
     if (imageManager.isInitialized()) {
         IMUManager* imuPtr = imuSensor.isInitialized() ? &imuSensor : nullptr;
         if (!ledManager.begin(config, imageManager, imuPtr)) {
-            Serial.println("LEDManager initialization failed (continuing without LED)");
+            sastle::Log.println("LEDManager initialization failed (continuing without LED)");
         } else {
             ledManager.printStatus();
             
@@ -177,19 +183,23 @@ void setup() {
             
             // レンダリングタスク開始 (Core 1)
             if (!ledManager.startRenderTask(1, 2, 8192)) {
-                Serial.println("Failed to start LED render task");
+                sastle::Log.println("Failed to start LED render task");
             }
         }
     } else {
-        Serial.println("LEDManager disabled (ImageManager not available)");
+        sastle::Log.println("LEDManager disabled (ImageManager not available)");
     }
     
     // CommandHandler初期化
     if (!commandHandler.begin(&ledManager, &config)) {
-        Serial.println("CommandHandler initialization failed");
+        sastle::Log.println("CommandHandler initialization failed");
     }
-    
-    Serial.println("\n=== Setup Complete ===");
+
+    // OTA (espota) 初期化: WiFi 接続済みなので無線書き込みを受け付ける。
+    // OTA 開始時はレンダリングタスクを停止する (要件: 更新中は描画停止で可)。
+    ota.begin(&ledManager);
+
+    sastle::Log.println("\n=== Setup Complete ===");
 }
 
 // 定期的にIMUデータをMQTT送信 (10Hz)
@@ -210,7 +220,7 @@ static void publishImuIfDue(unsigned long now) {
         // 3秒に1回だけシリアルログ出力
         if (now - lastIMULog >= IMU_LOG_INTERVAL) {
             lastIMULog = now;
-            Serial.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
+            sastle::Log.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
         }
     }
 }
@@ -225,14 +235,21 @@ static void publishStateIfDue(unsigned long now) {
     char stateBuffer[512];
     if (commandHandler.getState(stateBuffer, sizeof(stateBuffer))) {
         mqtt.publish(topics::kDeviceState, stateBuffer, true); // retained = true
-        Serial.println("[MQTT] → Published state (retained)");
+        sastle::Log.println("[MQTT] → Published state (retained)");
     }
 }
 
 void loop() {
+    // OTA 要求を最優先で処理。書き込みセッション中は handle() が転送完了まで
+    // ブロックするため、描画・配信は自然に停止する (要件どおり)。
+    ota.handle();
+
     // MQTT処理 (keep-alive & メッセージ受信)
     mqtt.loop();
-    
+
+    // 退避済みデバッグログを MQTT へフラッシュ
+    sastle::Log.loop();
+
     // ImageManager更新 (UDP画像受信・デコード)
     bool newFrameReceived = false;
     if (imageManager.isInitialized()) {
@@ -270,11 +287,11 @@ void loop() {
         int len = network.read(buffer, sizeof(buffer) - 1);
         if (len > 0) {
             buffer[len] = 0;
-            Serial.printf("[%lu] Received UDP packet from %s:%d\n", 
+            sastle::Log.printf("[%lu] Received UDP packet from %s:%d\n", 
                          millis(),
                          network.remoteIP().toString().c_str(), 
                          network.remotePort());
-            Serial.printf("  Data (%d bytes): %s\n", len, (char*)buffer);
+            sastle::Log.printf("  Data (%d bytes): %s\n", len, (char*)buffer);
         }
     }
     delay(10);

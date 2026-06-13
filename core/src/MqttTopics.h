@@ -24,6 +24,7 @@ constexpr const char* kDeviceImu         = "sphere/sphere001/imu";
 constexpr const char* kDeviceState       = "sphere/sphere001/state";
 constexpr const char* kDeviceGesture     = "sphere/sphere001/gesture";
 constexpr const char* kDeviceUiMode      = "sphere/sphere001/ui_mode";
+constexpr const char* kDeviceLog         = "sphere/sphere001/log";  // デバッグログ (USBレス時の確認用)
 
 } // namespace topics
 } // namespace sastle
