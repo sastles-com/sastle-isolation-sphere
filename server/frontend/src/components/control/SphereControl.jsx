@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Button, Paper, Grid } from '@mui/material';
+import { Box, Typography, Button, Paper, Grid, Switch, FormControlLabel } from '@mui/material';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import CompassCalibrationIcon from '@mui/icons-material/CompassCalibration';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
+import ThreeDRotationIcon from '@mui/icons-material/ThreeDRotation';
 import { CompactSlider } from '../ui/CompactSlider';
 import { NeonJoystick } from '../ui/NeonJoystick';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { useStateUpdate } from '../../hooks/useSphereState';
+import { apiPost } from '../../lib/api';
 
 export const SphereControl = () => {
     const [brightness, setBrightness] = useState(80);
+    const [axisOn, setAxisOn] = useState(false);
     const [offset, setOffset] = useState({ pitch: 0, roll: 0 });
     const joystickVector = useRef({ x: 0, y: 0 });
     const requestRef = useRef();
@@ -21,7 +24,21 @@ export const SphereControl = () => {
         if (state.params && state.params.brightness !== undefined) {
             setBrightness(state.params.brightness);
         }
+        if (state.led && state.led.axis !== undefined) {
+            setAxisOn(state.led.axis);
+        }
     });
+
+    // XYZ軸インジケータの ON/OFF (REST 経由でデバイスの command/led に到達)
+    const handleAxisToggle = async (e) => {
+        const on = e.target.checked;
+        setAxisOn(on);
+        try {
+            await apiPost('/api/command/led', { axis: on });
+        } catch (err) {
+            console.error('Failed to toggle axis indicator:', err);
+        }
+    };
 
     // Send brightness command to MQTT (debounced)
     const handleBrightnessChange = (value) => {
@@ -119,6 +136,24 @@ export const SphereControl = () => {
                         RESET OFFSET
                     </Button>
                 </Box>
+            </Paper>
+
+            {/* Display Controls */}
+            <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(0, 229, 255, 0.2)' }}>
+                <Typography variant="subtitle2" sx={{ color: '#ccc', mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <ThreeDRotationIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                    DISPLAY
+                </Typography>
+                <FormControlLabel
+                    control={<Switch checked={axisOn} onChange={handleAxisToggle} />}
+                    label={
+                        <Typography variant="body2" sx={{ color: '#ccc' }}>
+                            XYZ軸表示 (<span style={{ color: '#ff5252' }}>X</span>/
+                            <span style={{ color: '#69f0ae' }}>Y</span>/
+                            <span style={{ color: '#448aff' }}>Z</span> = R/G/B、回転しても固定)
+                        </Typography>
+                    }
+                />
             </Paper>
 
             {/* System Controls */}

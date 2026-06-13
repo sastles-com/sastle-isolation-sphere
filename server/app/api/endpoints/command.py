@@ -22,8 +22,9 @@ class ParamsCommand(BaseModel):
     saturation: Optional[int] = None
 
 class LEDCommand(BaseModel):
-    mode: str  # "sphere" | "pixels" | "off"
+    mode: Optional[str] = None  # "sphere" | "pixels" | "off" (axis単独切替時は省略可)
     pixels: Optional[list] = None
+    axis: Optional[bool] = None  # XYZ軸インジケータ ON/OFF
 
 @router.post("/command/playback")
 async def send_playback_command(command: PlaybackCommand, request: Request):
