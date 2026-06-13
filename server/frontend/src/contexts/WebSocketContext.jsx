@@ -8,8 +8,12 @@ const DEFAULT_WS_PORT = '9000';
 export const WebSocketProvider = ({ children }) => {
     const [isConnected, setIsConnected] = useState(false);
     const [lastMessage, setLastMessage] = useState(null);
+    const [logs, setLogs] = useState([]);
     const ws = useRef(null);
     const reconnectTimeout = useRef(null);
+
+    const MAX_LOG_LINES = 500; // 古い行は破棄してメモリ肥大を防ぐ
+    const clearLogs = useCallback(() => setLogs([]), []);
 
     const connect = useCallback(() => {
         // Use hostname from window.location to support mobile testing on LAN
@@ -33,7 +37,18 @@ export const WebSocketProvider = ({ children }) => {
         ws.current.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                setLastMessage(data);
+                if (data.type === 'LOG_LINE') {
+                    // デバッグログはバッファに追記 (状態更新とは別経路)
+                    const entry = { line: data.payload?.line ?? '', ts: Date.now() };
+                    setLogs((prev) => {
+                        const next = [...prev, entry];
+                        return next.length > MAX_LOG_LINES
+                            ? next.slice(next.length - MAX_LOG_LINES)
+                            : next;
+                    });
+                } else {
+                    setLastMessage(data);
+                }
             } catch (e) {
                 console.error('Failed to parse WebSocket message:', e);
             }
@@ -76,7 +91,7 @@ export const WebSocketProvider = ({ children }) => {
     }, []);
 
     return (
-        <WebSocketContext.Provider value={{ isConnected, lastMessage, sendMessage }}>
+        <WebSocketContext.Provider value={{ isConnected, lastMessage, sendMessage, logs, clearLogs }}>
             {children}
         </WebSocketContext.Provider>
     );

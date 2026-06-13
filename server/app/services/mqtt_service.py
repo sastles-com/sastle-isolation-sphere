@@ -115,6 +115,11 @@ class MQTTService:
             command_topic = MQTT_COMMAND_TOPIC_WILDCARD
             client.subscribe(command_topic)
             logger.info(f"Subscribed to command topic: {command_topic}")
+
+            # Subscribe to debug log topic (plain-text lines, forwarded to UI)
+            log_topic = f"sphere/{self.device_id}/log"
+            client.subscribe(log_topic)
+            logger.info(f"Subscribed to topic: {log_topic}")
         else:
             logger.error(f"Failed to connect to MQTT broker. Return code: {rc}")
             self.is_connected = False
@@ -128,10 +133,16 @@ class MQTTService:
         """Callback when message received from MQTT broker"""
         try:
             topic = msg.topic
+
+            # デバッグログはプレーンテキストなので JSON パース前に処理する
+            if topic.endswith("/log"):
+                self._handle_log(msg.payload.decode(errors="replace"))
+                return
+
             payload = json.loads(msg.payload.decode())
-            
+
             logger.debug(f"Received MQTT message on {topic}: {payload}")
-            
+
             # Handle command topics
             if "/command/" in topic:
                 self._handle_command(topic, payload)
@@ -141,11 +152,23 @@ class MQTTService:
             # Handle status data
             elif topic.endswith("/status"):
                 self._handle_status_data(payload)
-                
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode MQTT message: {e}")
         except Exception as e:
             logger.error(f"Error handling MQTT message: {e}")
+
+    def _handle_log(self, line: str):
+        """Forward a plain-text device debug log line to WebSocket clients"""
+        if not self.state_manager:
+            return
+        line = line.rstrip("\r\n")
+        if not line:
+            return
+        self._submit_coroutine(
+            self.state_manager.broadcast_log(line),
+            "broadcast log line"
+        )
 
     def _submit_coroutine(self, coro, context: str) -> bool:
         """MQTTスレッドからイベントループにコルーチンを投入する共通処理"""

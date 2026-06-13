@@ -53,6 +53,11 @@ export const TAB_CONFIG = [
                 id: 'pattern_control',
                 name: 'Pattern',
                 description: 'Pattern control'
+            },
+            {
+                id: 'debug_log',
+                name: 'Logs',
+                description: 'Device debug log'
             }
         ]
     }

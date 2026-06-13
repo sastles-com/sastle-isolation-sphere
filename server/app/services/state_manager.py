@@ -310,8 +310,10 @@ class StateManager:
 
     async def _notify_observers(self):
         """WebSocketクライアントに状態を配信"""
-        message = {"type": "STATE_UPDATE", "payload": self._state}
-        
+        await self._broadcast({"type": "STATE_UPDATE", "payload": self._state})
+
+    async def _broadcast(self, message: Dict[str, Any]):
+        """全 WebSocket クライアントへ任意のメッセージを配信する共通処理"""
         disconnected = []
         for observer in self._observers:
             try:
@@ -319,7 +321,11 @@ class StateManager:
             except Exception as e:
                 logger.warning(f"Failed to send to observer: {e}")
                 disconnected.append(observer)
-        
+
         # 切断されたクライアントを削除
         for observer in disconnected:
             self.remove_observer(observer)
+
+    async def broadcast_log(self, line: str):
+        """デバイスのデバッグログ1行を配信する (状態スナップショットには保持しない)"""
+        await self._broadcast({"type": "LOG_LINE", "payload": {"line": line}})

@@ -10,6 +10,7 @@ import { SphereControl } from '../components/control/SphereControl';
 import { PatternControl } from '../components/control/PatternControl';
 import { ConfigEditor } from '../components/params/ConfigEditor';
 import { ParamsEditor } from '../components/params/ParamsEditor';
+import { LogPanel } from '../components/debug/LogPanel';
 import { TAB_CONFIG } from '../config/tabConfig';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useStateUpdate } from '../hooks/useSphereState';
@@ -104,6 +105,8 @@ export const Dashboard = () => {
     const renderControlContent = (subTab) => {
         if (subTab.id === 'sphere_control') {
             return <SphereControl />;
+        } else if (subTab.id === 'debug_log') {
+            return <LogPanel />;
         } else {
             return <PatternControl />;
         }
