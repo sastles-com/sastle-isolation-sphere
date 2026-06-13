@@ -1,15 +1,21 @@
 # 開発引き継ぎ資料 — Isolation Sphere
 
-最終更新: 2026-06-11 / 作成環境: macOS (開発機) → 引き継ぎ先: サーバー稼働 PC (Ubuntu)
+最終更新: 2026-06-13 / 作成環境: macOS (開発機) → 引き継ぎ先: サーバー稼働 PC (Ubuntu)
 
 このドキュメントは、**サーバーを稼働させている PC 上で開発を継続する**ための引き継ぎ資料。
 プロジェクト全体像・現状・環境構築・検証手順・次の作業をまとめる。
 詳細は各 `README.md` / `core/doc/` / `docs/` を参照。
 
-> **追補 (2026-06-13)**: ボード抽象化 (M5AtomS3R/XIAO)、Mac→Ubuntu の OTG 書き込みフロー、
+> **追補 (2026-06-13a)**: ボード抽象化 (M5AtomS3R/XIAO)、Mac→Ubuntu の OTG 書き込みフロー、
 > ESP32 専用 P2P AP の実構築と device↔broker↔server 疎通までを完了。
 > 詳細は [`docs/HANDOFF_2026-06-13_bench_bringup.md`](docs/HANDOFF_2026-06-13_bench_bringup.md)、
 > AP 再現は [`server/scripts/setup_p2p_ap.sh`](server/scripts/setup_p2p_ap.sh)。
+>
+> **追補 (2026-06-13b)**: ボール封止で USB が届かない開発機向けに **ケーブルレス開発**を実装・実機確認。
+> ① **WiFi 無線書き込み (espota OTA)** — GMKTec から `pio run -e atoms3r_ota -t upload`。
+> ② **MQTT デバッグログ** — `sphere/sphere001/log` を Web UI (**CONTROL → Logs** タブ) にリアルタイム表示。
+> 途中で **partitions.csv の otadata 欠落バグ**を発見・修正 (これが無いと OTA は永遠に有効化失敗)。
+> 詳細は §5 完了済み / §8 次にやること を参照。
 
 ---
 
@@ -132,11 +138,13 @@ pio run -e led_drive_test -t upload   # LED駆動ベンチ検証ファーム
 | デバイス→サーバー | `sphere/sphere001/imu` | `{"w","x","y","z"}` クォータニオン |
 | デバイス→サーバー | `sphere/sphere001/state` | デバイス状態 |
 | デバイス→サーバー | `sphere/sphere001/status` | `"online"`/`"offline"` (retained) |
+| デバイス→サーバー | `sphere/sphere001/log` | デバッグログ1行 (**プレーンテキスト**, JSON ではない) |
 | サーバー→デバイス | `sphere/all/command/{playback,params,led,system}` | コマンド (例 `{"brightness":85}`) |
 | サーバー→デバイス | `sphere/all/state` | 全状態 (retained, ブロードキャスト) |
 
 REST API (FastAPI): `/api/command/{playback,params,led}`, `/api/config`, `/api/playlist`, `/health`。
 WebSocket `/ws` は接続時に現在状態を送り、以後 `STATE_UPDATE` をプッシュ。
+ログは別種メッセージ `{"type":"LOG_LINE","payload":{"line":...}}` で配信 (状態には混ぜない)。
 
 ---
 
@@ -152,6 +160,24 @@ WebSocket `/ws` は接続時に現在状態を送り、以後 `STATE_UPDATE` を
 - **サーバー⇔デバイス通信検証ハーネス** (`server/scripts/verify_server_comm.*`):
   実機不要で MQTT 契約を双方向検証。**4/4 ケース成功を確認済み**。
   詳細 `server/scripts/README_verify_comm.md`。
+- **ケーブルレス開発 (WiFi 無線書き込み + MQTT ログ)** — 2026-06-13、実機 (AtomS3R) で end-to-end 確認済み:
+  - **espota OTA**: `core/src/OtaManager.{h,cpp}` (ArduinoOTA ラッパー、OTA 開始時に
+    `LEDManager::stopRenderTask()` で描画停止)。`platformio.ini` に `[env:atoms3r_ota]` /
+    `[env:xiao_esp32s3_ota]` を追加。GMKTec から `pio run -e atoms3r_ota -t upload` で
+    無線書き込み → 自動リブートまで確認。
+  - **partitions.csv の otadata 修正**: 旧テーブルは ota_0/ota_1 はあるが **otadata 欠落**で、
+    OTA 転送 100% 成功でも `esp_ota_set_boot_partition` が記録できず `End failed`
+    (`Could Not Activate The Firmware`) になっていた。nvs を 0x6000→0x4000 に縮小し
+    0xd000 に `otadata,data,ota,0x2000` を挿入 (ota_0/ota_1/spiffs のオフセット不変=
+    LittleFS データ温存)。**OTA を使う ESP32 では otadata 必須**。
+  - **MQTT デバッグログ**: `core/src/RemoteLog.{h,cpp}` が Serial と MQTT へ tee
+    (`sastle::Log`、MQTT 未接続時は最大 4KB バックログに退避→接続後フラッシュ)。
+    トピック `sphere/sphere001/log`。`common.h` の `DEBUG_*` と main.cpp の Serial 出力を経由。
+    サーバー側は `mqtt_service.py` が購読 (JSON パース前にテキスト分岐) →
+    `state_manager.broadcast_log()` で WS へ `LOG_LINE` 配信。UI は **CONTROL → Logs** タブ
+    (`frontend/src/components/debug/LogPanel.jsx`)。
+  - 詳細手順はメモリ `ubuntu-flashing-environment` に記録。**OTA 対応ファームは初回のみ
+    USB(OTG) で焼く必要がある** (ブートストラップ)。
 
 ### 確定したハード前提 (ユーザー確認済み 2026-06-11)
 
@@ -209,6 +235,29 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
 3. **実機通信結合**: `core/data/config.json` の `wifi.broker` を実ブローカー IP に設定、
    ファーム書き込み、`mosquitto_sub -t 'sphere/#' -v` で実機の配信/受信を観測。
 4. **基板到着後**: core-M5atom-FPC 実機で BNO055(G2/G1) + スピーカー(GPIO08) 込み統合確認。
+
+### ケーブルレス開発まわりの残作業 (2026-06-13b で実装した OTA/ログの磨き込み)
+
+5. **OTA の堅牢化**:
+   - **ロールバック安全策**: 現状は新ファームを無条件 boot。起動失敗時に旧パーティションへ
+     自動復帰する仕組み (`esp_ota_mark_app_valid_cancel_rollback` + CONFIG_BOOTLOADER_APP_ROLLBACK)
+     が無いと、OTA で壊れたファームを焼くと封止状態で文鎮化する。**封止前に要対応**。
+   - **OTA パスワードを config 化**: 現状 `OtaManager.cpp` の `kOtaPassword` と
+     `platformio.ini` の `--auth` に `isolation-sphere-ota` をハードコード。config.json へ移す。
+   - **XIAO ESP32S3 での espota 実機確認** (現状 AtomS3R のみ確認済み。env は用意済み)。
+   - **OTA 中の安全性**: 現状 LED 描画タスクのみ停止。IMU/MQTT タスク等も含め検証。
+6. **MQTT ログの改善**:
+   - **ノイズ低減 / ログレベル**: IMU(3秒毎)・state(5秒毎) ログが log トピックを占有する。
+     レベル制御 (`g_debugEnabled` 連動 or トピック分離) や UI 側フィルタを検討。
+   - **生 ESP_LOG の取りこぼし**: `sastle::Log` 経由のみ MQTT に乗る。`log_e`/`ESP_LOGx`
+     (ライブラリ内部ログ) は Serial にしか出ない。`esp_log_set_vprintf` フックで拾うか検討。
+   - **frontend バンドル肥大警告**: ビルドで 500KB 超の警告。code-split は未対応 (動作影響なし)。
+7. **IP 体系の統一**: `config.json` は旧 `192.168.49.x`、新 server 仕様書は `192.168.100.1/24`。
+   現状ベンチは旧体系で稼働。将来どちらかに統一する (メモリ `ubuntu-flashing-environment` 参照)。
+8. **デバイス ID の動的化**: `sphere001` がファーム/サーバー/OTA ホスト名にハードコード。
+   複数台運用するなら config 駆動に。
+9. **GMKTec の git 整合**: ベンチ機は `chore/refactor-deps-audit` ブランチで audit 作業が
+   未コミット混在。動作実体は main と一致済み。audit 一段落後に `git stash -u` → main 切替 → pull。
 
 ---
 
