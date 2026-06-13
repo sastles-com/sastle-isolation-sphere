@@ -127,11 +127,34 @@ public:
     void setBrightness(uint8_t brightness);
     
     /**
+     * @brief 起動オープニングパターンを再生 (ブロッキング)
+     *
+     * RGB3点の光点が北極→南極へ螺旋降下し、南極で合流後、3点が一斉に
+     * 北極へ上昇、最後に全球が虹色に瞬いて消灯する。RGB各チャンネルと
+     * 全LEDアドレッシングが機能していることを ~1秒で示す。
+     * レンダリングタスク開始前 (setup内) に呼ぶこと。
+     *
+     * @param durationMs 総再生時間 (ミリ秒)
+     */
+    void playOpening(uint16_t durationMs);
+
+    /**
      * @brief IMU姿勢補正を有効化/無効化
-     * 
+     *
      * @param enabled true: 有効, false: 無効
      */
     void setIMUCompensation(bool enabled);
+
+    /**
+     * @brief XYZ軸インジケータ(オーバーレイ)の有効化/無効化
+     *
+     * +X=赤 / +Y=緑 / +Z=青 のマーカーを描画に重畳する(負方向は暗色)。
+     * IMU姿勢補正と同じ座標系で描くため、球体を回しても軸はワールド空間に
+     * 固定されて見える(IMU補正が有効な場合)。
+     * @param enabled true: 表示, false: 非表示
+     */
+    void setAxisIndicator(bool enabled) { _axisIndicatorEnabled = enabled; }
+    bool getAxisIndicator() const { return _axisIndicatorEnabled; }
     
     /**
      * @brief デバッグ情報を出力
@@ -195,16 +218,29 @@ private:
     void updateLEDBuffer();
     
     /**
-     * @brief 特定ストリップのLEDバッファを更新
-     * @param stripIndex ストリップ番号 (0-3)
+     * @brief IMU補正OFF時用の静的UV→ピクセル座標を事前計算する
      */
-    void updateStripBuffer(uint8_t stripIndex);
+    void precomputeStaticUV();
     
     /**
      * @brief 全ストリップのLED出力を並列実行 (DMA)
      * @note RMTハードウェアにより4ストリップが並列出力される
      */
     void showParallel();
+
+    /**
+     * @brief オープニング用: 3つの光点中心(単位ベクトル)で1フレーム描画して出力
+     * @param dir [3][3] = 各光点(R/G/B)の中心方向 (単位ベクトル)
+     * @note 各LEDと光点中心の角距離でガウス減衰させ、3色を加算合成する。
+     */
+    void renderOpeningDots(const float dir[3][3]);
+
+    /**
+     * @brief XYZ軸マーカーを1LEDに重畳する (updateStripBuffer から呼ぶ)
+     * @param led 対象LED色 (入出力、内容色に軸色をブレンド)
+     * @param x,y,z そのLEDのワールド系方向 (IMU補正後の単位ベクトル)
+     */
+    void overlayAxisIndicator(CRGB& led, float x, float y, float z);
     
     // メンバー変数
     bool _initialized;               ///< 初期化フラグ
@@ -215,6 +251,7 @@ private:
     IMUManager* _imuManager;         ///< IMUマネージャーへのポインタ（姿勢補正用）
     
     bool _imuCompensationEnabled;    ///< IMU姿勢補正の有効化フラグ
+    bool _axisIndicatorEnabled = false;  ///< XYZ軸インジケータ表示フラグ
     
     TaskHandle_t _renderTaskHandle;  ///< レンダリングタスクハンドル
     SemaphoreHandle_t _frameReadySemaphore;  ///< フレーム準備完了セマフォ
@@ -222,6 +259,8 @@ private:
     CRGB* _ledBuffer;                ///< LEDバッファ (SRAM)
     LEDCoord* _ledLayout;            ///< LEDレイアウト (SRAM)
     uint16_t _numLEDs;               ///< LED総数
+    uint16_t* _pxLUT = nullptr;      ///< 静的UV→ピクセルX (IMU補正OFF時, 事前計算)
+    uint16_t* _pyLUT = nullptr;      ///< 静的UV→ピクセルY (IMU補正OFF時, 事前計算)
     
     uint8_t _stripPins[4];           ///< ストリップGPIOピン
     uint16_t _ledsPerStrip[4];       ///< ストリップ毎のLED数

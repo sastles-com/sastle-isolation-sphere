@@ -38,21 +38,31 @@ unsigned long lastIMULog = 0;
 const unsigned long IMU_LOG_INTERVAL = 3000; // 3秒に1回ログ出力
 unsigned long lastStatePublish = 0;
 const unsigned long STATE_PUBLISH_INTERVAL = 5000; // 5秒に1回状態パブリッシュ
+unsigned long lastPerfLog = 0;
+const unsigned long PERF_LOG_INTERVAL = 2000; // 2秒に1回 性能計測ログ
 
 // MQTTメッセージ受信コールバック
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
-    sastle::Log.printf("\n[MQTT] ← Message on topic: %s\n", topic);
-    
+    // 重要: PubSubClient は送受信で同一バッファを使う。コールバック内で
+    // publish (= sastle::Log のMQTT送出やコマンド応答) を行うと、受信中の
+    // topic/payload が上書き破損する。先にローカルへ退避してから処理する。
+    char topicCopy[128];
+    strncpy(topicCopy, topic, sizeof(topicCopy) - 1);
+    topicCopy[sizeof(topicCopy) - 1] = '\0';
+
+    char payloadCopy[512];
+    unsigned int len = (length < sizeof(payloadCopy) - 1) ? length : sizeof(payloadCopy) - 1;
+    memcpy(payloadCopy, payload, len);
+    payloadCopy[len] = '\0';
+
+    sastle::Log.printf("\n[MQTT] ← Message on topic: %s\n", topicCopy);
+
     // CommandHandlerに処理を委譲
-    if (strstr(topic, "/command/") != NULL) {
-        commandHandler.handleMessage(topic, payload, length);
+    if (strstr(topicCopy, "/command/") != NULL) {
+        commandHandler.handleMessage(topicCopy, (uint8_t*)payloadCopy, len);
     } else {
         // その他のトピック（例: sphere/all/state）
-        char message[512];
-        int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
-        memcpy(message, payload, len);
-        message[len] = '\0';
-        sastle::Log.printf("[MQTT] Unhandled topic: %s\n", message);
+        sastle::Log.printf("[MQTT] Unhandled topic payload: %s\n", payloadCopy);
     }
 }
 
@@ -168,20 +178,15 @@ void setup() {
             sastle::Log.println("LEDManager initialization failed (continuing without LED)");
         } else {
             ledManager.printStatus();
-            
-            // 起動時LEDテスト: 赤→緑→青
-            ledManager.fillSolid(255, 0, 0);
-            ledManager.show();
-            delay(500);
-            ledManager.fillSolid(0, 255, 0);
-            ledManager.show();
-            delay(500);
-            ledManager.fillSolid(0, 0, 255);
-            ledManager.show();
-            delay(500);
-            ledManager.fillSolid(0, 0, 0);
-            ledManager.show();
-            
+
+            // 起動オープニングパターン (config でスキップ可)
+            if (config.getOpeningActionEnabled()) {
+                ledManager.playOpening(config.getOpeningActionDurationMs());
+            } else {
+                ledManager.fillSolid(0, 0, 0);
+                ledManager.show();
+            }
+
             // レンダリングタスク開始 (Core 1)
             if (!ledManager.startRenderTask(1, 2, 8192)) {
                 sastle::Log.println("Failed to start LED render task");
@@ -240,6 +245,22 @@ static void publishStateIfDue(unsigned long now) {
     }
 }
 
+// 性能計測ログ (2秒間隔): マッピング/出力/デコード時間と FPS を MQTT ログへ
+static void publishPerfStatsIfDue(unsigned long now) {
+    if (now - lastPerfLog < PERF_LOG_INTERVAL) {
+        return;
+    }
+    lastPerfLog = now;
+
+    LEDStats led = ledManager.getStats();
+    ImageStats img = imageManager.getStats();
+    sastle::Log.printf(
+        "[PERF] render_fps=%.1f map=%luus out=%luus | img_fps=%.1f decode=%luus jpeg=%uB recv=%lu | heap=%u\n",
+        led.fps, (unsigned long)led.mapping_time_us, (unsigned long)led.output_time_us,
+        img.fps, (unsigned long)img.decode_time_us, (unsigned)img.last_jpeg_size,
+        (unsigned long)img.frames_received, (unsigned)ESP.getFreeHeap());
+}
+
 void loop() {
     // OTA 要求を最優先で処理。書き込みセッション中は handle() が転送完了まで
     // ブロックするため、描画・配信は自然に停止する (要件どおり)。
@@ -279,6 +300,9 @@ void loop() {
 
     // 状態パブリッシュはIMUの有無にかかわらず実施 (retained)
     publishStateIfDue(now);
+
+    // 性能計測ログ
+    publishPerfStatsIfDue(now);
 
 
     // UDP受信チェック

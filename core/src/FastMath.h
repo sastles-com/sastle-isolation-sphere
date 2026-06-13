@@ -3,46 +3,24 @@
 
 #include <cmath>
 
-// LED座標変換(sphereToUV)用の高速近似計算関数群。
-// 標準の sqrtf/atan2f とは数値結果が微妙に異なるため、
-// 描画互換性を保つ目的で実装をそのまま維持している。
-
-static inline float _sqrtinv(float a){
-
-    float x, h, g;
-    int e;
-
-    // enhalf the exponent for a half digit initial accuracy
-    frexp(a, &e);
-    x = ldexp(1.0, -e >> 1);
-//    Serial.printf("    a=%6.4f  e = %6.4f   x = %6.4f \n", a, e, x);
-
-    // 1/sqrt(a) 4th order convergence
-    g = 1.0;
-    while(fabs(h=1.0-a*x*x) < fabs(g)){
-        x += x * (h * (8.0 + h * (6.0 + 5.0 * h)) / 16.0);
-        g = h;
-//        Serial.printf("     G=%6.4f  x = %6.4f \n", g, x);
-    }
-    return(x);
-}
+// LED座標変換(sphereToUV)用の高速計算関数群。
+// 以前は double 演算(frexp/ldexp + 4次収束ループ + double literal)で、
+// ESP32 では double がソフトエミュレーションのため非常に遅かった
+// (実測: マッピング 27ms/フレーム)。数式・出力規約はそのままに、
+// ハードウェア単精度 sqrtf と float 演算へ置き換えて高速化する。
+// (px/py は最終的に整数量子化されるため、描画結果は実質同一)
 
 static inline float _sqrt(float a){
-    float ret;
-
-    if(a < 0){
-        return 0.0;
+    if(a < 0.0f){
+        return 0.0f;
     }
-    ret = a * _sqrtinv(a);
-//    Serial.println(ret);
-
-    return (ret);
+    return sqrtf(a);  // ESP32-S3 FPU のハードウェア単精度平方根
 }
 
 
 static inline float _atan2(float _y, float _x){
-    float x = abs(_x);
-    float y = abs(_y);
+    float x = fabsf(_x);
+    float y = fabsf(_y);
     float z;
     bool c;
 
@@ -54,33 +32,31 @@ static inline float _atan2(float _y, float _x){
       z = x/y;
       c = false;
     }
-    float a = 8.0928*z*z*z*z-19.657*z*z*z-0.9258*z*z+57.511*z-0.0083;
-    if(_x == 0.0){
-        if(_y > 0.0)    a = 90.0;
-        else            a = -90.0;
+    float a = 8.0928f*z*z*z*z-19.657f*z*z*z-0.9258f*z*z+57.511f*z-0.0083f;
+    if(_x == 0.0f){
+        if(_y > 0.0f)    a = 90.0f;
+        else             a = -90.0f;
     }
     if(c){    // a<1
-        if(_x > 0.0){
-            if(_y < 0.0)  a *= -1.0;
+        if(_x > 0.0f){
+            if(_y < 0.0f)  a *= -1.0f;
         }
-        if(_x < 0.0){
-            if(_y > 0.0)  a = 180.0 - a;
-            if(_y < 0.0)  a = a - 180.0;
+        if(_x < 0.0f){
+            if(_y > 0.0f)  a = 180.0f - a;
+            if(_y < 0.0f)  a = a - 180.0f;
         }
     }
     if(!c){   // a>1
-        if(_x > 0.0){
-            if(_y > 0.0)  a = 90.0 - a;
-            if(_y < 0.0)  a = a - 90.0;
+        if(_x > 0.0f){
+            if(_y > 0.0f)  a = 90.0f - a;
+            if(_y < 0.0f)  a = a - 90.0f;
         }
-        if(_x < 0.0){
-            if(_y > 0.0)  a = a + 90.0;
-            if(_y < 0.0)  a = -a - 90.0;
+        if(_x < 0.0f){
+            if(_y > 0.0f)  a = a + 90.0f;
+            if(_y < 0.0f)  a = -a - 90.0f;
         }
     }
-    // delay(1);
-    // float rad = atan2(y, x);
-    return a/180.0;
+    return a/180.0f;
 }
 
 #endif /* __FAST_MATH_H__ */

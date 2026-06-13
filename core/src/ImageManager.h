@@ -41,6 +41,7 @@ struct ImageStats {
     float fps;                   ///< 現在のFPS
     unsigned long last_frame_time; ///< 最終フレーム受信時刻
     size_t last_jpeg_size;       ///< 最終JPEG画像サイズ
+    uint32_t decode_time_us;     ///< 最後のJPEGデコード所要時間 (μs)
 };
 
 /**
@@ -161,7 +162,8 @@ private:
     uint32_t _fpsFrameCount;     ///< FPS計測用フレーム数
     float _currentFPS;           ///< 現在のFPS
     size_t _lastJpegSize;        ///< 最終JPEGサイズ
-    
+    uint32_t _lastDecodeUs = 0;  ///< 最後のJPEGデコード所要時間 (μs)
+
     FrameReadyCallback _frameReadyCallback;  ///< フレーム準備完了コールバック
     
     /**

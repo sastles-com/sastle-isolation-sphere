@@ -55,7 +55,10 @@ LEDManager::~LEDManager() {
         free(_ledLayout);
         _ledLayout = nullptr;
     }
-    
+
+    if (_pxLUT) { free(_pxLUT); _pxLUT = nullptr; }
+    if (_pyLUT) { free(_pyLUT); _pyLUT = nullptr; }
+
     if (_frameReadySemaphore) {
         vSemaphoreDelete(_frameReadySemaphore);
         _frameReadySemaphore = nullptr;
@@ -98,6 +101,9 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     }
     
     Serial.printf("[LEDManager] Allocated LED buffer: %d bytes\n", _numLEDs * sizeof(CRGB));
+
+    // IMU補正OFF時用に静的UV→ピクセル座標を事前計算 (毎フレームの三角関数を回避)
+    precomputeStaticUV();
     
     // GPIO設定 (BoardConfig.h で一元管理)
     _stripPins[0] = kLedPin0;
@@ -401,72 +407,105 @@ void LEDManager::renderFrame() {
     }
 }
 
+void LEDManager::precomputeStaticUV() {
+    if (!_ledLayout || !_imageManager) {
+        return;
+    }
+    _pxLUT = (uint16_t*)malloc(_numLEDs * sizeof(uint16_t));
+    _pyLUT = (uint16_t*)malloc(_numLEDs * sizeof(uint16_t));
+    if (!_pxLUT || !_pyLUT) {
+        Serial.println("[LEDManager] Static UV LUT alloc failed (fallback: per-frame calc)");
+        if (_pxLUT) { free(_pxLUT); _pxLUT = nullptr; }
+        if (_pyLUT) { free(_pyLUT); _pyLUT = nullptr; }
+        return;
+    }
+    uint16_t w = _imageManager->getWidth();
+    uint16_t h = _imageManager->getHeight();
+    for (uint16_t i = 0; i < _numLEDs; i++) {
+        float u, v;
+        sphereToUV(_ledLayout[i].x, _ledLayout[i].y, _ledLayout[i].z, u, v);
+        _pxLUT[i] = (uint16_t)(u * (w - 1));
+        _pyLUT[i] = (uint16_t)(v * (h - 1));
+    }
+    Serial.printf("[LEDManager] Precomputed static UV LUT (%d LEDs)\n", _numLEDs);
+}
+
 void LEDManager::updateLEDBuffer() {
     if (!_imageManager || !_ledLayout || !_ledBuffer) {
         return;
     }
-    
-    // 全ストリップを順次更新
-    for (uint8_t strip = 0; strip < 4; strip++) {
-        updateStripBuffer(strip);
-    }
-}
 
-void LEDManager::updateStripBuffer(uint8_t stripIndex) {
-    if (stripIndex >= 4 || !_imageManager || !_ledLayout) {
-        return;
-    }
-    
-    uint16_t imgWidth = _imageManager->getWidth();
-    uint16_t imgHeight = _imageManager->getHeight();
-    
-    // IMU姿勢補正用のquaternionを取得（全ストリップ共通）
+    const uint16_t imgWidth = _imageManager->getWidth();
+    const uint16_t imgHeight = _imageManager->getHeight();
+
+    // IMU姿勢補正用のquaternion(共役=逆回転)を1回だけ取得
     float qw = 1.0f, qx = 0.0f, qy = 0.0f, qz = 0.0f;
     bool useIMU = false;
-    
     if (_imuCompensationEnabled && _imuManager && _imuManager->isInitialized()) {
         if (_imuManager->getQuaternion(qw, qx, qy, qz)) {
-            // Quaternionの共役（逆回転）
-            qx = -qx;
-            qy = -qy;
-            qz = -qz;
+            qx = -qx; qy = -qy; qz = -qz;
             useIMU = true;
         }
     }
-    
-    // このストリップのLEDのみ処理
+
+    // 全LEDを1パスで処理 (旧: strip毎に4回×全LED走査=3200反復 → 800反復)
     for (uint16_t i = 0; i < _numLEDs; i++) {
-        LEDCoord& coord = _ledLayout[i];
-        
-        // ストリップフィルタ
-        if (coord.strip != stripIndex) {
-            continue;
-        }
-        
-        // LEDの3D座標をコピー
-        float x = coord.x;
-        float y = coord.y;
-        float z = coord.z;
-        
-        // IMU姿勢補正
+        uint16_t px, py;
+        // 軸オーバーレイ用の(ワールド系)座標
+        float wx = _ledLayout[i].x, wy = _ledLayout[i].y, wz = _ledLayout[i].z;
+
         if (useIMU) {
-            rotateByQuaternion(x, y, z, qw, qx, qy, qz);
+            // 姿勢が毎フレーム変わるので回転 + UV変換を実施
+            rotateByQuaternion(wx, wy, wz, qw, qx, qy, qz);
+            float u, v;
+            sphereToUV(wx, wy, wz, u, v);
+            px = (uint16_t)(u * (imgWidth - 1));
+            py = (uint16_t)(v * (imgHeight - 1));
+        } else if (_pxLUT) {
+            // IMU補正OFF: 事前計算したピクセル座標を引くだけ (三角関数ゼロ)
+            px = _pxLUT[i];
+            py = _pyLUT[i];
+        } else {
+            float u, v;
+            sphereToUV(wx, wy, wz, u, v);
+            px = (uint16_t)(u * (imgWidth - 1));
+            py = (uint16_t)(v * (imgHeight - 1));
         }
-        
-        // 3D座標 → UV座標変換（高速近似）
-        float u, v;
-        sphereToUV(x, y, z, u, v);
-        
-        // UV → ピクセル座標
-        uint16_t px = (uint16_t)(u * (imgWidth - 1));
-        uint16_t py = (uint16_t)(v * (imgHeight - 1));
-        
-        // ピクセル色取得
+
         uint8_t r, g, b;
         _imageManager->getPixel(px, py, r, g, b);
-        
-        // LEDバッファに設定
         _ledBuffer[i] = CRGB(r, g, b);
+
+        // XYZ軸インジケータを重畳 (IMU時は wx,wy,wz=ワールド座標, OFF時はbody座標)
+        if (_axisIndicatorEnabled) {
+            overlayAxisIndicator(_ledBuffer[i], wx, wy, wz);
+        }
+    }
+}
+
+void LEDManager::overlayAxisIndicator(CRGB& led, float x, float y, float z) {
+    // 単位ベクトル前提。各半軸の中心方向との cos(角) = 対応する座標成分。
+    // +X/+Y/+Z は明色 R/G/B、-X/-Y/-Z は暗色で軸線の向きが分かるようにする。
+    constexpr float kAxisCos = 0.96f;          // マーカー半径 ≒ 16°
+    const float inv = 1.0f / (1.0f - kAxisCos);
+    struct AxisMarker { float cosang; uint8_t r, g, b; };
+    const AxisMarker markers[6] = {
+        { x, 255, 0, 0}, {-x, 48, 0, 0},   // ±X = 赤
+        { y, 0, 255, 0}, {-y, 0, 48, 0},   // ±Y = 緑
+        { z, 0, 0, 255}, {-z, 0, 0, 48},   // ±Z = 青
+    };
+    float bestW = 0.0f;
+    uint8_t mr = 0, mg = 0, mb = 0;
+    for (uint8_t k = 0; k < 6; k++) {
+        if (markers[k].cosang > kAxisCos) {
+            float w = (markers[k].cosang - kAxisCos) * inv;  // 0..1 (中心で1)
+            if (w > bestW) { bestW = w; mr = markers[k].r; mg = markers[k].g; mb = markers[k].b; }
+        }
+    }
+    if (bestW > 0.0f) {
+        led.r = (uint8_t)(led.r * (1.0f - bestW) + mr * bestW);
+        led.g = (uint8_t)(led.g * (1.0f - bestW) + mg * bestW);
+        led.b = (uint8_t)(led.b * (1.0f - bestW) + mb * bestW);
     }
 }
 
@@ -490,6 +529,109 @@ void LEDManager::fillSolid(uint8_t r, uint8_t g, uint8_t b) {
 
 void LEDManager::show() {
     FastLED.show();
+}
+
+// --- オープニングパターン用パラメータ ---
+namespace {
+constexpr uint8_t  kOpeningBrightness = 80;     // 起動演出の輝度 (全白回避のため控えめ)
+constexpr float    kDotSigma          = 0.13f;  // 光点の角半径(rad) ≒ 7-8° (数ピクセル相当)
+constexpr float    kSpinTurns         = 1.5f;   // 降下中に軸まわりに回る回数
+constexpr uint8_t  kDotColors[3][3]   = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}};  // R/G/B
+constexpr float    kTwoPi             = 6.28318530718f;
+}
+
+void LEDManager::renderOpeningDots(const float dir[3][3]) {
+    const float invTwoSigma2 = 1.0f / (2.0f * kDotSigma * kDotSigma);
+    for (uint16_t i = 0; i < _numLEDs; i++) {
+        // LED方向 (レイアウトは単位球だが防御的に正規化)
+        float lx = _ledLayout[i].x, ly = _ledLayout[i].y, lz = _ledLayout[i].z;
+        float len = sqrtf(lx * lx + ly * ly + lz * lz);
+        if (len > 1e-4f) { lx /= len; ly /= len; lz /= len; }
+
+        float r = 0.0f, g = 0.0f, b = 0.0f;
+        for (uint8_t d = 0; d < 3; d++) {
+            float cosang = lx * dir[d][0] + ly * dir[d][1] + lz * dir[d][2];
+            if (cosang > 1.0f) cosang = 1.0f; else if (cosang < -1.0f) cosang = -1.0f;
+            float ang = acosf(cosang);                 // 中心からの角距離 0..π
+            float w = expf(-(ang * ang) * invTwoSigma2);
+            if (w < 0.02f) continue;                    // 遠いLEDは無視
+            r += w * kDotColors[d][0];
+            g += w * kDotColors[d][1];
+            b += w * kDotColors[d][2];
+        }
+        _ledBuffer[i] = CRGB(r > 255 ? 255 : (uint8_t)r,
+                             g > 255 ? 255 : (uint8_t)g,
+                             b > 255 ? 255 : (uint8_t)b);
+    }
+    show();
+}
+
+void LEDManager::playOpening(uint16_t durationMs) {
+    if (!_ledBuffer || !_ledLayout || _numLEDs == 0) {
+        return;
+    }
+    Serial.printf("[LEDManager] Opening action (%u ms)\n", durationMs);
+
+    uint8_t prevBrightness = FastLED.getBrightness();
+    FastLED.setBrightness(kOpeningBrightness);
+
+    // フェーズ配分: 降下50% / 上昇33% / 開花(残り)
+    uint32_t descendMs = (uint32_t)durationMs * 50 / 100;
+    uint32_t ascendMs  = (uint32_t)durationMs * 33 / 100;
+    uint32_t bloomMs   = durationMs - descendMs - ascendMs;
+
+    float dir[3][3];
+    uint32_t t0, elapsed;
+
+    // --- フェーズ1: 北極(+Y)→南極(-Y) へ螺旋降下。3点は経度120°間隔。---
+    // 極軸は Y (sphereToUV が緯度を Y で測るため)。赤道面は X-Z。
+    t0 = millis();
+    while ((elapsed = millis() - t0) < descendMs) {
+        float t = (float)elapsed / (float)descendMs;     // 0→1
+        float y = 1.0f - 2.0f * t;                        // +1(北)→-1(南)
+        float rr = sqrtf(fmaxf(0.0f, 1.0f - y * y));      // その緯度の円の半径
+        float base = kSpinTurns * kTwoPi * t;             // 回転
+        for (uint8_t d = 0; d < 3; d++) {
+            float phi = base + d * (kTwoPi / 3.0f);
+            dir[d][0] = rr * cosf(phi);                   // X
+            dir[d][1] = y;                                // Y(極軸)
+            dir[d][2] = rr * sinf(phi);                   // Z
+        }
+        renderOpeningDots(dir);
+    }
+
+    // --- フェーズ2: 南極(-Y)→北極(+Y) へ3点が一斉に上昇 (経度固定の3本の子午線)。---
+    t0 = millis();
+    while ((elapsed = millis() - t0) < ascendMs) {
+        float t = (float)elapsed / (float)ascendMs;       // 0→1
+        float y = -1.0f + 2.0f * t;                       // -1(南)→+1(北)
+        float rr = sqrtf(fmaxf(0.0f, 1.0f - y * y));
+        for (uint8_t d = 0; d < 3; d++) {
+            float phi = d * (kTwoPi / 3.0f);              // 固定経度
+            dir[d][0] = rr * cosf(phi);
+            dir[d][1] = y;
+            dir[d][2] = rr * sinf(phi);
+        }
+        renderOpeningDots(dir);
+    }
+
+    // --- フェーズ3: 全球が虹色(経度=色相)に一瞬光ってフェード = READY ---
+    t0 = millis();
+    while ((elapsed = millis() - t0) < bloomMs) {
+        float t = (float)elapsed / (float)bloomMs;        // 0→1
+        uint8_t val = (uint8_t)(sinf(3.14159265f * t) * 255.0f);  // 0→1→0
+        for (uint16_t i = 0; i < _numLEDs; i++) {
+            float az = atan2f(_ledLayout[i].x, _ledLayout[i].z);  // Y軸まわりの経度
+            uint8_t hue = (uint8_t)((az + 3.14159265f) / kTwoPi * 255.0f);
+            _ledBuffer[i] = CHSV(hue, 255, val);
+        }
+        show();
+    }
+
+    // 消灯して輝度を元に戻す
+    fillSolid(0, 0, 0);
+    show();
+    FastLED.setBrightness(prevBrightness);
 }
 
 void LEDManager::setBrightness(uint8_t brightness) {

@@ -212,6 +212,10 @@ public:
     String getLayoutPath() { return doc["system"]["paths"]["layout"] | "/led_layout.csv"; }
     String getImagesPath() { return doc["system"]["paths"]["images"] | "/images/"; }
     String getOpeningPath() { return doc["system"]["paths"]["opening"] | "/images/opening/"; }
+
+    // 起動オープニングパターン (LEDManager::playOpening)。スキップは enabled=false。
+    bool getOpeningActionEnabled() { return doc["system"]["opening_action"]["enabled"] | true; }
+    uint16_t getOpeningActionDurationMs() { return doc["system"]["opening_action"]["duration_ms"] | 1200; }
     
     int getImageWidth() { return doc["image"]["width"] | 320; }
     int getImageHeight() { return doc["image"]["height"] | 160; }

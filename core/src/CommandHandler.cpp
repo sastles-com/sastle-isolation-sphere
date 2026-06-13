@@ -33,6 +33,7 @@ CommandHandler::CommandHandler()
     _playback.duration = 0.0f;
     
     _led.mode = "sphere";
+    _led.axisIndicator = false;
 }
 
 bool CommandHandler::begin(LEDManager* ledManager, ConfigManager* config) {
@@ -180,12 +181,14 @@ bool CommandHandler::_handleLed(const char* payload) {
     }
 
     Serial.println("[CommandHandler] === LED CONTROL ===");
-    
+
+    bool handled = false;
+
     if (doc.containsKey("mode")) {
         String mode = doc["mode"].as<String>();
         _led.mode = mode;
         Serial.printf("  mode: %s\n", mode.c_str());
-        
+
         if (mode == "off") {
             // LEDを消灯
             if (_ledManager) {
@@ -201,11 +204,21 @@ bool CommandHandler::_handleLed(const char* payload) {
             // 球体モード（デフォルト）
             Serial.println("  → Sphere mode");
         }
-        
-        return true;
+        handled = true;
     }
-    
-    return false;
+
+    // XYZ軸インジケータ (mode とは独立に切替可能)
+    if (doc.containsKey("axis")) {
+        bool on = doc["axis"].as<bool>();
+        _led.axisIndicator = on;
+        if (_ledManager) {
+            _ledManager->setAxisIndicator(on);
+        }
+        Serial.printf("  → Axis indicator: %s\n", on ? "ON" : "OFF");
+        handled = true;
+    }
+
+    return handled;
 }
 
 bool CommandHandler::_handleSystem(const char* payload) {
@@ -275,6 +288,7 @@ bool CommandHandler::getState(char* buffer, size_t bufferSize) {
     // led
     JsonObject led = doc.createNestedObject("led");
     led["mode"] = _led.mode;
+    led["axis"] = _led.axisIndicator;
     
     // system
     JsonObject system = doc.createNestedObject("system");

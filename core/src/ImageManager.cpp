@@ -255,12 +255,14 @@ bool ImageManager::decodeJPEG(const uint8_t* jpeg_data, size_t jpeg_size) {
         return false;
     }
     
-    // デコード実行
+    // デコード実行 (所要時間を計測)
+    unsigned long decodeStart = micros();
     if (TJpgDec.drawJpg(0, 0, jpeg_data, jpeg_size) != JDR_OK) {
         Serial.println("[ImageManager] JPEG decode failed");
         return false;
     }
-    
+    _lastDecodeUs = (uint32_t)(micros() - decodeStart);
+
     return true;
 }
 
@@ -329,6 +331,7 @@ ImageStats ImageManager::getStats() const {
     stats.fps = _currentFPS;
     stats.last_frame_time = _lastFrameTime;
     stats.last_jpeg_size = _lastJpegSize;
+    stats.decode_time_us = _lastDecodeUs;
     return stats;
 }
 

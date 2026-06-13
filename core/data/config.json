@@ -2,6 +2,10 @@
   "system": {
     "debug": true,
     "PSRAM": true,
+    "opening_action": {
+      "enabled": true,
+      "duration_ms": 1200
+    },
     "ota": {
       "enabled": true,
       "username": "admin",

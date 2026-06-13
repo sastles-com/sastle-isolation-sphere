@@ -76,6 +76,7 @@ private:
     
     struct {
         String mode;         // "sphere", "pixels", "off"
+        bool axisIndicator;  // XYZ軸インジケータ表示
         // pixels配列は大きいのでここでは保持しない
     } _led;
     
