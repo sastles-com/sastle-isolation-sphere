@@ -16,6 +16,12 @@
 > ② **MQTT デバッグログ** — `sphere/sphere001/log` を Web UI (**CONTROL → Logs** タブ) にリアルタイム表示。
 > 途中で **partitions.csv の otadata 欠落バグ**を発見・修正 (これが無いと OTA は永遠に有効化失敗)。
 > 詳細は §5 完了済み / §8 次にやること を参照。
+>
+> **追補 (2026-06-13c)**: ① **デバイス ID 動的化** — トピックの `sphere001` ハードコードを排除し
+> config.json の `sphere.id` を参照 (実機確認済み)。② **LED 駆動ベンチ実走** — `led_drive_test` 実機計測:
+> **5 ストリップ×160=800 LED 全て初期化成功** (pins 5/6/7/8/38)、**show()=15.0ms (≒上限66fps、30fps目標クリア)**。
+> ③ **OTA ロールバック策は不要** (メンテ時に分解可能とユーザー確定)。④ **otadata の運用上の罠**を §9 に追記。
+> ⑤ GMKTec を main ブランチへ整合 (audit 作業は stash 退避)。
 
 ---
 
@@ -227,11 +233,13 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
 
 ## 8. 次にやること (推奨順)
 
-1. **LED 駆動ベンチ**: AtomS3R + WS2812 ストリップで `led_drive_test` を実走。
-   特に ESP32-S3 の RMT TX が 4ch のため、5本目のストリップでの `show()` 時間と
-   FPS を実測 (FPS_BENCH モード)。遅ければ FastLED の S3 用 I2S 並列ドライバへ。
-2. **本体ファーム 5 ストリップ化**: ベンチ結果を受けて `BoardConfig.h` を
+1. ~~LED 駆動ベンチ実走~~ → **計測完了** (2026-06-13c, `led_drive_test` 実機): 5 ストリップ
+   (pins 5/6/7/8/38) 全初期化 OK、**show()=15.0ms (≒上限66fps、30fps クリア)**。
+   残り (要・人手): FPS_BENCH の最大持続 fps (本体ボタン操作)、CHASE のチェーン順序目視、
+   WHITE_LIMITED の全白電流実測 (電流計)。
+2. **本体ファーム 5 ストリップ化** (ベンチ合格を受けて実施可): `BoardConfig.h` を
    4→5 ストリップ (G38 追加) に拡張、`LEDManager` の配列 (`_stripPins[4]` 等) を 5 に。
+   ※ 現行 LED レイアウト/UV マッピングが 5×160 前提と一致するか要確認。
 3. **実機通信結合**: `core/data/config.json` の `wifi.broker` を実ブローカー IP に設定、
    ファーム書き込み、`mosquitto_sub -t 'sphere/#' -v` で実機の配信/受信を観測。
 4. **基板到着後**: core-M5atom-FPC 実機で BNO055(G2/G1) + スピーカー(GPIO08) 込み統合確認。
@@ -239,11 +247,10 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
 ### ケーブルレス開発まわりの残作業 (2026-06-13b で実装した OTA/ログの磨き込み)
 
 5. **OTA の堅牢化**:
-   - **ロールバック安全策**: 現状は新ファームを無条件 boot。起動失敗時に旧パーティションへ
-     自動復帰する仕組み (`esp_ota_mark_app_valid_cancel_rollback` + CONFIG_BOOTLOADER_APP_ROLLBACK)
-     が無いと、OTA で壊れたファームを焼くと封止状態で文鎮化する。**封止前に要対応**。
+   - ~~ロールバック安全策~~ → **不要** (2026-06-13c, メンテ時に分解可能とユーザー確定)。
    - **OTA パスワードを config 化**: 現状 `OtaManager.cpp` の `kOtaPassword` と
-     `platformio.ini` の `--auth` に `isolation-sphere-ota` をハードコード。config.json へ移す。
+     `platformio.ini` の `--auth` に `isolation-sphere-ota` をハードコード。
+     config.json には既に `system.ota` (username/password/listen_port) があるので、それを読む形に統一する。
    - **XIAO ESP32S3 での espota 実機確認** (現状 AtomS3R のみ確認済み。env は用意済み)。
    - **OTA 中の安全性**: 現状 LED 描画タスクのみ停止。IMU/MQTT タスク等も含め検証。
 6. **MQTT ログの改善**:
@@ -254,10 +261,10 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
    - **frontend バンドル肥大警告**: ビルドで 500KB 超の警告。code-split は未対応 (動作影響なし)。
 7. **IP 体系の統一**: `config.json` は旧 `192.168.49.x`、新 server 仕様書は `192.168.100.1/24`。
    現状ベンチは旧体系で稼働。将来どちらかに統一する (メモリ `ubuntu-flashing-environment` 参照)。
-8. **デバイス ID の動的化**: `sphere001` がファーム/サーバー/OTA ホスト名にハードコード。
-   複数台運用するなら config 駆動に。
-9. **GMKTec の git 整合**: ベンチ機は `chore/refactor-deps-audit` ブランチで audit 作業が
-   未コミット混在。動作実体は main と一致済み。audit 一段落後に `git stash -u` → main 切替 → pull。
+8. ~~デバイス ID の動的化~~ → **完了** (2026-06-13c)。config.json `sphere.id` 駆動に。
+   ただし **OTA ホスト名** (`OtaManager.cpp` の `kOtaHostname`) はまだ固定。複数台運用時はここも config 化。
+9. ~~GMKTec の git 整合~~ → **完了** (2026-06-13c)。main へ切替済み、audit 作業は `git stash@{0}` に退避。
+   audit 再開時は `git stash pop` (OTA 系の重複ファイルは main と同一内容なので衝突は main 側を採用)。
 
 ---
 
@@ -271,5 +278,13 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
   (`MIGRATION_PLAN.md` 参照)。broker/UDP ポート変更時は両側に波及する。
 - **LED 全白の電流**: 800 LED 全白@255 は ~48A。ベンチ・本番とも輝度上限運用必須
   (検証ファームは 64/255 に強制)。ポゴピン定格 RTLECS 1.5A/pin。
-- **デバイス ID `sphere001` はハードコード**: ファームとサーバー双方に直書き。
-  変更時は両側同時に。
+- **デバイス ID は config.json の `sphere.id` 駆動** (2026-06-13c〜): ファーム
+  (`MQTTManager::publishDevice`) もサーバー (`_load_device_id`) も `sphere.id` を読む。
+  変更は config.json 1 箇所でよいが、**ファームとサーバーが同じ config.json を見ること**が前提。
+- **⚠️ otadata の罠 (OTA→OTG 切替時)**: espota で書き込むと起動パーティションが ota_1 に
+  切り替わる。その後 `pio run -t upload` (OTG=esptool) は ota_0 に書くため、**otadata が指す
+  ota_1 (古いファーム) が起動し続け、OTG 書き込みが反映されない**ように見える。OTG を確実に
+  反映するには otadata を消してから:
+  `python .platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 -p /dev/ttyACM0 erase_region 0xd000 0x2000`
+  → リセットすると ota_0 (今焼いたファーム) が起動する。LittleFS は無傷。
+  (別ファーム env=`led_drive_test` へ OTG で切り替える時も同様に要 otadata 消去。)
