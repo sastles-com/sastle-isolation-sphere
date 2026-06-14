@@ -53,7 +53,9 @@ bool ImageManager::begin(ConfigManager& config, NetworkManager& network) {
     // 800 LED にはそれほど要らないため setJpgScale で 1/_jpegScale に縮小デコードする
     // (デコード時間 ∝ 出力画素数 なので大幅に軽量化。帯域・送信側は変更不要)。
     ImageConfig imgConfig = config.getImageConfig();
-    _jpegScale = 2;  // 320x160 → 160x80
+    // デコード時間はエントロピー復号支配でスケール非依存(実測 scale1=scale2)。
+    // 縮小しても速くならず律速でもないため、フル解像度(scale 1)で復号する。
+    _jpegScale = 1;  // 320x160 をそのままデコード
     _width = imgConfig.width / _jpegScale;
     _height = imgConfig.height / _jpegScale;
     _bufferSize = _width * _height * sizeof(uint16_t); // RGB565
