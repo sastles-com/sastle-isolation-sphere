@@ -92,12 +92,8 @@ export const Dashboard = () => {
         />
     );
 
-    const renderPlaylistContent = (subTab) => {
-        const isPlaying = playbackStatus === 'playing';
-        return subTab.id === 'playlists'
-            ? <PlaylistManager isPlaying={isPlaying} onTogglePlay={handleTogglePlay} onStop={handleStop} />
-            : <VideoManager />;
-    };
+    const renderPlaylistContent = (subTab) =>
+        subTab.id === 'playlists' ? <PlaylistManager /> : <VideoManager />;
 
     const renderParamsContent = (subTab) =>
         subTab.id === 'config' ? <ConfigEditor /> : <ParamsEditor />;
