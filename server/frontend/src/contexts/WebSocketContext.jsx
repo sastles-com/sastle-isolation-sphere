@@ -1,6 +1,9 @@
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 
 const WebSocketContext = createContext(null);
+// ログは高頻度更新のため別コンテキストに分離。useWebSocket() の購読者(Dashboard等)が
+// ログ受信のたびに再レンダーされるのを防ぐ(LogPanel だけが useLogs() で購読する)。
+const LogContext = createContext(null);
 
 // 開発サーバー(vite等)でポートが取れない場合のフォールバック先
 const DEFAULT_WS_PORT = '9000';
@@ -90,9 +93,18 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, []);
 
+    // main値はメモ化し、logs更新では identity を変えない(購読者を再レンダーさせない)
+    const wsValue = useMemo(
+        () => ({ isConnected, lastMessage, sendMessage }),
+        [isConnected, lastMessage, sendMessage]
+    );
+    const logValue = useMemo(() => ({ logs, clearLogs }), [logs, clearLogs]);
+
     return (
-        <WebSocketContext.Provider value={{ isConnected, lastMessage, sendMessage, logs, clearLogs }}>
-            {children}
+        <WebSocketContext.Provider value={wsValue}>
+            <LogContext.Provider value={logValue}>
+                {children}
+            </LogContext.Provider>
         </WebSocketContext.Provider>
     );
 };
@@ -101,6 +113,15 @@ export const useWebSocket = () => {
     const context = useContext(WebSocketContext);
     if (!context) {
         throw new Error('useWebSocket must be used within a WebSocketProvider');
+    }
+    return context;
+};
+
+// デバッグログ専用フック (LogPanel のみが使用)。これを使う側だけがログ更新で再レンダーされる。
+export const useLogs = () => {
+    const context = useContext(LogContext);
+    if (!context) {
+        throw new Error('useLogs must be used within a WebSocketProvider');
     }
     return context;
 };

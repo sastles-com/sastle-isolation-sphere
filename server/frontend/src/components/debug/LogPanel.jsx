@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Typography, Button, FormControlLabel, Switch } from '@mui/material';
-import { useWebSocket } from '../../contexts/WebSocketContext';
+import { useWebSocket, useLogs } from '../../contexts/WebSocketContext';
 
 /**
  * デバイスのデバッグログ (MQTT topic sphere/sphere001/log) を表示するパネル。
  * USB が届かない封止状態でも、WebSocket 経由でリアルタイムにログを確認できる。
  */
 export const LogPanel = () => {
-    const { logs, clearLogs, isConnected } = useWebSocket();
+    const { logs, clearLogs } = useLogs();
+    const { isConnected } = useWebSocket();
     const [autoScroll, setAutoScroll] = useState(true);
     const endRef = useRef(null);
 
