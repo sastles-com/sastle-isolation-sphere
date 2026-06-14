@@ -12,7 +12,11 @@ dependencies = [
     "pydantic>=2.6.0",
     "pydantic-settings>=2.1.0",
     "paho-mqtt>=2.0.0",
+    "pillow>=10.0.0",  # scripts/stream_to_sphere.py の映像→JPEG変換
 ]
+
+# 動画ファイルをストリームする場合のみ必要 (テストパターン/静止画は不要):
+#   uv pip install opencv-python-headless
 
 [build-system]
 requires = ["hatchling"]
