@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """球体ディスプレイへ映像をUDPストリーミングする (チャンク分割プロトコル)。
 
-ファーム core/src/ImageManager.h の UDPChunkHeader と完全に一致させること:
+プロトコルの正は docs/protocol_spec.md §4。ファーム core/src/ImageManager.h の
+UDPChunkHeader と完全に一致させること:
   16Bヘッダ(little-endian) = magic(u32 0x4A504547) frame_id(u32) chunk_index(u16)
                               chunk_count(u16) chunk_size(u16) reserved(u16)
   + JPEGチャンク(<=1400B)

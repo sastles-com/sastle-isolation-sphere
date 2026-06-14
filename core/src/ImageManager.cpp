@@ -347,17 +347,6 @@ bool ImageManager::getPixel(uint16_t x, uint16_t y, uint8_t& r, uint8_t& g, uint
     return true;
 }
 
-uint16_t ImageManager::getPixelRGB565(uint16_t x, uint16_t y) {
-    if (!_initialized || !_displayBuffer) {
-        return 0;
-    }
-    
-    if (x >= _width || y >= _height) {
-        return 0;
-    }
-    
-    return _displayBuffer[y * _width + x];
-}
 
 ImageStats ImageManager::getStats() const {
     ImageStats stats;

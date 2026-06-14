@@ -1,6 +1,6 @@
 /**
  * @file ImageManager.h
- * @brief UDP JPEG画像受信・デコード・ダブルバッファ管理クラス
+ * @brief UDP JPEG映像の受信・チャンク再構成・デコード・トリプルバッファ管理クラス
  * @author sastle-com
  * @date 2025-12-01
  */
@@ -14,10 +14,10 @@
 
 namespace sastle {
 
-/// フレーム準備完了コールバック型
-
 /// UDP映像チャンクヘッダー (16B)。1フレームのJPEGを複数チャンクに分割して送る
-/// (UDP断片化を避けるため各チャンクはMTU内)。サーバー側も同形式で送出すること。
+/// (UDP断片化を避けるため各チャンクはMTU内)。
+/// プロトコルの正は docs/protocol_spec.md §4。送信側 server/scripts/stream_to_sphere.py と
+/// このヘッダ定義は必ず一致させること。
 struct UDPChunkHeader {
     uint32_t magic;        ///< マジックナンバー 0x4A504547 ("JPEG")
     uint32_t frame_id;     ///< フレーム連番
@@ -55,11 +55,11 @@ struct ImageStats {
 
 /**
  * @class ImageManager
- * @brief UDP JPEG画像の受信・デコード・ダブルバッファ管理クラス
- * 
- * UDP経由で受信したJPEG圧縮画像をデコードし、
- * ダブルバッファでLED描画用RGB565データを提供します。
- * PSRAM上に2つのバッファを確保し、非ブロッキングで画像更新を行います。
+ * @brief UDP JPEG映像の受信・チャンク再構成・デコード・トリプルバッファ管理クラス
+ *
+ * UDPで届くチャンクを frame_id 単位で再構成し、JPEGをデコードして
+ * LED描画用RGB565を提供します。PSRAM上にトリプルバッファ(display/ready/decode)を
+ * 確保し、デコード(Core0)と描画(Core1)を独立・並列に動かします。
  */
 class ImageManager {
 public:
@@ -83,8 +83,8 @@ public:
      * @brief デコード専用タスクを開始 (Core分離による並列化)
      * @param core 実行コア (推奨: 0 = WiFi/lwIP と同居だがCPU処理なので可)
      * @note レンダリングタスク(別コア)と並列に動作させ、decode∥render を実現する。
-     *       render が Core1, decode が Core0 で走り、ダブルバッファ + bufferFree
-     *       セマフォでテアリングなくパイプライン化する。
+     *       render が Core1, decode が Core0 で走り、トリプルバッファ
+     *       (publishFrame/adoptReadyFrame) でテアリングなく独立に差し替える。
      */
     bool startDecodeTask(uint8_t core = 0, uint8_t priority = 1, uint32_t stackSize = 8192);
 
@@ -105,15 +105,6 @@ public:
      * @return true 取得成功, false 座標範囲外
      */
     bool getPixel(uint16_t x, uint16_t y, uint8_t& r, uint8_t& g, uint8_t& b);
-    
-    /**
-     * @brief 指定座標のピクセル色を取得 (RGB565)
-     * @param x X座標 (0 ~ width-1)
-     * @param y Y座標 (0 ~ height-1)
-     * @return RGB565形式のピクセル値, 範囲外の場合は0
-     */
-    uint16_t getPixelRGB565(uint16_t x, uint16_t y);
-    
     /**
      * @brief 画像幅を取得
      * @return 画像幅 (ピクセル)
