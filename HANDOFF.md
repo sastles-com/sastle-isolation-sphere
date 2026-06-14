@@ -22,6 +22,14 @@
 > **5 ストリップ×160=800 LED 全て初期化成功** (pins 5/6/7/8/38)、**show()=15.0ms (≒上限66fps、30fps目標クリア)**。
 > ③ **OTA ロールバック策は不要** (メンテ時に分解可能とユーザー確定)。④ **otadata の運用上の罠**を §9 に追記。
 > ⑤ GMKTec を main ブランチへ整合 (audit 作業は stash 退避)。
+>
+> **追補 (2026-06-14): 映像パイプライン最適化で 10Hz 達成 → ~20fps**。計測駆動で
+> ボトルネックを潰した。詳細は §10。要点:
+> ① **UDP映像受信が完全に壊れていた** → WiFiUDP(BSDソケットポーリング)が本環境で
+> 機能せず受信ゼロ。**AsyncUDP(lwIPコールバック直結)へ置換して修復**(これが最重要)。
+> ② **真のFPS律速は LCDデバッグ描画**(128×128を毎フレーム writePixel ~150ms)だった
+> → 一括 pushImage + 10Hzスロットルで解消。③ マッピング 27→4ms(FastMath float化)。
+> ④ デコードを Core0 専用タスクへ分離し描画(Core1)と並列化 → ~20fps。
 
 ---
 
@@ -288,3 +296,29 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
   `python .platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 -p /dev/ttyACM0 erase_region 0xd000 0x2000`
   → リセットすると ota_0 (今焼いたファーム) が起動する。LittleFS は無傷。
   (別ファーム env=`led_drive_test` へ OTG で切り替える時も同様に要 otadata 消去。)
+- **⚠️ UDP受信は AsyncUDP 必須** (2026-06-14): `WiFiUDP`(BSDソケットのポーリング受信)は
+  本ハード/coreで機能せず、`parsePacket()` が常に0を返し映像UDPを全く受信できなかった
+  (TCP/MQTT・ICMPは正常、リンク0%ロス、パケットはAP側から送出済みなのにデバイスが受信せず)。
+  `NetworkManager` の受信を **AsyncUDP**(lwIP `udp_recv` コールバック直結)に置換して解決。
+  WiFiUDP に戻さないこと。併せて接続後 `WiFi.setSleep(false)` も必要。
+
+---
+
+## 10. 映像パイプライン性能 (2026-06-14)
+
+計測駆動 (`[PERF]` ログ: map/out/decode/fps/recv/hits/drop) でボトルネックを順に解消し、
+**10Hz目標 → 実測 ~20fps** を達成。各工程の実測 (320×160 JPEG / 800 LED, AtomS3R):
+
+| 工程 | 値 | メモ |
+|------|----|----|
+| JPEGデコード | ~38–47ms | エントロピー復号支配。setJpgScale では縮まらない。Core0専用タスク |
+| マッピング(球面サンプリング) | ~4ms | FastMath を double→**HW単精度sqrtf/float化**で 27→4ms。単一ループ化 + IMU-off時 静的UV-LUT |
+| LED出力 show() | ~14ms | 800 WS2812 RMT。物理下限 |
+| LCDデバッグ描画 | ~150ms→数ms | **真のFPS律速だった**。1画素 writePixel ×16384 → 一括 pushImage + 10Hzスロットル |
+
+**並列化**: デコード=Core0 専用タスク、レンダリング=Core1 タスク。ダブルバッファ +
+2セマフォ (frameReady/bufferFree) でテアリングなくパイプライン化 → decode∥render。
+
+**今後さらに上げるなら**: デコードが律速 (~45ms)。入力解像度の見直し / フレームレート上限 /
+生RGB565転送 等。ただし実映像はデコードがより重くなり得るので現状の余裕(~20fps)は妥当。
+計測用送出器は GMKTec の `/tmp/send_small.py` `/tmp/send_frames.py` (system python3, 要 PIL)。
