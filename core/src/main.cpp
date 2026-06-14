@@ -255,10 +255,11 @@ static void publishPerfStatsIfDue(unsigned long now) {
     LEDStats led = ledManager.getStats();
     ImageStats img = imageManager.getStats();
     sastle::Log.printf(
-        "[PERF] render_fps=%.1f map=%luus out=%luus | img_fps=%.1f decode=%luus jpeg=%uB recv=%lu | heap=%u\n",
+        "[PERF] render_fps=%.1f map=%luus out=%luus | img_fps=%.1f decode=%luus jpeg=%uB recv=%lu hits=%lu drop=%lu | heap=%u\n",
         led.fps, (unsigned long)led.mapping_time_us, (unsigned long)led.output_time_us,
         img.fps, (unsigned long)img.decode_time_us, (unsigned)img.last_jpeg_size,
-        (unsigned long)img.frames_received, (unsigned)ESP.getFreeHeap());
+        (unsigned long)img.frames_received, (unsigned long)imageManager.getParseHits(),
+        (unsigned long)imageManager.getDropped(), (unsigned)ESP.getFreeHeap());
 }
 
 void loop() {

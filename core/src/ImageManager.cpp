@@ -49,13 +49,17 @@ bool ImageManager::begin(ConfigManager& config, NetworkManager& network) {
     
     _network = &network;
     
-    // 画像サイズを設定から取得
+    // 画像サイズを設定から取得。JPEGは送信側の解像度(例 320x160)だが、
+    // 800 LED にはそれほど要らないため setJpgScale で 1/_jpegScale に縮小デコードする
+    // (デコード時間 ∝ 出力画素数 なので大幅に軽量化。帯域・送信側は変更不要)。
     ImageConfig imgConfig = config.getImageConfig();
-    _width = imgConfig.width;
-    _height = imgConfig.height;
+    _jpegScale = 2;  // 320x160 → 160x80
+    _width = imgConfig.width / _jpegScale;
+    _height = imgConfig.height / _jpegScale;
     _bufferSize = _width * _height * sizeof(uint16_t); // RGB565
-    
-    Serial.printf("[ImageManager] Initializing: %dx%d (RGB565)\n", _width, _height);
+
+    Serial.printf("[ImageManager] Initializing: decode %dx%d (src %dx%d, scale 1/%d, RGB565)\n",
+                  _width, _height, imgConfig.width, imgConfig.height, _jpegScale);
     Serial.printf("  Buffer size: %d bytes each\n", _bufferSize);
     Serial.printf("  Total memory: %d bytes\n", _bufferSize * 2 + _udpBufferSize);
     
@@ -74,7 +78,7 @@ bool ImageManager::begin(ConfigManager& config, NetworkManager& network) {
     }
     
     // TJpg_Decoder初期化
-    TJpgDec.setJpgScale(1);  // スケール: 1, 2, 4, 8
+    TJpgDec.setJpgScale(_jpegScale);  // 縮小デコード (1,2,4,8)
     TJpgDec.setSwapBytes(true);  // RGB565バイトスワップ
     TJpgDec.setCallback(tjpgOutput);
     
@@ -162,12 +166,20 @@ bool ImageManager::update() {
     }
     
     size_t jpeg_size = 0;
-    
-    // UDP画像パケット受信
-    if (!receivePacket(jpeg_size)) {
+
+    // 溜まっているUDPデータグラムを全てドレインし、最新フレームのみ採用する。
+    // (バックログを残すと遅延が増えるだけ。受信キュー詰まりの回避にもなる)
+    bool got = false;
+    size_t latest_size = 0;
+    while (receivePacket(jpeg_size)) {
+        got = true;
+        latest_size = jpeg_size;
+    }
+    if (!got) {
         return false;
     }
-    
+    jpeg_size = latest_size;  // _udpBuffer には最後のデータグラムが入っている
+
     // JPEG検証済みなので、ヘッダー分スキップしてデコード
     const uint8_t* jpeg_data = _udpBuffer + sizeof(UDPImageHeader);
     size_t jpeg_data_size = jpeg_size - sizeof(UDPImageHeader);
@@ -194,7 +206,8 @@ bool ImageManager::receivePacket(size_t& jpeg_size) {
     if (packetSize <= 0) {
         return false;
     }
-    
+    _parseHits++;  // parsePacket が >0 を返した回数 (受信診断用)
+
     // パケットサイズチェック
     if (packetSize < (int)sizeof(UDPImageHeader)) {
         Serial.printf("[ImageManager] Packet too small: %d bytes\n", packetSize);
@@ -248,10 +261,10 @@ bool ImageManager::decodeJPEG(const uint8_t* jpeg_data, size_t jpeg_size) {
         return false;
     }
     
-    // サイズ検証
-    if (w != _width || h != _height) {
+    // サイズ検証 (getJpgSize は元JPEGの解像度を返す。縮小デコードするので元寸で比較)
+    if (w != _width * _jpegScale || h != _height * _jpegScale) {
         Serial.printf("[ImageManager] Size mismatch: expected %dx%d, got %dx%d\n",
-                     _width, _height, w, h);
+                     _width * _jpegScale, _height * _jpegScale, w, h);
         return false;
     }
     

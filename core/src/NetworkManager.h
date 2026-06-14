@@ -12,6 +12,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <AsyncUDP.h>
 #include "ConfigManager.h"
 
 namespace sastle {
@@ -134,10 +135,21 @@ public:
     void printStatus();
     
 private:
-    WiFiUDP udp;             ///< UDPクライアント
+    WiFiUDP udp;             ///< UDP送信用 (WiFiUDP)
     bool wifiConnected;      ///< WiFi接続状態
     bool udpStarted;         ///< UDP開始状態
     uint16_t udpLocalPort;   ///< UDPローカルポート
+
+    // 受信は AsyncUDP (lwIP udp_recv コールバック直結)。WiFiUDP の BSDソケット
+    // ポーリング受信が本ハード/coreで機能しなかったため置換。コールバックで
+    // 最新データグラムを _rxBuf に取り込み、parsePacket/read で取り出す。
+    static constexpr size_t kRxBufSize = 20000;  ///< 最大フレーム想定
+    AsyncUDP _audp;                              ///< 受信用
+    uint8_t _rxBuf[kRxBufSize];                  ///< 最新受信パケット
+    volatile size_t _rxLen = 0;                  ///< 最新パケット長 (0=なし)
+    IPAddress _rxRemoteIP;                        ///< 最新送信元IP
+    uint16_t _rxRemotePort = 0;                   ///< 最新送信元ポート
+    portMUX_TYPE _rxMux = portMUX_INITIALIZER_UNLOCKED;  ///< コールバック/loop排他
     
     /**
      * @brief WiFi接続ヘルパー関数

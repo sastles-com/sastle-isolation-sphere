@@ -50,7 +50,13 @@ bool NetworkManager::connectWiFi(const String& ssid, const String& password,
                                   const IPAddress& subnet) {
     // WiFiモード設定
     WiFi.mode(WIFI_STA);
-    
+
+    // モデム省電力を無効化 (重要)。
+    // 省電力(既定ON)中はビーコン間でスリープし、再送のないUDPパケットを
+    // 取りこぼす(TCP/MQTTは再送で生存、ICMP pingは応答型で通るため気付きにくい)。
+    // 映像UDP受信のため必須。
+    WiFi.setSleep(false);
+
     // 静的IP設定
     if (!WiFi.config(localIP, gateway, subnet)) {
         Serial.println("ERROR: Failed to configure static IP");
@@ -72,6 +78,13 @@ bool NetworkManager::connectWiFi(const String& ssid, const String& password,
     
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
+
+        // モデム省電力を無効化 (接続確立後に行うこと)。WiFi.begin() が PS を
+        // 既定(MIN_MODEM)へ戻すため、begin前の設定は無効。省電力中はビーコン間で
+        // スリープし再送のないUDPを取りこぼす(TCP/pingは生存)。映像UDP受信に必須。
+        WiFi.setSleep(false);
+        Serial.printf("WiFi sleep mode: %d (0=NONE/無効化成功)\n", (int)WiFi.getSleep());
+
         Serial.println("WiFi connected successfully!");
         Serial.printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
         Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
@@ -120,15 +133,31 @@ bool NetworkManager::beginUDP(uint16_t localPort) {
         return false;
     }
     
-    Serial.printf("Starting UDP on port %d\n", localPort);
-    
-    if (udp.begin(localPort)) {
+    Serial.printf("Starting UDP(Async) on port %d\n", localPort);
+
+    udpLocalPort = localPort;
+    _rxLen = 0;
+
+    // AsyncUDP: lwIP の udp_recv コールバックで最新データグラムを取り込む。
+    // (WiFiUDP の BSDソケットポーリング受信が本環境で機能しなかったため置換)
+    // コールバックは AsyncUDP タスク文脈で走るため、_rxBuf へのコピーを
+    // portMUX で loop 側 read() と排他する。
+    if (_audp.listen(localPort)) {
+        _audp.onPacket([this](AsyncUDPPacket packet) {
+            size_t n = packet.length();
+            if (n > kRxBufSize) n = kRxBufSize;
+            portENTER_CRITICAL(&_rxMux);
+            memcpy(_rxBuf, packet.data(), n);
+            _rxLen = n;
+            _rxRemoteIP = packet.remoteIP();
+            _rxRemotePort = packet.remotePort();
+            portEXIT_CRITICAL(&_rxMux);
+        });
         udpStarted = true;
-        udpLocalPort = localPort;
-        Serial.printf("UDP started successfully on port %d\n", localPort);
+        Serial.printf("UDP(Async) listening on port %d\n", localPort);
         return true;
     } else {
-        Serial.println("ERROR: Failed to start UDP");
+        Serial.println("ERROR: AsyncUDP listen failed");
         udpStarted = false;
         return false;
     }
@@ -136,7 +165,7 @@ bool NetworkManager::beginUDP(uint16_t localPort) {
 
 void NetworkManager::endUDP() {
     if (udpStarted) {
-        udp.stop();
+        _audp.close();
         udpStarted = false;
         Serial.println("UDP stopped");
     }
@@ -182,29 +211,37 @@ int NetworkManager::parsePacket() {
     if (!udpStarted) {
         return 0;
     }
-    return udp.parsePacket();
+    return (int)_rxLen;  // AsyncUDP コールバックが取り込んだ最新データグラム長 (0=未受信)
 }
 
 int NetworkManager::available() {
     if (!udpStarted) {
         return 0;
     }
-    return udp.available();
+    return (int)_rxLen;
 }
 
 int NetworkManager::read(uint8_t* buffer, size_t length) {
     if (!udpStarted) {
         return 0;
     }
-    return udp.read(buffer, length);
+    portENTER_CRITICAL(&_rxMux);
+    size_t n = _rxLen;
+    if (n > length) n = length;
+    if (n > 0) {
+        memcpy(buffer, _rxBuf, n);
+    }
+    _rxLen = 0;  // 消費済み
+    portEXIT_CRITICAL(&_rxMux);
+    return (int)n;
 }
 
 IPAddress NetworkManager::remoteIP() {
-    return udp.remoteIP();
+    return _rxRemoteIP;
 }
 
 uint16_t NetworkManager::remotePort() {
-    return udp.remotePort();
+    return _rxRemotePort;
 }
 
 void NetworkManager::printStatus() {

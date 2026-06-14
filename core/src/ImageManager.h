@@ -138,8 +138,9 @@ private:
     NetworkManager* _network;    ///< ネットワークマネージャーポインタ
     
     // 画像パラメータ
-    uint16_t _width;             ///< 画像幅
-    uint16_t _height;            ///< 画像高さ
+    uint16_t _width;             ///< デコード後の画像幅 (= src幅/_jpegScale)
+    uint16_t _height;            ///< デコード後の画像高さ
+    uint8_t _jpegScale = 2;      ///< 縮小デコード倍率 (1,2,4,8)
     size_t _bufferSize;          ///< 1バッファのサイズ (bytes)
     
     // ダブルバッファ (PSRAM)
@@ -163,6 +164,12 @@ private:
     float _currentFPS;           ///< 現在のFPS
     size_t _lastJpegSize;        ///< 最終JPEGサイズ
     uint32_t _lastDecodeUs = 0;  ///< 最後のJPEGデコード所要時間 (μs)
+
+public:
+    uint32_t getParseHits() const { return _parseHits; }    ///< parsePacket>0 の回数 (UDP受信診断)
+    uint32_t getDropped() const { return _framesDropped; }  ///< ドロップ数
+private:
+    uint32_t _parseHits = 0;     ///< parsePacket が >0 を返した累計
 
     FrameReadyCallback _frameReadyCallback;  ///< フレーム準備完了コールバック
     
