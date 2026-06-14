@@ -17,10 +17,15 @@ namespace sastle {
 /// フレーム準備完了コールバック型
 typedef void (*FrameReadyCallback)(void);
 
-/// UDP画像パケットヘッダー
-struct UDPImageHeader {
-    uint32_t magic;      ///< マジックナンバー 0x4A504547 ("JPEG")
-    uint32_t frame_id;   ///< フレーム連番
+/// UDP映像チャンクヘッダー (16B)。1フレームのJPEGを複数チャンクに分割して送る
+/// (UDP断片化を避けるため各チャンクはMTU内)。サーバー側も同形式で送出すること。
+struct UDPChunkHeader {
+    uint32_t magic;        ///< マジックナンバー 0x4A504547 ("JPEG")
+    uint32_t frame_id;     ///< フレーム連番
+    uint16_t chunk_index;  ///< チャンク番号 (0..chunk_count-1)
+    uint16_t chunk_count;  ///< このフレームの総チャンク数
+    uint16_t chunk_size;   ///< このチャンクのJPEGバイト数
+    uint16_t reserved;     ///< 予約 (アライン)
 } __attribute__((packed));
 
 /// マジックナンバー "JPEG"
@@ -28,6 +33,11 @@ constexpr uint32_t UDP_IMAGE_MAGIC = 0x4A504547;
 
 /// 最大UDPペイロードサイズ (64KB)
 constexpr size_t MAX_UDP_IMAGE_SIZE = 65507;
+
+/// 1チャンクのJPEGデータ最大長 (MTU内: 1500 - IP/UDP - 16Bヘッダ に余裕)
+constexpr size_t MAX_CHUNK_DATA = 1400;
+/// 1フレームの最大チャンク数 (_udpBuffer 65507 / 1400 ≒ 46)
+constexpr uint16_t MAX_CHUNKS = 46;
 
 /**
  * @struct ImageStats
@@ -191,8 +201,16 @@ private:
     // --- デコード並列化 (Core分離) ---
     TaskHandle_t _decodeTaskHandle = nullptr;     ///< デコードタスク
     SemaphoreHandle_t _bufferFreeSem = nullptr;   ///< 描画バッファ解放通知(render→decode)
-    bool decodeOneFrame();                        ///< 受信+デコード(swapはしない)
+    bool decodeOneFrame();                        ///< 受信+再構成+デコード(swapはしない)
     static void decodeTaskFunc(void* param);      ///< デコードタスク本体
+
+    // --- チャンク再構成 (decodeタスク専用なのでロック不要) ---
+    uint8_t _chunkBuf[1500];                      ///< 受信データグラム取り出し用
+    uint32_t _reasmFrameId = 0xFFFFFFFF;          ///< 再構成中フレームID
+    uint16_t _reasmChunkCount = 0;                ///< 総チャンク数
+    uint16_t _reasmReceived = 0;                  ///< 受信済みチャンク数
+    uint32_t _reasmTotalSize = 0;                 ///< 完成JPEGサイズ
+    uint64_t _reasmGotMask = 0;                   ///< 受信済みビットマスク (最大64ch)
     
     /**
      * @brief PSRAMにバッファを確保
@@ -210,7 +228,6 @@ private:
      * @param jpeg_size 受信したJPEGサイズ (出力)
      * @return true 受信成功, false 受信なし/エラー
      */
-    bool receivePacket(size_t& jpeg_size);
     
     /**
      * @brief JPEGをデコードしてバッファに展開

@@ -168,30 +168,78 @@ void ImageManager::freeBuffers() {
     _decodeBuffer = nullptr;
 }
 
-// 受信+デコードのみ (バッファswapはしない)。_decodeBuffer に最新フレームを書く。
+// 受信キューからチャンクを取り出してフレームを再構成し、揃ったらデコードする。
+// (バッファswapはしない)。1フレーム完成で true。再構成状態はメンバに保持し
+// 複数回の呼び出しに跨って継続する。
 bool ImageManager::decodeOneFrame() {
     if (!_initialized || !_network) {
         return false;
     }
 
-    size_t jpeg_size = 0;
-    // 溜まっているUDPデータグラムを全てドレインし、最新フレームのみ採用する。
-    bool got = false;
-    size_t latest_size = 0;
-    while (receivePacket(jpeg_size)) {
-        got = true;
-        latest_size = jpeg_size;
-    }
-    if (!got) {
-        return false;
+    bool frameComplete = false;
+    int n;
+    while ((n = _network->recvDatagram(_chunkBuf, sizeof(_chunkBuf))) > 0) {
+        _parseHits++;
+        if (n < (int)sizeof(UDPChunkHeader)) {
+            continue;
+        }
+        const UDPChunkHeader* h = (const UDPChunkHeader*)_chunkBuf;
+        if (h->magic != UDP_IMAGE_MAGIC) {
+            continue;
+        }
+        if (h->chunk_count == 0 || h->chunk_count > MAX_CHUNKS ||
+            h->chunk_index >= h->chunk_count) {
+            continue;
+        }
+        size_t dataLen = h->chunk_size;
+        if (dataLen > MAX_CHUNK_DATA || sizeof(UDPChunkHeader) + dataLen > (size_t)n) {
+            continue;
+        }
+
+        // 新しいフレームの開始 (frame_id が変化)
+        if (h->frame_id != _reasmFrameId) {
+            if (_reasmFrameId != 0xFFFFFFFF && _reasmReceived < _reasmChunkCount) {
+                _framesDropped++;  // 前フレームは未完のまま破棄
+            }
+            _reasmFrameId = h->frame_id;
+            _reasmChunkCount = h->chunk_count;
+            _reasmReceived = 0;
+            _reasmTotalSize = 0;
+            _reasmGotMask = 0;
+        }
+
+        size_t off = (size_t)h->chunk_index * MAX_CHUNK_DATA;
+        if (off + dataLen > _udpBufferSize) {
+            continue;
+        }
+        uint64_t bit = 1ULL << h->chunk_index;
+        if (!(_reasmGotMask & bit)) {
+            memcpy(_udpBuffer + off, _chunkBuf + sizeof(UDPChunkHeader), dataLen);
+            _reasmGotMask |= bit;
+            _reasmReceived++;
+            if (h->chunk_index == h->chunk_count - 1) {
+                _reasmTotalSize = off + dataLen;  // 最終チャンクで全体サイズ確定
+            }
+        }
+
+        if (_reasmReceived == _reasmChunkCount && _reasmTotalSize > 0) {
+            // フレーム完成。_udpBuffer[0.._reasmTotalSize] が完全なJPEG。
+            _lastJpegSize = _reasmTotalSize;
+            _reasmFrameId = 0xFFFFFFFF;  // 完了 → 次フレーム待ち
+            frameComplete = true;
+            break;  // 残りチャンクは次フレーム分。今のフレームを先にデコード。
+        }
     }
 
-    const uint8_t* jpeg_data = _udpBuffer + sizeof(UDPImageHeader);
-    size_t jpeg_data_size = latest_size - sizeof(UDPImageHeader);
-    if (!decodeJPEG(jpeg_data, jpeg_data_size)) {
+    if (!frameComplete) {
+        return false;
+    }
+    if (!decodeJPEG(_udpBuffer, _lastJpegSize)) {
         _decodeErrors++;
         return false;
     }
+    _framesReceived++;
+    _lastFrameTime = millis();
     return true;
 }
 
@@ -245,55 +293,6 @@ void ImageManager::releaseBuffer() {
     }
 }
 
-bool ImageManager::receivePacket(size_t& jpeg_size) {
-    // UDPパケット受信チェック
-    int packetSize = _network->parsePacket();
-    if (packetSize <= 0) {
-        return false;
-    }
-    _parseHits++;  // parsePacket が >0 を返した回数 (受信診断用)
-
-    // パケットサイズチェック
-    if (packetSize < (int)sizeof(UDPImageHeader)) {
-        Serial.printf("[ImageManager] Packet too small: %d bytes\n", packetSize);
-        _framesDropped++;
-        return false;
-    }
-    
-    if (packetSize > (int)_udpBufferSize) {
-        Serial.printf("[ImageManager] Packet too large: %d bytes\n", packetSize);
-        _framesDropped++;
-        return false;
-    }
-    
-    // パケット読み込み
-    int bytesRead = _network->read(_udpBuffer, packetSize);
-    if (bytesRead != packetSize) {
-        Serial.printf("[ImageManager] Read error: expected %d, got %d\n", packetSize, bytesRead);
-        _framesDropped++;
-        return false;
-    }
-    
-    // ヘッダー検証
-    UDPImageHeader* header = (UDPImageHeader*)_udpBuffer;
-    if (header->magic != UDP_IMAGE_MAGIC) {
-        Serial.printf("[ImageManager] Invalid magic: 0x%08X\n", header->magic);
-        _framesDropped++;
-        return false;
-    }
-    
-    _framesReceived++;
-    _lastFrameTime = millis();
-    _lastJpegSize = packetSize - sizeof(UDPImageHeader);
-    jpeg_size = packetSize;
-    
-    if (_framesReceived % 100 == 0) {
-        Serial.printf("[ImageManager] Frame #%d received (JPEG: %d bytes)\n", 
-                     header->frame_id, _lastJpegSize);
-    }
-    
-    return true;
-}
 
 bool ImageManager::decodeJPEG(const uint8_t* jpeg_data, size_t jpeg_size) {
     // デコードターゲットバッファを設定

@@ -136,22 +136,30 @@ bool NetworkManager::beginUDP(uint16_t localPort) {
     Serial.printf("Starting UDP(Async) on port %d\n", localPort);
 
     udpLocalPort = localPort;
-    _rxLen = 0;
 
-    // AsyncUDP: lwIP の udp_recv コールバックで最新データグラムを取り込む。
+    // 受信データグラム用キューを確保 (バースト吸収)
+    if (!_rxQueue) {
+        _rxQueue = xQueueCreate(kRxQueueLen, sizeof(UdpDatagram));
+        if (!_rxQueue) {
+            Serial.println("ERROR: Failed to create UDP rx queue");
+            return false;
+        }
+    }
+
+    // AsyncUDP: コールバック(AsyncUDPタスク文脈, 直列)で各データグラムをキューへ。
     // (WiFiUDP の BSDソケットポーリング受信が本環境で機能しなかったため置換)
-    // コールバックは AsyncUDP タスク文脈で走るため、_rxBuf へのコピーを
-    // portMUX で loop 側 read() と排他する。
     if (_audp.listen(localPort)) {
         _audp.onPacket([this](AsyncUDPPacket packet) {
             size_t n = packet.length();
-            if (n > kRxBufSize) n = kRxBufSize;
-            portENTER_CRITICAL(&_rxMux);
-            memcpy(_rxBuf, packet.data(), n);
-            _rxLen = n;
+            if (n == 0 || n > kMaxDatagram) {
+                return;
+            }
+            _cbDg.len = (uint16_t)n;
+            memcpy(_cbDg.data, packet.data(), n);
             _rxRemoteIP = packet.remoteIP();
             _rxRemotePort = packet.remotePort();
-            portEXIT_CRITICAL(&_rxMux);
+            // キュー満杯時はドロップ (最新優先のため、必要なら拡張)
+            xQueueSend(_rxQueue, &_cbDg, 0);
         });
         udpStarted = true;
         Serial.printf("UDP(Async) listening on port %d\n", localPort);
@@ -207,32 +215,17 @@ bool NetworkManager::sendUDP(const char* host, uint16_t port, const uint8_t* dat
     return false;
 }
 
-int NetworkManager::parsePacket() {
-    if (!udpStarted) {
+int NetworkManager::recvDatagram(uint8_t* buffer, size_t length) {
+    if (!udpStarted || !_rxQueue) {
         return 0;
     }
-    return (int)_rxLen;  // AsyncUDP コールバックが取り込んだ最新データグラム長 (0=未受信)
-}
-
-int NetworkManager::available() {
-    if (!udpStarted) {
-        return 0;
+    UdpDatagram dg;  // 呼び出し側(decodeタスク, 8192 stack)で確保
+    if (xQueueReceive(_rxQueue, &dg, 0) != pdTRUE) {
+        return 0;  // キュー空
     }
-    return (int)_rxLen;
-}
-
-int NetworkManager::read(uint8_t* buffer, size_t length) {
-    if (!udpStarted) {
-        return 0;
-    }
-    portENTER_CRITICAL(&_rxMux);
-    size_t n = _rxLen;
+    size_t n = dg.len;
     if (n > length) n = length;
-    if (n > 0) {
-        memcpy(buffer, _rxBuf, n);
-    }
-    _rxLen = 0;  // 消費済み
-    portEXIT_CRITICAL(&_rxMux);
+    memcpy(buffer, dg.data, n);
     return (int)n;
 }
 

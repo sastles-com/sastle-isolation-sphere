@@ -304,21 +304,7 @@ void loop() {
     // 性能計測ログ
     publishPerfStatsIfDue(now);
 
-
-    // UDP受信チェック
-    int packetSize = network.parsePacket();
-    if (packetSize) {
-        uint8_t buffer[256];
-        int len = network.read(buffer, sizeof(buffer) - 1);
-        if (len > 0) {
-            buffer[len] = 0;
-            sastle::Log.printf("[%lu] Received UDP packet from %s:%d\n", 
-                         millis(),
-                         network.remoteIP().toString().c_str(), 
-                         network.remotePort());
-            sastle::Log.printf("  Data (%d bytes): %s\n", len, (char*)buffer);
-        }
-    }
+    // 映像UDP受信+デコードは Core0 のデコードタスクが担当 (loop では扱わない)
     delay(10);
 }
 

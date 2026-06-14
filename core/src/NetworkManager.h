@@ -98,25 +98,14 @@ public:
     bool sendUDP(const char* host, uint16_t port, const uint8_t* data, size_t length);
     
     /**
-     * @brief 受信UDPパケットをパース
-     * @return 受信データサイズ (バイト), 0=受信なし
-     */
-    int parsePacket();
-    
-    /**
-     * @brief 受信バッファの利用可能バイト数を取得
-     * @return 利用可能バイト数
-     */
-    int available();
-    
-    /**
-     * @brief 受信データを読み込む
+     * @brief 受信キューから1データグラム(=チャンク)を取り出す (非ブロッキング)
      * @param buffer 読み込みバッファ
-     * @param length 読み込みサイズ
-     * @return 実際に読み込んだバイト数
+     * @param length バッファ長
+     * @return 取り出したバイト数, 0=キュー空
+     * @note 受信は AsyncUDP コールバックがキューに積む。フレーム再構成は呼び出し側で。
      */
-    int read(uint8_t* buffer, size_t length);
-    
+    int recvDatagram(uint8_t* buffer, size_t length);
+
     /**
      * @brief 送信元IPアドレスを取得
      * @return 送信元IPアドレス
@@ -141,15 +130,21 @@ private:
     uint16_t udpLocalPort;   ///< UDPローカルポート
 
     // 受信は AsyncUDP (lwIP udp_recv コールバック直結)。WiFiUDP の BSDソケット
-    // ポーリング受信が本ハード/coreで機能しなかったため置換。コールバックで
-    // 最新データグラムを _rxBuf に取り込み、parsePacket/read で取り出す。
-    static constexpr size_t kRxBufSize = 20000;  ///< 最大フレーム想定
-    AsyncUDP _audp;                              ///< 受信用
-    uint8_t _rxBuf[kRxBufSize];                  ///< 最新受信パケット
-    volatile size_t _rxLen = 0;                  ///< 最新パケット長 (0=なし)
-    IPAddress _rxRemoteIP;                        ///< 最新送信元IP
+    // ポーリング受信が本ハード/coreで機能しなかったため置換。
+    // 各データグラム(=チャンク)をFreeRTOSキューに積み、recvDatagram() で取り出す。
+    // (断片化回避のためフレームは送信側でMTU内チャンクに分割される。再構成は
+    //  ImageManager が行う。キューがコールバック⇄decodeタスク間の並行性を吸収。)
+    static constexpr size_t kMaxDatagram = 1500;  ///< 1データグラム最大 (MTU内)
+    static constexpr int kRxQueueLen = 32;        ///< 受信キュー段数
+    struct UdpDatagram {                          ///< 受信キューの要素
+        uint16_t len;
+        uint8_t data[kMaxDatagram];
+    };
+    AsyncUDP _audp;                               ///< 受信用
+    QueueHandle_t _rxQueue = nullptr;             ///< 受信データグラムキュー
+    UdpDatagram _cbDg;                            ///< コールバック用作業領域(AsyncUDPタスク専用)
+    IPAddress _rxRemoteIP;                         ///< 最新送信元IP
     uint16_t _rxRemotePort = 0;                   ///< 最新送信元ポート
-    portMUX_TYPE _rxMux = portMUX_INITIALIZER_UNLOCKED;  ///< コールバック/loop排他
     
     /**
      * @brief WiFi接続ヘルパー関数
