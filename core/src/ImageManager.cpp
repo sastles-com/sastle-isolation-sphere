@@ -27,8 +27,7 @@ ImageManager::ImageManager()
       _fpsFrameCount(0),
       _currentFPS(0.0f),
       _lastJpegSize(0),
-      _tjpgTargetBuffer(nullptr),
-      _frameReadyCallback(nullptr) {
+      _tjpgTargetBuffer(nullptr) {
     _instance = this;
 }
 
@@ -217,18 +216,6 @@ bool ImageManager::decodeOneFrame() {
     }
     _framesReceived++;
     _lastFrameTime = millis();
-    return true;
-}
-
-// 後方互換: 単一スレッドでの受信→デコード→公開 (現在はデコードタスク経由で未使用)
-bool ImageManager::update() {
-    if (!decodeOneFrame()) {
-        return false;
-    }
-    publishFrame();
-    _framesDecoded++;
-    _fpsFrameCount++;
-    calculateFPS();
     return true;
 }
 

@@ -29,7 +29,6 @@ LEDManager::LEDManager()
     , _imuManager(nullptr)
     , _imuCompensationEnabled(false)
     , _renderTaskHandle(nullptr)
-    , _frameReadySemaphore(nullptr)
     , _ledBuffer(nullptr)
     , _ledLayout(nullptr)
     , _numLEDs(0)
@@ -59,11 +58,6 @@ LEDManager::~LEDManager() {
     if (_pxLUT) { free(_pxLUT); _pxLUT = nullptr; }
     if (_pyLUT) { free(_pyLUT); _pyLUT = nullptr; }
 
-    if (_frameReadySemaphore) {
-        vSemaphoreDelete(_frameReadySemaphore);
-        _frameReadySemaphore = nullptr;
-    }
-    
     _instance = nullptr;
 }
 
@@ -638,17 +632,6 @@ void LEDManager::printStatus() {
     Serial.printf("Render Time: %u us\n", _stats.render_time_us);
     Serial.printf("  Mapping: %u us\n", _stats.mapping_time_us);
     Serial.printf("  Output: %u us\n", _stats.output_time_us);
-}
-
-void LEDManager::onFrameReady() {
-    // 静的コールバック関数
-    // ImageManagerからフレームデコード完了時に呼ばれる
-    if (_instance && _instance->_frameReadySemaphore) {
-        // セマフォをGiveしてレンダリングタスクに通知
-        BaseType_t higherPriorityTaskWoken = pdFALSE;
-        xSemaphoreGiveFromISR(_instance->_frameReadySemaphore, &higherPriorityTaskWoken);
-        portYIELD_FROM_ISR(higherPriorityTaskWoken);
-    }
 }
 
 } // namespace sastle

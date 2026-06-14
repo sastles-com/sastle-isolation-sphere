@@ -15,7 +15,6 @@
 namespace sastle {
 
 /// フレーム準備完了コールバック型
-typedef void (*FrameReadyCallback)(void);
 
 /// UDP映像チャンクヘッダー (16B)。1フレームのJPEGを複数チャンクに分割して送る
 /// (UDP断片化を避けるため各チャンクはMTU内)。サーバー側も同形式で送出すること。
@@ -79,13 +78,6 @@ public:
      * @brief リソースを解放
      */
     void end();
-    
-    /**
-     * @brief UDP画像受信とデコードを実行
-     * @return true 新しいフレームをデコード, false フレームなし/エラー
-     * @note メインループ内で定期的に呼び出す
-     */
-    bool update();
 
     /**
      * @brief デコード専用タスクを開始 (Core分離による並列化)
@@ -151,7 +143,6 @@ public:
      * @param callback コールバック関数
      * @note デコード完了後、バッファスワップ時に呼び出されます
      */
-    void setFrameReadyCallback(FrameReadyCallback callback) { _frameReadyCallback = callback; }
     
     /**
      * @brief 統計情報を表示
@@ -203,7 +194,6 @@ public:
 private:
     uint32_t _parseHits = 0;     ///< parsePacket が >0 を返した累計
 
-    FrameReadyCallback _frameReadyCallback;  ///< フレーム準備完了コールバック
 
     // --- デコード並列化 (Core分離) ---
     TaskHandle_t _decodeTaskHandle = nullptr;     ///< デコードタスク

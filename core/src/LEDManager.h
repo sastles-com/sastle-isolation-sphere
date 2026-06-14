@@ -160,13 +160,7 @@ public:
      * @brief デバッグ情報を出力
      */
     void printStatus();
-    
-    /**
-     * @brief フレーム準備完了通知コールバック (静的)
-     * @note ImageManagerから呼ばれる
-     */
-    static void onFrameReady();
-    
+
 private:
     /**
      * @brief LEDレイアウトファイルを読み込み
@@ -254,7 +248,6 @@ private:
     bool _axisIndicatorEnabled = false;  ///< XYZ軸インジケータ表示フラグ
     
     TaskHandle_t _renderTaskHandle;  ///< レンダリングタスクハンドル
-    SemaphoreHandle_t _frameReadySemaphore;  ///< フレーム準備完了セマフォ
     
     CRGB* _ledBuffer;                ///< LEDバッファ (SRAM)
     LEDCoord* _ledLayout;            ///< LEDレイアウト (SRAM)
