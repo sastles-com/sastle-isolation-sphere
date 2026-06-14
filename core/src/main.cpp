@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include "common.h"
 #include "FileManager.h"
 #include "ConfigManager.h"
@@ -282,11 +283,39 @@ void loop() {
     // UDP受信+デコードは Core0 のデコードタスクで実行 (loop からは呼ばない)。
     // レンダリングは Core1 のレンダリングタスク。decode∥render で並列化。
 
-    // LCD更新 (デバッグモード時のみ。内部で ~10Hz にスロットル)
+    // LCD更新 (デバッグモード時のみ)。
+    // 映像フレームが一定時間届いていれば映像を表示、途絶えていれば
+    // device 生存情報(STANDBY ステータス画面)へ自動で切り替える。
+    // これにより停止時の焼き付き解消と「動いてないが生きている」表示を両立。
     if (lcdManager.isDebugEnabled()) {
-        lcdManager.update(&imageManager);
+        static uint32_t s_lastFrames = 0;
+        static unsigned long s_lastFrameMs = 0;
+        unsigned long n = millis();
+        uint32_t fr = imageManager.getStats().frames_received;
+        if (fr != s_lastFrames) {
+            s_lastFrames = fr;
+            s_lastFrameMs = n;
+        }
+        // 映像未受信なら起動3秒後にSTANDBY、受信後は途切れ1.5秒でSTANDBY
+        bool idle = (s_lastFrames == 0) ? (n > 3000) : ((n - s_lastFrameMs) > 1500);
+        if (idle) {
+            LcdStatus st;
+            st.uptime_s = n / 1000;
+            static String ipStr;
+            ipStr = WiFi.localIP().toString();
+            st.ip = ipStr.c_str();
+            st.rssi = (int)WiFi.RSSI();
+            st.free_heap = ESP.getFreeHeap();
+            st.fps = ledManager.getStats().fps;
+            float qw, qx, qy, qz;
+            st.imu_ok = imuSensor.getQuaternion(qw, qx, qy, qz);
+            st.qw = qw; st.qx = qx; st.qy = qy; st.qz = qz;
+            lcdManager.drawStatus(st);
+        } else {
+            lcdManager.update(&imageManager);
+        }
     }
-    
+
     // IMU更新
     unsigned long now = millis();
     if (imuSensor.isInitialized()) {

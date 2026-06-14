@@ -105,6 +105,64 @@ void LCDManager::update(ImageManager* imageManager) {
 #endif // BOARD_HAS_LCD
 }
 
+void LCDManager::drawStatus(const LcdStatus& s) {
+    if (!_initialized || !_debugEnabled) {
+        return;
+    }
+#if BOARD_HAS_LCD
+    // ~3Hz にスロットル (映像レンダリングを縛らない)。点滅もこの周期。
+    unsigned long now = millis();
+    if (now - _lastStatusMs < 300) {
+        return;
+    }
+    _lastStatusMs = now;
+    _heartbeat = !_heartbeat;
+
+    // ちらつき防止のためスプライトへ描いて一括転送 (遅延生成)
+    if (!_statusCanvas) {
+        _statusCanvas = new M5Canvas(&M5.Display);
+        _statusCanvas->createSprite(_lcdWidth, _lcdHeight);
+    }
+    M5Canvas& c = *_statusCanvas;
+    c.fillSprite(TFT_BLACK);
+
+    // ハートビート + タイトル
+    c.fillCircle(12, 12, 5, _heartbeat ? TFT_GREEN : 0x0320);
+    c.setTextColor(TFT_GREEN);
+    c.setTextSize(2);
+    c.setCursor(26, 5);
+    c.print("STANDBY");
+
+    // 情報行 (device 自前のライブ値)
+    c.setTextSize(1);
+    c.setTextColor(TFT_WHITE);
+    int y = 34;
+    const int dy = 14;
+    uint32_t up = s.uptime_s;
+    c.setCursor(4, y); c.printf("up   %02u:%02u:%02u",
+                                (unsigned)(up / 3600), (unsigned)((up % 3600) / 60), (unsigned)(up % 60)); y += dy;
+    c.setCursor(4, y); c.printf("ip   %s", s.ip ? s.ip : "-"); y += dy;
+    c.setCursor(4, y); c.printf("wifi %d dBm", s.rssi); y += dy;
+    c.setCursor(4, y); c.printf("heap %uKB", (unsigned)(s.free_heap / 1024)); y += dy;
+    c.setCursor(4, y); c.printf("fps  %.1f", s.fps); y += dy;
+
+    // IMU: pitch をテキスト + バー表示 (動く=描画ループ生存の証明)
+    if (s.imu_ok) {
+        float pitch = atan2f(2.0f * (s.qw * s.qx + s.qy * s.qz),
+                             1.0f - 2.0f * (s.qx * s.qx + s.qy * s.qy));
+        c.setCursor(4, y); c.printf("imu %+.2f", pitch);
+        const int bx = 66, bw = 58;
+        c.drawRect(bx, y - 1, bw, 9, 0x4208);
+        int px = bx + bw / 2 + (int)(pitch / 3.14159f * (bw / 2));
+        if (px < bx + 1) px = bx + 1;
+        if (px > bx + bw - 3) px = bx + bw - 3;
+        c.fillRect(px, y, 2, 7, TFT_GREEN);
+    }
+
+    c.pushSprite(0, 0);
+#endif // BOARD_HAS_LCD
+}
+
 void LCDManager::drawText(const char* text, int16_t x, int16_t y, uint8_t textSize, uint16_t color) {
     if (!_initialized || !_debugEnabled) {
         return;

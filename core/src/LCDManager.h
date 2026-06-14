@@ -31,9 +31,26 @@
 namespace sastle {
 
 /**
+ * @struct LcdStatus
+ * @brief アイドル/無信号時にLCDへ表示する device 生存情報
+ *
+ * device 自前のライブ値(増え続ける uptime / 動く IMU)を表示することで
+ * 「映像は来ていないが device は生きている」ことを示す。
+ */
+struct LcdStatus {
+    uint32_t uptime_s;   ///< 起動からの経過秒 (増え続ける=生存証明)
+    const char* ip;      ///< IPアドレス文字列
+    int rssi;            ///< WiFi 受信強度 [dBm]
+    uint32_t free_heap;  ///< 空きヒープ [bytes]
+    float fps;           ///< 描画FPS
+    float qw, qx, qy, qz;///< IMUクォータニオン
+    bool imu_ok;         ///< IMU有効
+};
+
+/**
  * @class LCDManager
  * @brief LCD表示管理
- * 
+ *
  * sphere.features.LCD.debugフラグでデバッグ表示を制御
  * ON時は受信した画像をLCDに表示
  */
@@ -73,7 +90,16 @@ public:
      * @param color 色 (RGB565)
      */
     void drawText(const char* text, int16_t x, int16_t y, uint8_t textSize = 2, uint16_t color = TFT_WHITE);
-    
+
+    /**
+     * @brief アイドル/無信号時のステータス画面を描画
+     * @param s 表示する device 生存情報
+     *
+     * 映像が一定時間届かない時に呼ぶ。内部で ~3Hz にスロットルし、
+     * ハートビート点滅 + uptime/IP/RSSI/heap/fps/IMU を sprite で描画(ちらつき防止)。
+     */
+    void drawStatus(const LcdStatus& s);
+
     /**
      * @brief 画面クリア
      * @param color 背景色 (RGB565)
@@ -96,6 +122,11 @@ private:
     uint8_t _rotation;           ///< LCD回転角度 (0/1/2/3)
     uint16_t* _lcdBuf = nullptr; ///< 一括転送用フレームバッファ (RGB565)
     unsigned long _lastUpdateMs = 0;  ///< 最終LCD更新時刻 (スロットル用)
+    unsigned long _lastStatusMs = 0;  ///< 最終ステータス描画時刻 (スロットル用)
+    bool _heartbeat = false;          ///< ステータス画面のハートビート点滅状態
+#if BOARD_HAS_LCD
+    M5Canvas* _statusCanvas = nullptr; ///< ステータス画面用スプライト (遅延生成)
+#endif
 };
 
 } // namespace sastle
