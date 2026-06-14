@@ -137,3 +137,58 @@ async def delete_playlist(request: Request, playlist_id: int):
         raise HTTPException(status_code=404, detail="playlist not found")
     db.delete_playlist(playlist_id)
     return {"status": "ok", "deleted": playlist_id}
+
+
+# ============================ 再生制御 (ストリーミング) ============================
+# 動画を選択 → サーバーが OpenCV でデコードし 320x160 JPEG チャンクとして UDP 送出。
+# 制御は VideoStreamer (別スレッド)。状態は playback_state DB にも反映する。
+
+def _sync_playback_state(db, streamer):
+    """ストリーマ状態を playback_state DB に反映 (Web UI 表示・永続化用)。"""
+    try:
+        db.update_playback_state(
+            status=streamer.status,
+            current_video_id=streamer.current_video_id,
+        )
+    except Exception as e:  # DB スキーマ差異等で落とさない
+        logger.warning(f"playback_state sync skipped: {e}")
+
+
+@router.post("/play/{video_id}")
+async def play_video(request: Request, video_id: int):
+    """指定した素材動画の再生(デバイスへのストリーミング)を開始する。"""
+    db = request.app.state.db
+    streamer = request.app.state.video_streamer
+    v = db.get_video(video_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="video not found")
+    path = v.get("converted_path")
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=410, detail="video file missing on disk")
+    ok = streamer.play(path, fps=v.get("fps") or None, loop=True, video_id=video_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to start streaming")
+    _sync_playback_state(db, streamer)
+    logger.info(f"play video {video_id}: {path}")
+    return {"status": "ok", "playback": streamer.get_status()}
+
+
+@router.post("/playback/pause")
+async def pause_playback(request: Request):
+    streamer = request.app.state.video_streamer
+    streamer.toggle()
+    _sync_playback_state(request.app.state.db, streamer)
+    return {"status": "ok", "playback": streamer.get_status()}
+
+
+@router.post("/playback/stop")
+async def stop_playback(request: Request):
+    streamer = request.app.state.video_streamer
+    streamer.stop()
+    _sync_playback_state(request.app.state.db, streamer)
+    return {"status": "ok", "playback": streamer.get_status()}
+
+
+@router.get("/playback")
+async def get_playback(request: Request):
+    return request.app.state.video_streamer.get_status()

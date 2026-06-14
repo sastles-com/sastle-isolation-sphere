@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.core.config import get_settings, CORS_ORIGINS, DB_PATH
 from app.services.state_manager import StateManager
 from app.services.mqtt_service import MQTTService
+from app.services.video_streamer import VideoStreamer
 from app.db import Database
 from app.api.router import api_router
 from app.api.endpoints import websocket
@@ -39,14 +40,19 @@ async def lifespan(app: FastAPI):
     # SQLite データベース初期化 (動画/プレイリスト)
     db = Database(DB_PATH)
 
+    # 動画ストリーマ初期化 (再生時に動画→JPEGチャンク→UDPでデバイスへ送出)
+    video_streamer = VideoStreamer()
+
     # アプリケーション状態に保存
     app.state.state_manager = state_manager
     app.state.mqtt_service = mqtt_service
     app.state.db = db
+    app.state.video_streamer = video_streamer
 
     yield
 
     # Shutdown
+    video_streamer.stop()
     mqtt_service.stop()
     db.close()
 
