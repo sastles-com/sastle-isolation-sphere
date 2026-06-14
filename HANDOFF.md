@@ -372,9 +372,25 @@ Core1 レンダリングタスク: 連続駆動 ~50Hz: adoptReadyFrame()(新フ�
   旧 `mockVideos.js` 削除。
 - 検証: TestClient + UDPループバックで upload→play→playback→stop、プレイリスト順次巡回
   (全動画を巡回・UDPフレーム受信)、FK安全な動画削除を確認。
-- **未デプロイ/未確認**: GMKTec反映は `git pull` + `uv sync` + frontend `npm run build` +
-  サーバー再起動が必要。色順(BGR/RGB)と実機表示はLED基板到着後に確認。
-  プレイリスト再生の playback_state は `current_playlist_id` も記録(WS state には未連携)。
+- **実機検証済み (2026-06-14)**: GMKTec へデプロイ(`git pull`+`uv sync`+frontend `npm run build`+
+  サーバー再起動)し、アップロード→再生→**実機LCDに fire 動画が安定表示・色も正常**を確認。
+  `cv2.imencode`(BGR)で色は正しく出る(変換不要)。送信先 192.168.49.101:8889、320×160。
+
+### A+. 再生UX改善 (2026-06-14, 実機検証済み)
+- **無信号時の STANDBY ステータス画面** (`core` 88d68f8): 映像フレームが途切れると LCD を
+  device 自前のライブ情報(uptime/IP/RSSI/heap/fps/IMU + ハートビート)へ自動切替。
+  「最後のフレーム焼き付き」解消と「映像は無いが生きている」表示を両立。`LCDManager::drawStatus`
+  (M5Canvasスプライト)、main.cpp で `frames_received` 鮮度により映像/STANDBY を切替
+  (未受信は起動3秒後、途切れ1.5秒)。**OTA(espota)で書き込み済み**。
+- **ループ再生ON/OFFトグル** (`server/frontend` 3d4b43f): `VideoStreamer._loop` 可変化 +
+  `POST /playback/loop`、NOW STREAMING バーに 🔁(緑=ON)。OFFで再生し切ると停止→STANDBY。
+- **応答性修正** (`server` c033232): 30fps動画を捌けず送出スレッドが sleepゼロで回り uvicorn の
+  イベントループを GIL 飢餓させ、WebUI 操作が ~10秒無応答だった。**送出fpsを MAX_STREAM_FPS(20)で
+  上限化(skipフレーム間引き・速度維持)+毎フレーム最低3ms sleep** で解消。
+- **運用の罠**: GMKTec に手動起動の `stream_to_sphere.py` が残ると VideoStreamer と二重送信して
+  表示が交錯する → `pkill -f stream_to_sphere.py`。deviceハング時は uptime が固定 → 電源リセット。
+- **未確認/残**: 実機LED(基板未着)。WS state へ `current_playlist_id` 未連携。
+  STANDBY閾値1.5s・MAX_STREAM_FPS=20 は要チューニング余地。
 
 ### C. デバイス機能のTODO (firmware)
 - **LED pixel(個別制御)モード**未実装 (`CommandHandler::_handleLed` "pixels")。
