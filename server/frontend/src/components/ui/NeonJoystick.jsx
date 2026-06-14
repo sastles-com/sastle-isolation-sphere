@@ -72,6 +72,7 @@ export const NeonJoystick = ({ size = 150, onChange }) => {
     return (
         <Box
             ref={containerRef}
+            data-no-swipe  // 親のタブ横スワイプにジョイスティック操作を拾わせない
             sx={{
                 width: size,
                 height: size,

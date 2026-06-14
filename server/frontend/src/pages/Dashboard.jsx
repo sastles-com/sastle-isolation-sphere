@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useSwipeable } from 'react-swipeable';
 import { Box, Typography, BottomNavigation, BottomNavigationAction, Tabs, Tab } from '@mui/material';
 import PublicIcon from '@mui/icons-material/Public';
@@ -62,9 +62,18 @@ export const Dashboard = () => {
     };
 
     // 横スワイプで主タブ移動 (ボトムタブバーと併用)。縦スクロールは妨げない。
+    // スライダ/ジョイスティック等の操作部品の上で始まったジェスチャーは
+    // タブ移動として拾わない (誤作動防止)。
+    const swipeBlocked = useRef(false);
     const swipeHandlers = useSwipeable({
-        onSwipedLeft: () => changeTab(currentTab + 1),
-        onSwipedRight: () => changeTab(currentTab - 1),
+        onTouchStartOrOnMouseDown: ({ event }) => {
+            const el = event.target;
+            swipeBlocked.current = !!(el && el.closest && el.closest(
+                '[data-no-swipe], .MuiSlider-root, [role="slider"], input, textarea, button, a'
+            ));
+        },
+        onSwipedLeft: () => { if (!swipeBlocked.current) changeTab(currentTab + 1); },
+        onSwipedRight: () => { if (!swipeBlocked.current) changeTab(currentTab - 1); },
         trackMouse: true,
         preventScrollOnSwipe: false,
         delta: 50,
