@@ -8,6 +8,7 @@ import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import PauseIcon from '@mui/icons-material/Pause';
+import RepeatIcon from '@mui/icons-material/Repeat';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -91,6 +92,7 @@ export const PlaylistManager = () => {
 
     const handleStop = async () => { await apiPost(`${BASE}/playback/stop`, {}); fetchPlayback(); };
     const handlePauseToggle = async () => { await apiPost(`${BASE}/playback/pause`, {}); fetchPlayback(); };
+    const handleLoopToggle = async () => { await apiPost(`${BASE}/playback/loop`, { loop: !playback.loop }); fetchPlayback(); };
 
     const handleAddVideo = async (videoId) => {
         setAddAnchor(null);
@@ -144,6 +146,11 @@ export const PlaylistManager = () => {
                             {playback.status === 'playing' ? 'STREAMING' : 'PAUSED'}
                             {playback.playlist_id ? ` · PL#${playback.playlist_id}` : ` · #${playback.video_id ?? '-'}`}
                         </Typography>
+                        <IconButton size="small" onClick={handleLoopToggle}
+                            title={playback.loop ? 'ループ ON' : 'ループ OFF'}
+                            sx={{ color: playback.loop ? '#00FF41' : 'text.secondary' }}>
+                            <RepeatIcon fontSize="small" />
+                        </IconButton>
                         <IconButton size="small" onClick={handlePauseToggle} sx={{ color: 'primary.main' }}>
                             {playback.status === 'playing' ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
                         </IconButton>

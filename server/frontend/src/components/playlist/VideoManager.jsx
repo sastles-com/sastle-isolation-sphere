@@ -6,6 +6,7 @@ import MovieIcon from '@mui/icons-material/Movie';
 import StopIcon from '@mui/icons-material/Stop';
 import PauseIcon from '@mui/icons-material/Pause';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import RepeatIcon from '@mui/icons-material/Repeat';
 import { VideoCard } from './VideoCard';
 import { apiGet, apiPost } from '../../lib/api';
 
@@ -96,6 +97,10 @@ export const VideoManager = () => {
 
     const handlePauseToggle = async () => {
         try { await apiPost(`${PLAYBACK_URL}/pause`, {}); } finally { fetchPlayback(); }
+    };
+
+    const handleLoopToggle = async () => {
+        try { await apiPost(`${PLAYBACK_URL}/loop`, { loop: !playback.loop }); } finally { fetchPlayback(); }
     };
 
     const handleUploadClick = () => fileInputRef.current?.click();
@@ -197,6 +202,11 @@ export const VideoManager = () => {
                         {' · '}
                         {(videos.find(v => v.id === playback.video_id) || {}).title || `#${playback.video_id ?? '-'}`}
                     </Typography>
+                    <IconButton size="small" onClick={handleLoopToggle}
+                        title={playback.loop ? 'ループ ON' : 'ループ OFF'}
+                        sx={{ color: playback.loop ? '#00FF41' : 'text.secondary' }}>
+                        <RepeatIcon fontSize="small" />
+                    </IconButton>
                     <IconButton size="small" onClick={handlePauseToggle} sx={{ color: 'primary.main' }}>
                         {playback.status === 'playing' ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
                     </IconButton>

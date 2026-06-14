@@ -52,12 +52,18 @@ class VideoStreamer:
         self.current_path = None
         self.current_video_id = None
         self.current_playlist_id = None
+        self._loop = True                # ループ再生フラグ (再生中も変更可能)
         logger.info(f"VideoStreamer target={self._target} size={self._w}x{self._h}")
 
     def get_status(self):
         return {"status": self.status, "video_id": self.current_video_id,
                 "playlist_id": self.current_playlist_id, "path": self.current_path,
-                "target": list(self._target)}
+                "loop": self._loop, "target": list(self._target)}
+
+    def set_loop(self, loop: bool):
+        """ループ再生フラグを切り替える (再生中に変更すると末尾到達時の挙動に反映)。"""
+        self._loop = bool(loop)
+        return self._loop
 
     def play(self, path: str, fps=None, loop: bool = True, video_id=None):
         """単一動画を再生 (loop=True で繰り返し)。"""
@@ -77,11 +83,12 @@ class VideoStreamer:
             return False
         self._stop.clear()
         self._pause.clear()
+        self._loop = bool(loop)
         self.current_playlist_id = playlist_id
         self.current_video_id = entries[0].get("video_id")
         self.current_path = entries[0].get("path")
         self.status = "playing"
-        self._thread = threading.Thread(target=self._run, args=(entries, loop), daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(entries,), daemon=True)
         self._thread.start()
         return True
 
@@ -111,8 +118,8 @@ class VideoStreamer:
         self.current_video_id = None
         self.current_playlist_id = None
 
-    def _run(self, entries, loop):
-        """エントリ列を順次再生。各動画を最後まで送出し、末尾で loop なら先頭へ。"""
+    def _run(self, entries):
+        """エントリ列を順次再生。各動画を最後まで送出し、末尾で self._loop なら先頭へ。"""
         import cv2
         fid = 0
         idx = 0
@@ -153,7 +160,7 @@ class VideoStreamer:
                     break
                 idx += 1
                 if idx >= len(entries):
-                    if loop:
+                    if self._loop:
                         idx = 0
                     else:
                         break

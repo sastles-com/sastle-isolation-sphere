@@ -295,6 +295,18 @@ async def stop_playback(request: Request):
     return {"status": "ok", "playback": streamer.get_status()}
 
 
+class LoopSet(BaseModel):
+    loop: bool
+
+
+@router.post("/playback/loop")
+async def set_playback_loop(request: Request, body: LoopSet):
+    """ループ再生のON/OFFを切り替える (再生中も即時反映)。"""
+    streamer = request.app.state.video_streamer
+    streamer.set_loop(body.loop)
+    return {"status": "ok", "playback": streamer.get_status()}
+
+
 @router.get("/playback")
 async def get_playback(request: Request):
     return request.app.state.video_streamer.get_status()
