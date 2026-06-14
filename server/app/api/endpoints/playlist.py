@@ -1,39 +1,139 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
+"""動画・プレイリスト API (SQLite DB バックエンド)。
 
+素材動画(videos) と プレイリスト(playlists/playlist_items) を管理する。
+設計: docs/playlist_system_design.md。DB: app/db/database.py。
+動画は再生時に 320x160 JPEG にライブ変換して送出するため、ここでは元ファイルを
+そのまま保存する(事前RGB565変換はしない)。
+"""
+import logging
+import os
+import time
+import uuid as uuidlib
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from pydantic import BaseModel
+
+from app.core.config import MEDIA_VIDEOS_DIR
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-class Video(BaseModel):
-    id: str
-    title: str
-    duration: str
-    size: str
+ALLOWED_EXT = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
 
-class Playlist(BaseModel):
-    id: str
+
+def _extract_metadata(path: str):
+    """OpenCV があれば (duration_ms, width, height, fps) を返す。無ければ既定値。"""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            return (0, 0, 0, 30)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        cap.release()
+        dur = int(frames / fps * 1000) if fps else 0
+        return (dur, w, h, int(round(fps)) or 30)
+    except Exception as e:
+        logger.warning(f"metadata extract failed ({path}): {e}")
+        return (0, 0, 0, 30)
+
+
+# ============================ 動画 (素材) ============================
+
+@router.get("/videos")
+async def get_videos(request: Request):
+    return request.app.state.db.get_videos()
+
+
+@router.post("/videos")
+async def upload_video(
+    request: Request,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+):
+    """動画をアップロードして保存・DB登録する。"""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(status_code=400, detail=f"unsupported format: {ext or '(none)'}")
+
+    os.makedirs(MEDIA_VIDEOS_DIR, exist_ok=True)
+    vid = f"v_{int(time.time())}_{uuidlib.uuid4().hex[:6]}"
+    dest = os.path.join(MEDIA_VIDEOS_DIR, f"{vid}{ext}")
+
+    size = 0
+    try:
+        with open(dest, "wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)  # 1MBずつ
+                if not chunk:
+                    break
+                out.write(chunk)
+                size += len(chunk)
+    except Exception as e:
+        if os.path.exists(dest):
+            os.remove(dest)
+        raise HTTPException(status_code=500, detail=f"save failed: {e}")
+
+    dur, w, h, fps = _extract_metadata(dest)
+    db = request.app.state.db
+    row = db.create_video(
+        uuid=vid,
+        title=title or (file.filename or vid),
+        filename=file.filename or f"{vid}{ext}",
+        converted_path=dest,   # 元ファイル(再生時にライブ変換)
+        duration_ms=dur, width=w, height=h, fps=fps,
+        size_bytes=size, codec=ext.lstrip("."),
+    )
+    logger.info(f"uploaded video {vid}: {size}B {w}x{h} {dur}ms")
+    return row
+
+
+@router.delete("/videos/{video_id}")
+async def delete_video(request: Request, video_id: int):
+    db = request.app.state.db
+    v = db.get_video(video_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="video not found")
+    path = v.get("converted_path")
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception as e:
+            logger.warning(f"file remove failed ({path}): {e}")
+    db.delete_video(video_id)
+    return {"status": "ok", "deleted": video_id}
+
+
+# ============================ プレイリスト ============================
+
+class PlaylistCreate(BaseModel):
     name: str
-    videos: List[str]
+    description: Optional[str] = None
+    loop: bool = False
+    shuffle: bool = False
 
-# Mock Data
-VIDEOS = [
-  { "id": "v1", "title": "Isolation Theme", "duration": "3:45", "size": "12MB" },
-  { "id": "v2", "title": "Ambient Rain", "duration": "10:00", "size": "45MB" }
-]
 
-PLAYLISTS = [
-  { "id": "p1", "name": "Morning Routine", "videos": ["v1"] }
-]
+@router.get("/playlists")
+async def get_playlists(request: Request):
+    return request.app.state.db.get_playlists()
 
-@router.get("/videos", response_model=List[Video])
-async def get_videos():
-    return VIDEOS
-
-@router.get("/playlists", response_model=List[Playlist])
-async def get_playlists():
-    return PLAYLISTS
 
 @router.post("/playlists")
-async def create_playlist(playlist: Playlist):
-    PLAYLISTS.append(playlist.dict())
-    return playlist
+async def create_playlist(request: Request, body: PlaylistCreate):
+    pid = f"p_{int(time.time())}_{uuidlib.uuid4().hex[:6]}"
+    return request.app.state.db.create_playlist(
+        uuid=pid, name=body.name, description=body.description,
+        loop=body.loop, shuffle=body.shuffle,
+    )
+
+
+@router.delete("/playlists/{playlist_id}")
+async def delete_playlist(request: Request, playlist_id: int):
+    db = request.app.state.db
+    if not db.get_playlist(playlist_id):
+        raise HTTPException(status_code=404, detail="playlist not found")
+    db.delete_playlist(playlist_id)
+    return {"status": "ok", "deleted": playlist_id}

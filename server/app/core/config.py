@@ -11,6 +11,10 @@ MQTT_STATE_TOPIC = "sphere/all/state"
 MQTT_COMMAND_TOPIC_PREFIX = "sphere/all/command"
 MQTT_COMMAND_TOPIC_WILDCARD = "sphere/all/command/#"
 
+# プレイリスト/動画システムの保存先 (server/ 起動前提の相対パス)
+DB_PATH = "data/sphere.db"            # SQLite データベース
+MEDIA_VIDEOS_DIR = "data/videos"      # アップロード動画の保存先
+
 # MQTT ブローカー設定 (config.json) の探索パス。
 # サーバーは server/ ディレクトリから起動される前提の相対パス(順序も既存実装と同一)
 CONFIG_SEARCH_PATHS = [

@@ -2,9 +2,10 @@ import logging
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.core.config import get_settings, CORS_ORIGINS
+from app.core.config import get_settings, CORS_ORIGINS, DB_PATH
 from app.services.state_manager import StateManager
 from app.services.mqtt_service import MQTTService
+from app.db import Database
 from app.api.router import api_router
 from app.api.endpoints import websocket
 
@@ -35,14 +36,19 @@ async def lifespan(app: FastAPI):
     # MQTT接続開始
     mqtt_service.start()
     
+    # SQLite データベース初期化 (動画/プレイリスト)
+    db = Database(DB_PATH)
+
     # アプリケーション状態に保存
     app.state.state_manager = state_manager
     app.state.mqtt_service = mqtt_service
-    
+    app.state.db = db
+
     yield
-    
+
     # Shutdown
     mqtt_service.stop()
+    db.close()
 
 from fastapi.middleware.cors import CORSMiddleware
 
