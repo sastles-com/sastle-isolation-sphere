@@ -350,21 +350,31 @@ Core1 レンダリングタスク: 連続駆動 ~50Hz: adoptReadyFrame()(新フ�
 (OTA/ログ)は完成・実機確認済み。ここから先の**未実装機能**を棚卸しした。実装順は **B → A → C → D**
 (土台→実運用→デバイス機能→入力)を想定。出典: `server/task.md` + コード内TODO + ベンチ検証知見。
 
-### B. デバイス操作の到達性(配線の穴) ★最初
-- **WSコマンドが実機に届かない**。WebSocket経由のコマンドは `StateManager` が server state を
-  更新し `sphere/all/state` を publish するだけ。デバイスは `sphere/all/command/*` しか購読せず、
-  実機到達は REST `/api/command/*` (`app/api/endpoints/command.py`) 経由のみ。
-  → UIの brightness/playback/axis 等が実機に反映されない。**経路を統一**する(WS経路でも
-  command トピックへ publish する、等)。これが直らないと以降のUI操作が効かない土台。
+### B. デバイス操作の到達性(配線の穴) ★最初 → ✅ 完了 (2026-06-14)
+- **WSコマンドが実機に届かない**問題を修正済み。`StateManager.handle_websocket_message` が
+  `_update_*` 後に `sphere/all/command/{params,playback,led}` へ publish するようにした
+  (`_publish_command`)。WS経路の SET_PARAMS が `sphere/all/command/params` に到達することを
+  mosquitto_sub で検証済み。
 
-### A. 映像再生の統合(Phase2・実運用の本命)
-- **再生コマンドとストリーマが未連携**: `server/scripts/stream_to_sphere.py` は手動起動の単発。
-  UIの play/pause/stop → ストリーマの起動/停止/切替 の配線が無い(`state_manager` に subprocess
-  起動等なし)。再生制御をストリーマ(またはデーモン化)に接続する。
-- **プレイリストAPIがモック**: `app/api/endpoints/playlist.py` は39行のハードコード。
-  CRUD/永続化/トラック管理が未実装。
-- **実動画ファイル再生(OpenCVデコード)未実装**: 現状はテストパターン/静止画のみ。
-  `stream_to_sphere.py` の video 分岐は opencv-python 前提(venv未導入)。
+### A. 映像再生の統合(Phase2・実運用の本命) → ✅ 完了 (2026-06-14)
+全サブ機能を実装・ローカル検証済み(実機LED確認は基板到着後)。
+- **A-① DB配線+アップロード** ✅: `playlist.py` を SQLite バックエンドに刷新。
+  `POST /videos`(multipart 保存 + opencv メタ抽出)/`GET /videos`/`DELETE /videos/{id}`。
+  `main.py` lifespan で `app.state.db` 初期化。
+- **A-③ 再生→ストリーミング連携** ✅: `app/services/video_streamer.py` (`VideoStreamer`)。
+  別スレッドで動画を opencv デコード→320x160→JPEGチャンク(protocol §4)→UDP送出。
+  `play/pause/resume/stop/play_entries`。送信先は config.json から解決。
+- **A-② プレイリストアイテム管理 + 順次再生** ✅: `GET /playlists/{id}`(items詳細)、
+  `POST/DELETE/PUT /playlists/{id}/items`(追加/削除/並び替え)、`POST /playlists/{id}/play`
+  (loop/shuffle 対応の順次再生)。DB に `get_playlist_items_detailed`/`set_playlist_items` 追加。
+- **A-④ フロント配線** ✅: `VideoManager`(アップロード/一覧/削除/再生)・`PlaylistManager`
+  (PL作成/削除/アイテム編集/並び替え/PL再生)を実API配線。NOW STREAMING バー + 2秒ポーリング。
+  旧 `mockVideos.js` 削除。
+- 検証: TestClient + UDPループバックで upload→play→playback→stop、プレイリスト順次巡回
+  (全動画を巡回・UDPフレーム受信)、FK安全な動画削除を確認。
+- **未デプロイ/未確認**: GMKTec反映は `git pull` + `uv sync` + frontend `npm run build` +
+  サーバー再起動が必要。色順(BGR/RGB)と実機表示はLED基板到着後に確認。
+  プレイリスト再生の playback_state は `current_playlist_id` も記録(WS state には未連携)。
 
 ### C. デバイス機能のTODO (firmware)
 - **LED pixel(個別制御)モード**未実装 (`CommandHandler::_handleLed` "pixels")。
