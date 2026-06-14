@@ -150,17 +150,10 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     FastLED.setBrightness(kLedDefaultBrightness);
     FastLED.clear();
     FastLED.show();
-    
-    // セマフォ作成
-    _frameReadySemaphore = xSemaphoreCreateBinary();
-    if (!_frameReadySemaphore) {
-        Serial.println("[LEDManager] Failed to create semaphore");
-        return false;
-    }
-    
-    // ImageManagerにフレーム準備完了コールバックを設定
-    _imageManager->setFrameReadyCallback(LEDManager::onFrameReady);
-    
+
+    // レンダリングは連続駆動 (renderTaskFunction が毎パス adoptReadyFrame + renderFrame)。
+    // フレーム到着セマフォ/コールバックによるハンドシェイクは廃止 (トリプルバッファ化)。
+
     _initialized = true;
     Serial.println("[LEDManager] Initialization complete");
     
@@ -352,30 +345,22 @@ void LEDManager::stopRenderTask() {
 
 void LEDManager::renderTaskFunction(void* parameter) {
     LEDManager* manager = static_cast<LEDManager*>(parameter);
-    const TickType_t frameDelay = pdMS_TO_TICKS(kFrameDelayMs);
-    
+
     Serial.printf("[LED_Render] Task started on core %d\n", xPortGetCoreID());
-    
+
+    // 連続駆動: フレーム到着に依存せず、毎パス最新IMUで現在の表示フレームを
+    // 再マッピング描画する。新フレームは adoptReadyFrame() で独立に差し替わる。
+    // → IMU姿勢追従は show() 律速の高Hz(~50-60Hz)で滑らか、動画は来たぶんだけ差替。
     while (true) {
         unsigned long frameStart = micros();
-        
-        // ImageManagerのフレーム更新を待機
-        // タイムアウト付き（フレーム間隔）
-        if (xSemaphoreTake(manager->_frameReadySemaphore, frameDelay)) {
-            // 新しいフレームが利用可能
-            manager->renderFrame();
-        } else {
-            // タイムアウト - 前のフレームを再描画または何もしない
-            // ここでは統計カウント用にドロップとする
-            manager->_stats.frames_dropped++;
+
+        if (manager->_imageManager) {
+            manager->_imageManager->adoptReadyFrame();  // 新フレームがあれば採用
         }
-        
-        // フレームレート維持
-        unsigned long frameTime = micros() - frameStart;
-        manager->_stats.render_time_us = frameTime;
-        
-        // 短い待機で他タスクに譲る
-        vTaskDelay(1);
+        manager->renderFrame();                          // 最新IMUで再マッピング+出力
+
+        manager->_stats.render_time_us = micros() - frameStart;
+        vTaskDelay(1);  // 他タスクに譲る (show()が~14msなので実効~50-60Hz)
     }
 }
 
@@ -394,11 +379,6 @@ void LEDManager::renderFrame() {
     unsigned long outputTime = micros() - outputStart;
     _stats.output_time_us = outputTime;
 
-    // 描画バッファを使い終えたことを ImageManager に通知 (decodeのswap許可)。
-    // これにより decode(別コア) は次フレームのswapを安全に行える。
-    if (_imageManager) {
-        _imageManager->releaseBuffer();
-    }
     
     // 統計更新
     _stats.frames_rendered++;

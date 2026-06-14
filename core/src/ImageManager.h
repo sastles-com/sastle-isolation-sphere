@@ -97,10 +97,11 @@ public:
     bool startDecodeTask(uint8_t core = 0, uint8_t priority = 1, uint32_t stackSize = 8192);
 
     /**
-     * @brief レンダリング側が描画バッファを使い終えたことを通知 (decodeのswap許可)
-     * @note レンダリングタスクが1フレーム描画後に呼ぶこと。
+     * @brief 表示待ちの完成フレームがあれば表示バッファに採用する (render側が毎パス呼ぶ)
+     * @note これによりレンダリングは連続駆動(IMU再マッピング)しつつ、フレーム差し替えを
+     *       独立に行える。新フレームが無ければ現在の表示バッファを維持。
      */
-    void releaseBuffer();
+    void adoptReadyFrame();
 
     /**
      * @brief 指定座標のピクセル色を取得 (RGB)
@@ -168,11 +169,17 @@ private:
     uint8_t _jpegScale = 2;      ///< 縮小デコード倍率 (1,2,4,8)
     size_t _bufferSize;          ///< 1バッファのサイズ (bytes)
     
-    // ダブルバッファ (PSRAM)
-    uint16_t* _bufferA;          ///< RGB565バッファA
-    uint16_t* _bufferB;          ///< RGB565バッファB
-    uint16_t* _drawBuffer;       ///< 現在の描画用バッファ (読み取り専用)
-    uint16_t* _decodeBuffer;     ///< 現在のデコード用バッファ (書き込み)
+    // トリプルバッファ (PSRAM)。描画(IMU再マッピング)を連続駆動しつつ、
+    // フレーム差し替えを独立に行うため3枚使う(テアリング防止)。
+    //   display = render が表示中 / ready = 表示待ちの完成フレーム / decode = 書込中
+    // インデックス操作のみ _bufMux で排他(画素コピーはしないので一瞬)。
+    uint16_t* _buf[3] = {nullptr, nullptr, nullptr};
+    volatile int _displayIdx = 0;        ///< 表示中バッファ
+    volatile int _readyIdx = -1;         ///< 表示待ち完成フレーム (-1=なし)
+    volatile int _decodeIdx = 1;         ///< デコード書込中バッファ
+    uint16_t* _displayBuffer = nullptr;  ///< getPixel が読む (= _buf[_displayIdx])
+    uint16_t* _decodeBuffer = nullptr;   ///< tjpgが書く (= _buf[_decodeIdx])
+    portMUX_TYPE _bufMux = portMUX_INITIALIZER_UNLOCKED;
     
     // UDP受信バッファ (PSRAM)
     uint8_t* _udpBuffer;         ///< JPEG受信バッファ
@@ -200,7 +207,6 @@ private:
 
     // --- デコード並列化 (Core分離) ---
     TaskHandle_t _decodeTaskHandle = nullptr;     ///< デコードタスク
-    SemaphoreHandle_t _bufferFreeSem = nullptr;   ///< 描画バッファ解放通知(render→decode)
     bool decodeOneFrame();                        ///< 受信+再構成+デコード(swapはしない)
     static void decodeTaskFunc(void* param);      ///< デコードタスク本体
 
@@ -240,7 +246,7 @@ private:
     /**
      * @brief バッファをスワップ (描画⇔デコード)
      */
-    void swapBuffers();
+    void publishFrame();  ///< decode完成フレームを ready に公開 (トリプルバッファ)
     
     /**
      * @brief FPSを計算

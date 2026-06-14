@@ -16,10 +16,6 @@ ImageManager::ImageManager()
       _width(320),
       _height(160),
       _bufferSize(0),
-      _bufferA(nullptr),
-      _bufferB(nullptr),
-      _drawBuffer(nullptr),
-      _decodeBuffer(nullptr),
       _udpBuffer(nullptr),
       _udpBufferSize(MAX_UDP_IMAGE_SIZE),
       _framesReceived(0),
@@ -84,12 +80,6 @@ bool ImageManager::begin(ConfigManager& config, NetworkManager& network) {
     TJpgDec.setSwapBytes(true);  // RGB565バイトスワップ
     TJpgDec.setCallback(tjpgOutput);
 
-    // バッファ解放セマフォ (decode∥render のハンドシェイク用)。初期はバッファ空き。
-    _bufferFreeSem = xSemaphoreCreateBinary();
-    if (_bufferFreeSem) {
-        xSemaphoreGive(_bufferFreeSem);
-    }
-
     _initialized = true;
     _fpsTimestamp = millis();
     
@@ -110,61 +100,48 @@ void ImageManager::end() {
 }
 
 bool ImageManager::allocateBuffers() {
-    // RGB565ダブルバッファをPSRAMに確保
-    _bufferA = (uint16_t*)ps_malloc(_bufferSize);
-    if (!_bufferA) {
-        Serial.println("[ImageManager] Failed to allocate buffer A");
-        return false;
+    // RGB565 トリプルバッファをPSRAMに確保
+    for (int i = 0; i < 3; i++) {
+        _buf[i] = (uint16_t*)ps_malloc(_bufferSize);
+        if (!_buf[i]) {
+            Serial.printf("[ImageManager] Failed to allocate buffer %d\n", i);
+            for (int j = 0; j < i; j++) { free(_buf[j]); _buf[j] = nullptr; }
+            return false;
+        }
+        memset(_buf[i], 0, _bufferSize);
     }
-    memset(_bufferA, 0, _bufferSize);
-    
-    _bufferB = (uint16_t*)ps_malloc(_bufferSize);
-    if (!_bufferB) {
-        Serial.println("[ImageManager] Failed to allocate buffer B");
-        free(_bufferA);
-        _bufferA = nullptr;
-        return false;
-    }
-    memset(_bufferB, 0, _bufferSize);
-    
+
     // UDP受信バッファをPSRAMに確保
     _udpBuffer = (uint8_t*)ps_malloc(_udpBufferSize);
     if (!_udpBuffer) {
         Serial.println("[ImageManager] Failed to allocate UDP buffer");
-        free(_bufferA);
-        free(_bufferB);
-        _bufferA = nullptr;
-        _bufferB = nullptr;
+        for (int j = 0; j < 3; j++) { free(_buf[j]); _buf[j] = nullptr; }
         return false;
     }
-    
-    // 初期状態: A=描画, B=デコード
-    _drawBuffer = _bufferA;
-    _decodeBuffer = _bufferB;
-    
-    Serial.printf("[ImageManager] Buffers allocated successfully\n");
-    Serial.printf("  Buffer A: %p\n", _bufferA);
-    Serial.printf("  Buffer B: %p\n", _bufferB);
-    Serial.printf("  UDP Buffer: %p\n", _udpBuffer);
+
+    // 初期: 0=表示, 1=デコード, 2=空き
+    _displayIdx = 0;
+    _decodeIdx = 1;
+    _readyIdx = -1;
+    _displayBuffer = _buf[0];
+    _decodeBuffer = _buf[1];
+
+    Serial.printf("[ImageManager] Triple buffers allocated (%p,%p,%p), UDP %p\n",
+                  _buf[0], _buf[1], _buf[2], _udpBuffer);
     Serial.printf("  Free PSRAM: %d bytes\n", ESP.getFreePsram());
-    
+
     return true;
 }
 
 void ImageManager::freeBuffers() {
-    if (_bufferA) {
-        free(_bufferA);
-        _bufferA = nullptr;
-    }
-    if (_bufferB) {
-        free(_bufferB);
-        _bufferB = nullptr;
+    for (int i = 0; i < 3; i++) {
+        if (_buf[i]) { free(_buf[i]); _buf[i] = nullptr; }
     }
     if (_udpBuffer) {
         free(_udpBuffer);
         _udpBuffer = nullptr;
     }
-    _drawBuffer = nullptr;
+    _displayBuffer = nullptr;
     _decodeBuffer = nullptr;
 }
 
@@ -243,12 +220,12 @@ bool ImageManager::decodeOneFrame() {
     return true;
 }
 
-// 後方互換: 単一スレッドでの受信→デコード→swap (現在はデコードタスク経由で未使用)
+// 後方互換: 単一スレッドでの受信→デコード→公開 (現在はデコードタスク経由で未使用)
 bool ImageManager::update() {
     if (!decodeOneFrame()) {
         return false;
     }
-    swapBuffers();
+    publishFrame();
     _framesDecoded++;
     _fpsFrameCount++;
     calculateFPS();
@@ -260,10 +237,9 @@ void ImageManager::decodeTaskFunc(void* param) {
     Serial.printf("[ImageManager] Decode task started on core %d\n", xPortGetCoreID());
     for (;;) {
         if (self->decodeOneFrame()) {
-            // renderが前フレームを描き終える(releaseBuffer)まで待ってから swap。
-            // ダブルバッファなのでこれでテアリングなくパイプライン化される。
-            xSemaphoreTake(self->_bufferFreeSem, portMAX_DELAY);
-            self->swapBuffers();   // ポインタ交換 + frameReadyCallback(render起動)
+            // 完成フレームを ready に公開 (トリプルバッファ)。renderは連続駆動で
+            // 次パスに adoptReadyFrame() で採用する。ハンドシェイク不要。
+            self->publishFrame();
             self->_framesDecoded++;
             self->_fpsFrameCount++;
             self->calculateFPS();
@@ -287,10 +263,16 @@ bool ImageManager::startDecodeTask(uint8_t core, uint8_t priority, uint32_t stac
     return true;
 }
 
-void ImageManager::releaseBuffer() {
-    if (_bufferFreeSem) {
-        xSemaphoreGive(_bufferFreeSem);
+// render側(毎パス): 表示待ち完成フレームがあれば表示バッファに採用する。
+void ImageManager::adoptReadyFrame() {
+    portENTER_CRITICAL(&_bufMux);
+    if (_readyIdx >= 0) {
+        // 旧表示バッファは解放 (誰も所有しない=次のpublishでdecodeが拾う)
+        _displayIdx = _readyIdx;
+        _readyIdx = -1;
     }
+    _displayBuffer = _buf[_displayIdx];
+    portEXIT_CRITICAL(&_bufMux);
 }
 
 
@@ -323,15 +305,26 @@ bool ImageManager::decodeJPEG(const uint8_t* jpeg_data, size_t jpeg_size) {
     return true;
 }
 
-void ImageManager::swapBuffers() {
-    // ポインタ交換のみ（高速）
-    uint16_t* temp = _drawBuffer;
-    _drawBuffer = _decodeBuffer;
-    _decodeBuffer = temp;
-    
-    // フレーム準備完了コールバックを呼び出す
-    if (_frameReadyCallback) {
-        _frameReadyCallback();
+// decode側: 書き終えた _decodeIdx を ready に公開し、次の書込先を確保する。
+// インデックス操作のみ(画素コピーなし)なので _bufMux は一瞬。
+void ImageManager::publishFrame() {
+    portENTER_CRITICAL(&_bufMux);
+    int oldReady = _readyIdx;
+    _readyIdx = _decodeIdx;            // 今書いたフレームを表示待ちに
+    if (oldReady >= 0) {
+        // 表示前に上書きされた旧readyは破棄 → そのバッファを次の書込先に再利用
+        _decodeIdx = oldReady;
+    } else {
+        // display でも ready でもない1枚を次の書込先に
+        for (int i = 0; i < 3; i++) {
+            if (i != _displayIdx && i != _readyIdx) { _decodeIdx = i; break; }
+        }
+    }
+    _decodeBuffer = _buf[_decodeIdx];
+    bool dropped = (oldReady >= 0);
+    portEXIT_CRITICAL(&_bufMux);
+    if (dropped) {
+        _framesDropped++;  // render が追いつかず表示前に破棄
     }
 }
 
@@ -348,7 +341,7 @@ void ImageManager::calculateFPS() {
 }
 
 bool ImageManager::getPixel(uint16_t x, uint16_t y, uint8_t& r, uint8_t& g, uint8_t& b) {
-    if (!_initialized || !_drawBuffer) {
+    if (!_initialized || !_displayBuffer) {
         return false;
     }
     
@@ -357,7 +350,7 @@ bool ImageManager::getPixel(uint16_t x, uint16_t y, uint8_t& r, uint8_t& g, uint
     }
     
     // RGB565を取得
-    uint16_t rgb565 = _drawBuffer[y * _width + x];
+    uint16_t rgb565 = _displayBuffer[y * _width + x];
     
     // RGB565 -> RGB888変換
     r = ((rgb565 >> 11) & 0x1F) << 3;  // R: 5bit -> 8bit
@@ -368,7 +361,7 @@ bool ImageManager::getPixel(uint16_t x, uint16_t y, uint8_t& r, uint8_t& g, uint
 }
 
 uint16_t ImageManager::getPixelRGB565(uint16_t x, uint16_t y) {
-    if (!_initialized || !_drawBuffer) {
+    if (!_initialized || !_displayBuffer) {
         return 0;
     }
     
@@ -376,7 +369,7 @@ uint16_t ImageManager::getPixelRGB565(uint16_t x, uint16_t y) {
         return 0;
     }
     
-    return _drawBuffer[y * _width + x];
+    return _displayBuffer[y * _width + x];
 }
 
 ImageStats ImageManager::getStats() const {
