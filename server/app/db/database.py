@@ -332,6 +332,28 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
         self.conn.commit()
+
+    def get_playlist_items_detailed(self, playlist_id: int) -> List[Dict[str, Any]]:
+        """アイテムを動画情報込みで position 順に取得 (item_id / position + videos.*)。"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT pi.id AS item_id, pi.position, v.*
+            FROM playlist_items pi
+            JOIN videos v ON v.id = pi.video_id
+            WHERE pi.playlist_id = ?
+            ORDER BY pi.position
+        """, (playlist_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def set_playlist_items(self, playlist_id: int, video_ids: List[int]):
+        """アイテムを指定順で総入れ替え (追加/削除/並び替えの共通処理)。position は 0..n。"""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
+        cursor.executemany(
+            "INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)",
+            [(playlist_id, vid, i) for i, vid in enumerate(video_ids)],
+        )
+        self.conn.commit()
     
     # ==================== Playback State ====================
     

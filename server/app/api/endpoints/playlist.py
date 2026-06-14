@@ -126,9 +126,33 @@ class PlaylistCreate(BaseModel):
     shuffle: bool = False
 
 
+class PlaylistItemAdd(BaseModel):
+    video_id: int
+
+
+class PlaylistItemsSet(BaseModel):
+    video_ids: list[int]
+
+
 @router.get("/playlists")
 async def get_playlists(request: Request):
-    return request.app.state.db.get_playlists()
+    """プレイリスト一覧 (各々のアイテム数 item_count 付き)。"""
+    db = request.app.state.db
+    playlists = db.get_playlists()
+    for p in playlists:
+        p["item_count"] = len(db.get_playlist_items(p["id"]))
+    return playlists
+
+
+@router.get("/playlists/{playlist_id}")
+async def get_playlist_detail(request: Request, playlist_id: int):
+    """プレイリスト詳細 (動画情報込みのアイテム列)。"""
+    db = request.app.state.db
+    p = db.get_playlist(playlist_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="playlist not found")
+    p["items"] = db.get_playlist_items_detailed(playlist_id)
+    return p
 
 
 @router.post("/playlists")
@@ -149,6 +173,52 @@ async def delete_playlist(request: Request, playlist_id: int):
     return {"status": "ok", "deleted": playlist_id}
 
 
+# ---------------------- プレイリストアイテム (追加/削除/並び替え) ----------------------
+
+def _require_playlist(db, playlist_id):
+    p = db.get_playlist(playlist_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="playlist not found")
+    return p
+
+
+@router.post("/playlists/{playlist_id}/items")
+async def add_playlist_item(request: Request, playlist_id: int, body: PlaylistItemAdd):
+    """動画をプレイリスト末尾に追加する。"""
+    db = request.app.state.db
+    _require_playlist(db, playlist_id)
+    if not db.get_video(body.video_id):
+        raise HTTPException(status_code=404, detail="video not found")
+    items = db.get_playlist_items(playlist_id)
+    db.add_playlist_item(playlist_id, body.video_id, len(items))
+    return {"status": "ok", "items": db.get_playlist_items_detailed(playlist_id)}
+
+
+@router.delete("/playlists/{playlist_id}/items/{item_id}")
+async def remove_playlist_item(request: Request, playlist_id: int, item_id: int):
+    """アイテムを1件削除し、position を詰め直す。"""
+    db = request.app.state.db
+    _require_playlist(db, playlist_id)
+    items = db.get_playlist_items(playlist_id)
+    remaining = [it["video_id"] for it in items if it["id"] != item_id]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="item not found")
+    db.set_playlist_items(playlist_id, remaining)
+    return {"status": "ok", "items": db.get_playlist_items_detailed(playlist_id)}
+
+
+@router.put("/playlists/{playlist_id}/items")
+async def set_playlist_items(request: Request, playlist_id: int, body: PlaylistItemsSet):
+    """アイテムを指定順で総入れ替えする (並び替え/一括設定)。"""
+    db = request.app.state.db
+    _require_playlist(db, playlist_id)
+    for vid in body.video_ids:
+        if not db.get_video(vid):
+            raise HTTPException(status_code=404, detail=f"video not found: {vid}")
+    db.set_playlist_items(playlist_id, body.video_ids)
+    return {"status": "ok", "items": db.get_playlist_items_detailed(playlist_id)}
+
+
 # ============================ 再生制御 (ストリーミング) ============================
 # 動画を選択 → サーバーが OpenCV でデコードし 320x160 JPEG チャンクとして UDP 送出。
 # 制御は VideoStreamer (別スレッド)。状態は playback_state DB にも反映する。
@@ -159,6 +229,7 @@ def _sync_playback_state(db, streamer):
         db.update_playback_state(
             status=streamer.status,
             current_video_id=streamer.current_video_id,
+            current_playlist_id=streamer.current_playlist_id,
         )
     except Exception as e:  # DB スキーマ差異等で落とさない
         logger.warning(f"playback_state sync skipped: {e}")
@@ -180,6 +251,31 @@ async def play_video(request: Request, video_id: int):
         raise HTTPException(status_code=500, detail="failed to start streaming")
     _sync_playback_state(db, streamer)
     logger.info(f"play video {video_id}: {path}")
+    return {"status": "ok", "playback": streamer.get_status()}
+
+
+@router.post("/playlists/{playlist_id}/play")
+async def play_playlist(request: Request, playlist_id: int):
+    """プレイリストを順次ストリーミング再生する (loop/shuffle はプレイリスト設定に従う)。"""
+    db = request.app.state.db
+    streamer = request.app.state.video_streamer
+    p = _require_playlist(db, playlist_id)
+    items = db.get_playlist_items_detailed(playlist_id)
+    entries = [
+        {"path": it.get("converted_path"), "fps": it.get("fps") or None, "video_id": it.get("id")}
+        for it in items
+        if it.get("converted_path") and os.path.exists(it["converted_path"])
+    ]
+    if not entries:
+        raise HTTPException(status_code=400, detail="playlist has no playable videos")
+    if p.get("shuffle"):
+        import random
+        random.shuffle(entries)
+    ok = streamer.play_entries(entries, loop=bool(p.get("loop")), playlist_id=playlist_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to start streaming")
+    _sync_playback_state(db, streamer)
+    logger.info(f"play playlist {playlist_id}: {len(entries)} videos loop={p.get('loop')}")
     return {"status": "ok", "playback": streamer.get_status()}
 
 

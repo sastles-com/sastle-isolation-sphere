@@ -51,24 +51,37 @@ class VideoStreamer:
         self.status = "stopped"          # playing/paused/stopped/error
         self.current_path = None
         self.current_video_id = None
+        self.current_playlist_id = None
         logger.info(f"VideoStreamer target={self._target} size={self._w}x{self._h}")
 
     def get_status(self):
         return {"status": self.status, "video_id": self.current_video_id,
-                "path": self.current_path, "target": list(self._target)}
+                "playlist_id": self.current_playlist_id, "path": self.current_path,
+                "target": list(self._target)}
 
     def play(self, path: str, fps=None, loop: bool = True, video_id=None):
+        """単一動画を再生 (loop=True で繰り返し)。"""
+        return self.play_entries(
+            [{"path": path, "fps": fps, "video_id": video_id}], loop=loop)
+
+    def play_entries(self, entries, loop: bool = True, playlist_id=None):
+        """動画エントリ列 [{path, fps, video_id}] を順次再生する。
+
+        各動画は最後まで再生してから次へ進む。末尾まで来たら loop なら先頭へ戻る。
+        """
         self.stop()
-        if not os.path.exists(path):
+        entries = [e for e in entries if e.get("path") and os.path.exists(e["path"])]
+        if not entries:
             self.status = "error"
-            logger.error(f"video not found: {path}")
+            logger.error("no playable entries")
             return False
         self._stop.clear()
         self._pause.clear()
-        self.current_path = path
-        self.current_video_id = video_id
+        self.current_playlist_id = playlist_id
+        self.current_video_id = entries[0].get("video_id")
+        self.current_path = entries[0].get("path")
         self.status = "playing"
-        self._thread = threading.Thread(target=self._run, args=(path, fps, loop), daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(entries, loop), daemon=True)
         self._thread.start()
         return True
 
@@ -96,48 +109,58 @@ class VideoStreamer:
         self.status = "stopped"
         self.current_path = None
         self.current_video_id = None
+        self.current_playlist_id = None
 
-    def _run(self, path, fps, loop):
+    def _run(self, entries, loop):
+        """エントリ列を順次再生。各動画を最後まで送出し、末尾で loop なら先頭へ。"""
         import cv2
-        cap = cv2.VideoCapture(path)
-        if not cap.isOpened():
-            self.status = "error"
-            logger.error(f"cannot open video: {path}")
-            return
-        src_fps = float(fps or cap.get(cv2.CAP_PROP_FPS) or 15.0)
-        period = 1.0 / max(1.0, src_fps)
-        logger.info(f"streaming {path} @ {src_fps:.1f}fps -> {self._target}")
-
         fid = 0
-        next_t = time.time()
+        idx = 0
         try:
             while not self._stop.is_set():
-                if self._pause.is_set():
-                    time.sleep(0.05)
-                    next_t = time.time()
-                    continue
-                ok, frame = cap.read()
-                if not ok:
-                    if loop:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        continue
-                    break
-                frame = cv2.resize(frame, (self._w, self._h))
-                ok2, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._q])
-                if ok2:
-                    self._send_frame(fid, jpg.tobytes())
-                    fid += 1
-                next_t += period
-                sleep = next_t - time.time()
-                if sleep > 0:
-                    time.sleep(sleep)
+                entry = entries[idx]
+                self.current_video_id = entry.get("video_id")
+                self.current_path = entry.get("path")
+                cap = cv2.VideoCapture(entry["path"])
+                if not cap.isOpened():
+                    logger.error(f"cannot open video, skipping: {entry['path']}")
                 else:
-                    next_t = time.time()  # 追いつけない場合リセット
+                    src_fps = float(entry.get("fps") or cap.get(cv2.CAP_PROP_FPS) or 15.0)
+                    period = 1.0 / max(1.0, src_fps)
+                    logger.info(f"streaming {entry['path']} @ {src_fps:.1f}fps -> {self._target}")
+                    next_t = time.time()
+                    while not self._stop.is_set():
+                        if self._pause.is_set():
+                            time.sleep(0.05)
+                            next_t = time.time()
+                            continue
+                        ok, frame = cap.read()
+                        if not ok:
+                            break  # この動画は終端
+                        frame = cv2.resize(frame, (self._w, self._h))
+                        ok2, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._q])
+                        if ok2:
+                            self._send_frame(fid, jpg.tobytes())
+                            fid += 1
+                        next_t += period
+                        sleep = next_t - time.time()
+                        if sleep > 0:
+                            time.sleep(sleep)
+                        else:
+                            next_t = time.time()  # 追いつけない場合リセット
+                    cap.release()
+                if self._stop.is_set():
+                    break
+                idx += 1
+                if idx >= len(entries):
+                    if loop:
+                        idx = 0
+                    else:
+                        break
         finally:
-            cap.release()
             if not self._stop.is_set():
                 self.status = "stopped"   # 自然終了 (loop=False)
-        logger.info(f"streaming ended: {path}")
+        logger.info("streaming ended")
 
     def _send_frame(self, fid, jpeg):
         n = (len(jpeg) + MAX_CHUNK - 1) // MAX_CHUNK
