@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSwipeable } from 'react-swipeable';
 import { Box, Typography, BottomNavigation, BottomNavigationAction, Tabs, Tab } from '@mui/material';
 import PublicIcon from '@mui/icons-material/Public';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
@@ -55,9 +56,19 @@ export const Dashboard = () => {
     };
 
     const changeTab = (index) => {
-        setCurrentTab(index);
+        const n = TAB_CONFIG.length;
+        setCurrentTab(((index % n) + n) % n);  // ラップ
         setSubTabIndex(0);  // タブ切替時はサブタブを先頭へ
     };
+
+    // 横スワイプで主タブ移動 (ボトムタブバーと併用)。縦スクロールは妨げない。
+    const swipeHandlers = useSwipeable({
+        onSwipedLeft: () => changeTab(currentTab + 1),
+        onSwipedRight: () => changeTab(currentTab - 1),
+        trackMouse: true,
+        preventScrollOnSwipe: false,
+        delta: 50,
+    });
 
     // --- 各タブの内容レンダラー (表示中のものだけ呼ばれる=マウントされる) ---
     const renderSphereContent = () => (
@@ -137,8 +148,8 @@ export const Dashboard = () => {
                 )}
             </Box>
 
-            {/* BODY - 表示中タブの内容のみマウント */}
-            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+            {/* BODY - 表示中タブの内容のみマウント。横スワイプで主タブ移動可。 */}
+            <Box {...swipeHandlers} sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
                 {hasSubTabs ? renderer(activeSubTab) : renderer()}
             </Box>
 
