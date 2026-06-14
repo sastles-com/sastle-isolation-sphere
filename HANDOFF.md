@@ -1,6 +1,6 @@
 # 開発引き継ぎ資料 — Isolation Sphere
 
-最終更新: 2026-06-13 / 作成環境: macOS (開発機) → 引き継ぎ先: サーバー稼働 PC (Ubuntu)
+最終更新: 2026-06-14 / 作成環境: macOS (開発機) → 引き継ぎ先: サーバー稼働 PC (Ubuntu)
 
 このドキュメントは、**サーバーを稼働させている PC 上で開発を継続する**ための引き継ぎ資料。
 プロジェクト全体像・現状・環境構築・検証手順・次の作業をまとめる。
@@ -341,3 +341,46 @@ Core1 レンダリングタスク: 連続駆動 ~50Hz: adoptReadyFrame()(新フ�
 **今後さらに上げるなら**: デコードが律速 (~45ms)。入力解像度/フレームレート/生RGB565転送 等。
 ただしIMU追従は既に~50Hzで滑らかなので、必要なのは動画fpsを上げたい場合のみ。
 計測/送出ツール: `server/scripts/stream_to_sphere.py` (本番), GMKTec `/tmp/send_chunked.py` (テスト)。
+
+---
+
+## 11. 未実装機能 / 機能実装ロードマップ (2026-06-14)
+
+映像の球面表示パイプライン(受信→再構成→デコード→IMUマッピング→描画)とケーブルレス開発
+(OTA/ログ)は完成・実機確認済み。ここから先の**未実装機能**を棚卸しした。実装順は **B → A → C → D**
+(土台→実運用→デバイス機能→入力)を想定。出典: `server/task.md` + コード内TODO + ベンチ検証知見。
+
+### B. デバイス操作の到達性(配線の穴) ★最初
+- **WSコマンドが実機に届かない**。WebSocket経由のコマンドは `StateManager` が server state を
+  更新し `sphere/all/state` を publish するだけ。デバイスは `sphere/all/command/*` しか購読せず、
+  実機到達は REST `/api/command/*` (`app/api/endpoints/command.py`) 経由のみ。
+  → UIの brightness/playback/axis 等が実機に反映されない。**経路を統一**する(WS経路でも
+  command トピックへ publish する、等)。これが直らないと以降のUI操作が効かない土台。
+
+### A. 映像再生の統合(Phase2・実運用の本命)
+- **再生コマンドとストリーマが未連携**: `server/scripts/stream_to_sphere.py` は手動起動の単発。
+  UIの play/pause/stop → ストリーマの起動/停止/切替 の配線が無い(`state_manager` に subprocess
+  起動等なし)。再生制御をストリーマ(またはデーモン化)に接続する。
+- **プレイリストAPIがモック**: `app/api/endpoints/playlist.py` は39行のハードコード。
+  CRUD/永続化/トラック管理が未実装。
+- **実動画ファイル再生(OpenCVデコード)未実装**: 現状はテストパターン/静止画のみ。
+  `stream_to_sphere.py` の video 分岐は opencv-python 前提(venv未導入)。
+
+### C. デバイス機能のTODO (firmware)
+- **LED pixel(個別制御)モード**未実装 (`CommandHandler::_handleLed` "pixels")。
+- **ジェスチャー→実アクション**未実装 (`GestureManager`: 検出・publishのみ。画像切替/輝度変更が空)。
+- **IMUキャリブレーション** / **config reload** コマンド未実装 (`CommandHandler::_handleSystem`)。
+- **state のプレースホルダ**: 実FPS(`ledManager.getStats().fps`)/温度/NTP時刻/seq を実値に
+  (`CommandHandler::getState`)。
+- **5ストリップ化**: `BoardConfig.h` 4→5 (G38追加) + `LEDManager` 配列拡張。ベンチ合格済み。
+- **OTAホスト名/パスワードのconfig化**: `OtaManager.cpp` のハードコードを config.json
+  (`system.ota`) 参照へ。
+- **IMU姿勢予測**(レイテンシ補償): 現フュージョン済みq + ジャイロで一次デッドレコニング(任意)。
+
+### D. ジョイスティック (Phase3)
+- `server/joystick/` (daemon/device_manager/mapper, ~257行) は存在するが**動作・MQTT連携・
+  起動統合が未確認/未整備**。evdev でのUSB検出、PS4対応、ボタンマッピング、MQTT直publish。
+
+### E. その他
+- XIAO ボードのピン値が暫定 (`board_xiao_esp32s3.h` TODO)。
+- IP体系の統一 (旧 192.168.49.x ↔ 新 192.168.100.x、§9参照)。
