@@ -11,23 +11,25 @@ import AspectRatioIcon from '@mui/icons-material/AspectRatio';
 import MovieIcon from '@mui/icons-material/Movie';
 import { formatDuration, formatSize } from '../../lib/format';
 
-export const VideoCard = ({ 
-    video, 
-    selected = false, 
-    onSelect, 
-    onInfo, 
+export const VideoCard = ({
+    video,
+    selected = false,
+    playing = false,
+    onSelect,
+    onInfo,
     onDelete,
+    onPlay,
     mode = 'view' // 'view' | 'select'
 }) => {
     return (
         <Card
             sx={{
                 bgcolor: selected ? 'rgba(0, 229, 255, 0.1)' : 'rgba(20, 27, 45, 0.9)',
-                border: selected ? '2px solid #00E5FF' : '1px solid rgba(0, 229, 255, 0.2)',
+                border: playing ? '2px solid #00FF41' : (selected ? '2px solid #00E5FF' : '1px solid rgba(0, 229, 255, 0.2)'),
                 borderRadius: 2,
                 overflow: 'hidden',
                 transition: 'all 0.2s ease',
-                boxShadow: selected ? '0 0 20px rgba(0, 229, 255, 0.4)' : 'none',
+                boxShadow: playing ? '0 0 20px rgba(0, 255, 65, 0.5)' : (selected ? '0 0 20px rgba(0, 229, 255, 0.4)' : 'none'),
                 '&:active': {
                     transform: 'scale(0.98)'
                 },
@@ -50,7 +52,8 @@ export const VideoCard = ({
                         opacity: 1
                     }
                 }}
-                onClick={onInfo}
+                onClick={onPlay || onInfo}
+                title="再生"
             >
                 {/* Thumbnail image (if available) */}
                 {video.thumbnail_path ? (

@@ -97,6 +97,16 @@ async def delete_video(request: Request, video_id: int):
     v = db.get_video(video_id)
     if not v:
         raise HTTPException(status_code=404, detail="video not found")
+
+    # 再生中/参照中の動画を削除する場合はストリーミング停止 + playback_state の参照解除
+    # (playback_state.current_video_id は FK 制約があり、参照が残ると削除が失敗する)
+    streamer = request.app.state.video_streamer
+    if streamer.current_video_id == video_id:
+        streamer.stop()
+    ps = db.get_playback_state() or {}
+    if ps.get("current_video_id") == video_id:
+        db.clear_playback_state()
+
     path = v.get("converted_path")
     if path and os.path.exists(path):
         try:

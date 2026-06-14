@@ -370,8 +370,18 @@ class Database:
             return
         
         updates.append("updated_at = CURRENT_TIMESTAMP")
-        
+
         cursor = self.conn.cursor()
         sql = f"UPDATE playback_state SET {', '.join(updates)} WHERE id = 1"
         cursor.execute(sql, params)
+        self.conn.commit()
+
+    def clear_playback_state(self):
+        """再生状態を停止・参照クリア (動画削除時に FK 参照を外すため)。"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE playback_state SET status = 'stopped', "
+            "current_video_id = NULL, current_playlist_id = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = 1"
+        )
         self.conn.commit()

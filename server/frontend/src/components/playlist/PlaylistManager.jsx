@@ -29,7 +29,7 @@ export const PlaylistManager = ({ isPlaying, onTogglePlay, onStop }) => {
                 // UI expects { id, name, count, duration }
                 const uiPlaylists = data.map(p => ({
                     ...p,
-                    count: p.videos.length,
+                    count: p.videos?.length ?? p.item_count ?? 0,
                     duration: '0:00' // Placeholder as API doesn't return duration yet
                 }));
                 setPlaylists(uiPlaylists);
