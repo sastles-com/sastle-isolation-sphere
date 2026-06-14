@@ -94,6 +94,8 @@ private:
     uint16_t _lcdWidth;          ///< LCD幅
     uint16_t _lcdHeight;         ///< LCD高さ
     uint8_t _rotation;           ///< LCD回転角度 (0/1/2/3)
+    uint16_t* _lcdBuf = nullptr; ///< 一括転送用フレームバッファ (RGB565)
+    unsigned long _lastUpdateMs = 0;  ///< 最終LCD更新時刻 (スロットル用)
 };
 
 } // namespace sastle

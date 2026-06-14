@@ -48,7 +48,12 @@ bool LCDManager::begin(ConfigManager* config) {
     _lcdWidth = M5.Display.width();
     _lcdHeight = M5.Display.height();
     _rotation = 0;  // config.jsonから取得可能
-    
+
+    // 一括転送(pushImage)用バッファ。1画素ずつ writePixel すると 128x128 で
+    // ~150ms/フレームかかり描画FPSの律速になっていたため、全画素を組んで
+    // 1回の pushImage で転送する。
+    _lcdBuf = (uint16_t*)malloc((size_t)_lcdWidth * _lcdHeight * sizeof(uint16_t));
+
     M5.Display.setRotation(_rotation);
     M5.Display.setBrightness(128);  // 初期輝度50%
     M5.Display.fillScreen(TFT_BLACK);
@@ -69,37 +74,34 @@ bool LCDManager::begin(ConfigManager* config) {
 }
 
 void LCDManager::update(ImageManager* imageManager) {
-    if (!_initialized || !_debugEnabled || !imageManager) {
+    if (!_initialized || !_debugEnabled || !imageManager || !_lcdBuf) {
         return;
     }
-    
+
 #if BOARD_HAS_LCD
+    // スロットル: デバッグ表示は最大 ~10Hz で十分。毎フレーム描くと描画FPSを縛る。
+    unsigned long now = millis();
+    if (now - _lastUpdateMs < 100) {
+        return;
+    }
+    _lastUpdateMs = now;
+
     uint16_t imgWidth = imageManager->getWidth();
     uint16_t imgHeight = imageManager->getHeight();
 
-    // 画像データをLCDに描画
-    // ImageManagerのRGB565データを直接転送
-    // スケーリング: 320x160 → 128x128 (アスペクト比無視で全画面表示)
-    
-    M5.Display.startWrite();
-    
+    // 全画素をバッファに組み立て (RAM上、高速) → 1回の pushImage で一括転送。
+    // 旧実装は writePixel を 128x128=16384回呼び ~150ms かかっていた。
     for (uint16_t y = 0; y < _lcdHeight; y++) {
+        uint16_t srcY = (y * imgHeight) / _lcdHeight;
+        uint16_t* row = _lcdBuf + (size_t)y * _lcdWidth;
         for (uint16_t x = 0; x < _lcdWidth; x++) {
-            // LCDの座標を画像座標にマッピング
             uint16_t srcX = (x * imgWidth) / _lcdWidth;
-            uint16_t srcY = (y * imgHeight) / _lcdHeight;
-            
-            // RGB565ピクセル取得
             uint8_t r, g, b;
             imageManager->getPixel(srcX, srcY, r, g, b);
-            
-            // RGB888 → RGB565変換
-            uint16_t color = M5.Display.color565(r, g, b);
-            M5.Display.writePixel(x, y, color);
+            row[x] = M5.Display.color565(r, g, b);
         }
     }
-
-    M5.Display.endWrite();
+    M5.Display.pushImage(0, 0, _lcdWidth, _lcdHeight, _lcdBuf);
 #endif // BOARD_HAS_LCD
 }
 
