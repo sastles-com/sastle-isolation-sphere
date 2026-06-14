@@ -5,7 +5,7 @@ import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from app.core.config import MQTT_STATE_TOPIC
+from app.core.config import MQTT_STATE_TOPIC, MQTT_COMMAND_TOPIC_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -253,20 +253,39 @@ class StateManager:
         """
         msg_type = data.get("type")
         payload = data.get("payload", {})
-        
+
         logger.info(f"[WebSocket] Processing message: type={msg_type}")
-        
+
+        # WSメッセージ種別 → デバイスコマンドトピックの suffix
+        COMMAND_SUFFIX = {"SET_PARAMS": "params", "SET_PLAYBACK": "playback", "SET_LED": "led"}
+
         if msg_type == "SET_PARAMS":
             await self._update_params(payload)
-        
         elif msg_type == "SET_PLAYBACK":
             await self._update_playback(payload)
-        
         elif msg_type == "SET_LED":
             await self._update_led(payload)
-        
         else:
             logger.warning(f"Unknown WebSocket message type: {msg_type}")
+            return
+
+        # サーバー状態更新だけでなく、デバイスのコマンドトピックへも転送する。
+        # (デバイスは sphere/all/command/* のみ購読。これが無いとUI操作が実機に届かない)
+        suffix = COMMAND_SUFFIX.get(msg_type)
+        if suffix:
+            self._publish_command(suffix, payload)
+
+    def _publish_command(self, suffix: str, payload: Dict[str, Any]):
+        """デバイスのコマンドトピック sphere/all/command/<suffix> へ publish する。"""
+        if not self._mqtt_client:
+            return
+        try:
+            self._mqtt_client.publish(
+                f"{MQTT_COMMAND_TOPIC_PREFIX}/{suffix}", json.dumps(payload), qos=1
+            )
+            logger.debug(f"Command -> {MQTT_COMMAND_TOPIC_PREFIX}/{suffix}: {payload}")
+        except Exception as e:
+            logger.error(f"Failed to publish command: {e}")
     
     async def _publish_state(self):
         """

@@ -51,10 +51,7 @@ export const SphereControl = () => {
         
         // Debounce: send command after 300ms of inactivity
         brightnessTimeoutRef.current = setTimeout(() => {
-            sendMessage('COMMAND', {
-                command: 'params',
-                params: { brightness: value }
-            });
+            sendMessage('SET_PARAMS', { brightness: value });
         }, 300);
     };
 
