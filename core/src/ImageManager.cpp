@@ -99,43 +99,30 @@ void ImageManager::end() {
 }
 
 bool ImageManager::allocateBuffers() {
-    // RGB565 トリプルバッファをPSRAMに確保
-    for (int i = 0; i < 3; i++) {
-        _buf[i] = (uint16_t*)ps_malloc(_bufferSize);
-        if (!_buf[i]) {
-            Serial.printf("[ImageManager] Failed to allocate buffer %d\n", i);
-            for (int j = 0; j < i; j++) { free(_buf[j]); _buf[j] = nullptr; }
-            return false;
-        }
-        memset(_buf[i], 0, _bufferSize);
-    }
-
-    // UDP受信バッファをPSRAMに確保
-    _udpBuffer = (uint8_t*)ps_malloc(_udpBufferSize);
-    if (!_udpBuffer) {
-        Serial.println("[ImageManager] Failed to allocate UDP buffer");
-        for (int j = 0; j < 3; j++) { free(_buf[j]); _buf[j] = nullptr; }
+    // RGB565 トリプルバッファ
+    if (!_pool.allocate(_bufferSize)) {
+        Serial.println("[ImageManager] Failed to allocate frame buffers");
         return false;
     }
 
-    // 初期: 0=表示, 1=デコード, 2=空き
-    _displayIdx = 0;
-    _decodeIdx = 1;
-    _readyIdx = -1;
-    _displayBuffer = _buf[0];
-    _decodeBuffer = _buf[1];
+    // UDP受信(チャンク再構成)バッファ
+    _udpBuffer = (uint8_t*)ps_malloc(_udpBufferSize);
+    if (!_udpBuffer) {
+        Serial.println("[ImageManager] Failed to allocate UDP buffer");
+        _pool.freeAll();
+        return false;
+    }
 
-    Serial.printf("[ImageManager] Triple buffers allocated (%p,%p,%p), UDP %p\n",
-                  _buf[0], _buf[1], _buf[2], _udpBuffer);
-    Serial.printf("  Free PSRAM: %d bytes\n", ESP.getFreePsram());
+    _displayBuffer = _pool.displayBuffer();
+    _decodeBuffer = _pool.decodeBuffer();
+    _reassembler.begin(_udpBuffer, _udpBufferSize);
 
+    Serial.printf("[ImageManager] Buffers allocated. Free PSRAM: %d bytes\n", ESP.getFreePsram());
     return true;
 }
 
 void ImageManager::freeBuffers() {
-    for (int i = 0; i < 3; i++) {
-        if (_buf[i]) { free(_buf[i]); _buf[i] = nullptr; }
-    }
+    _pool.freeAll();
     if (_udpBuffer) {
         free(_udpBuffer);
         _udpBuffer = nullptr;
@@ -144,64 +131,20 @@ void ImageManager::freeBuffers() {
     _decodeBuffer = nullptr;
 }
 
-// 受信キューからチャンクを取り出してフレームを再構成し、揃ったらデコードする。
-// (バッファswapはしない)。1フレーム完成で true。再構成状態はメンバに保持し
-// 複数回の呼び出しに跨って継続する。
+// 受信キューからチャンクを取り出して FrameReassembler に渡し、フレームが揃ったら
+// デコードする(公開はしない)。再構成状態は _reassembler が保持し、複数回の呼び出しに
+// 跨って継続する。
 bool ImageManager::decodeOneFrame() {
     if (!_initialized || !_network) {
         return false;
     }
 
     bool frameComplete = false;
+    size_t jpegSize = 0;
     int n;
     while ((n = _network->recvDatagram(_chunkBuf, sizeof(_chunkBuf))) > 0) {
         _parseHits++;
-        if (n < (int)sizeof(UDPChunkHeader)) {
-            continue;
-        }
-        const UDPChunkHeader* h = (const UDPChunkHeader*)_chunkBuf;
-        if (h->magic != UDP_IMAGE_MAGIC) {
-            continue;
-        }
-        if (h->chunk_count == 0 || h->chunk_count > MAX_CHUNKS ||
-            h->chunk_index >= h->chunk_count) {
-            continue;
-        }
-        size_t dataLen = h->chunk_size;
-        if (dataLen > MAX_CHUNK_DATA || sizeof(UDPChunkHeader) + dataLen > (size_t)n) {
-            continue;
-        }
-
-        // 新しいフレームの開始 (frame_id が変化)
-        if (h->frame_id != _reasmFrameId) {
-            if (_reasmFrameId != 0xFFFFFFFF && _reasmReceived < _reasmChunkCount) {
-                _framesDropped++;  // 前フレームは未完のまま破棄
-            }
-            _reasmFrameId = h->frame_id;
-            _reasmChunkCount = h->chunk_count;
-            _reasmReceived = 0;
-            _reasmTotalSize = 0;
-            _reasmGotMask = 0;
-        }
-
-        size_t off = (size_t)h->chunk_index * MAX_CHUNK_DATA;
-        if (off + dataLen > _udpBufferSize) {
-            continue;
-        }
-        uint64_t bit = 1ULL << h->chunk_index;
-        if (!(_reasmGotMask & bit)) {
-            memcpy(_udpBuffer + off, _chunkBuf + sizeof(UDPChunkHeader), dataLen);
-            _reasmGotMask |= bit;
-            _reasmReceived++;
-            if (h->chunk_index == h->chunk_count - 1) {
-                _reasmTotalSize = off + dataLen;  // 最終チャンクで全体サイズ確定
-            }
-        }
-
-        if (_reasmReceived == _reasmChunkCount && _reasmTotalSize > 0) {
-            // フレーム完成。_udpBuffer[0.._reasmTotalSize] が完全なJPEG。
-            _lastJpegSize = _reasmTotalSize;
-            _reasmFrameId = 0xFFFFFFFF;  // 完了 → 次フレーム待ち
+        if (_reassembler.addChunk(_chunkBuf, (size_t)n, jpegSize)) {
             frameComplete = true;
             break;  // 残りチャンクは次フレーム分。今のフレームを先にデコード。
         }
@@ -210,7 +153,8 @@ bool ImageManager::decodeOneFrame() {
     if (!frameComplete) {
         return false;
     }
-    if (!decodeJPEG(_udpBuffer, _lastJpegSize)) {
+    _lastJpegSize = jpegSize;
+    if (!decodeJPEG(_udpBuffer, jpegSize)) {
         _decodeErrors++;
         return false;
     }
@@ -251,15 +195,10 @@ bool ImageManager::startDecodeTask(uint8_t core, uint8_t priority, uint32_t stac
 }
 
 // render側(毎パス): 表示待ち完成フレームがあれば表示バッファに採用する。
+// render側: 表示待ちの完成フレームがあれば display に採用し、_displayBuffer を更新する。
 void ImageManager::adoptReadyFrame() {
-    portENTER_CRITICAL(&_bufMux);
-    if (_readyIdx >= 0) {
-        // 旧表示バッファは解放 (誰も所有しない=次のpublishでdecodeが拾う)
-        _displayIdx = _readyIdx;
-        _readyIdx = -1;
-    }
-    _displayBuffer = _buf[_displayIdx];
-    portEXIT_CRITICAL(&_bufMux);
+    _pool.adopt();
+    _displayBuffer = _pool.displayBuffer();
 }
 
 
@@ -292,24 +231,10 @@ bool ImageManager::decodeJPEG(const uint8_t* jpeg_data, size_t jpeg_size) {
     return true;
 }
 
-// decode側: 書き終えた _decodeIdx を ready に公開し、次の書込先を確保する。
-// インデックス操作のみ(画素コピーなし)なので _bufMux は一瞬。
+// decode側: 完成フレームを ready に公開し、次の書込先(_decodeBuffer)を更新する。
 void ImageManager::publishFrame() {
-    portENTER_CRITICAL(&_bufMux);
-    int oldReady = _readyIdx;
-    _readyIdx = _decodeIdx;            // 今書いたフレームを表示待ちに
-    if (oldReady >= 0) {
-        // 表示前に上書きされた旧readyは破棄 → そのバッファを次の書込先に再利用
-        _decodeIdx = oldReady;
-    } else {
-        // display でも ready でもない1枚を次の書込先に
-        for (int i = 0; i < 3; i++) {
-            if (i != _displayIdx && i != _readyIdx) { _decodeIdx = i; break; }
-        }
-    }
-    _decodeBuffer = _buf[_decodeIdx];
-    bool dropped = (oldReady >= 0);
-    portEXIT_CRITICAL(&_bufMux);
+    bool dropped = _pool.publish();
+    _decodeBuffer = _pool.decodeBuffer();
     if (dropped) {
         _framesDropped++;  // render が追いつかず表示前に破棄
     }

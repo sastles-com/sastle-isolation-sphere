@@ -11,32 +11,13 @@
 #include <TJpg_Decoder.h>
 #include "ConfigManager.h"
 #include "NetworkManager.h"
+#include "FrameReassembler.h"   // UDPChunkHeader / チャンク再構成 (プロトコル定義もここ)
+#include "FrameBufferPool.h"    // display/ready/decode トリプルバッファ
 
 namespace sastle {
 
-/// UDP映像チャンクヘッダー (16B)。1フレームのJPEGを複数チャンクに分割して送る
-/// (UDP断片化を避けるため各チャンクはMTU内)。
-/// プロトコルの正は docs/protocol_spec.md §4。送信側 server/scripts/stream_to_sphere.py と
-/// このヘッダ定義は必ず一致させること。
-struct UDPChunkHeader {
-    uint32_t magic;        ///< マジックナンバー 0x4A504547 ("JPEG")
-    uint32_t frame_id;     ///< フレーム連番
-    uint16_t chunk_index;  ///< チャンク番号 (0..chunk_count-1)
-    uint16_t chunk_count;  ///< このフレームの総チャンク数
-    uint16_t chunk_size;   ///< このチャンクのJPEGバイト数
-    uint16_t reserved;     ///< 予約 (アライン)
-} __attribute__((packed));
-
-/// マジックナンバー "JPEG"
-constexpr uint32_t UDP_IMAGE_MAGIC = 0x4A504547;
-
-/// 最大UDPペイロードサイズ (64KB)
+/// 最大UDPペイロードサイズ (64KB) = 再構成バッファサイズ
 constexpr size_t MAX_UDP_IMAGE_SIZE = 65507;
-
-/// 1チャンクのJPEGデータ最大長 (MTU内: 1500 - IP/UDP - 16Bヘッダ に余裕)
-constexpr size_t MAX_CHUNK_DATA = 1400;
-/// 1フレームの最大チャンク数 (_udpBuffer 65507 / 1400 ≒ 46)
-constexpr uint16_t MAX_CHUNKS = 46;
 
 /**
  * @struct ImageStats
@@ -151,19 +132,12 @@ private:
     uint8_t _jpegScale = 2;      ///< 縮小デコード倍率 (1,2,4,8)
     size_t _bufferSize;          ///< 1バッファのサイズ (bytes)
     
-    // トリプルバッファ (PSRAM)。描画(IMU再マッピング)を連続駆動しつつ、
-    // フレーム差し替えを独立に行うため3枚使う(テアリング防止)。
-    //   display = render が表示中 / ready = 表示待ちの完成フレーム / decode = 書込中
-    // インデックス操作のみ _bufMux で排他(画素コピーはしないので一瞬)。
-    uint16_t* _buf[3] = {nullptr, nullptr, nullptr};
-    volatile int _displayIdx = 0;        ///< 表示中バッファ
-    volatile int _readyIdx = -1;         ///< 表示待ち完成フレーム (-1=なし)
-    volatile int _decodeIdx = 1;         ///< デコード書込中バッファ
-    uint16_t* _displayBuffer = nullptr;  ///< getPixel が読む (= _buf[_displayIdx])
-    uint16_t* _decodeBuffer = nullptr;   ///< tjpgが書く (= _buf[_decodeIdx])
-    portMUX_TYPE _bufMux = portMUX_INITIALIZER_UNLOCKED;
-    
-    // UDP受信バッファ (PSRAM)
+    // 描画/デコードのトリプルバッファ (display/ready/decode)。差し替えロジックは FrameBufferPool。
+    FrameBufferPool _pool;
+    uint16_t* _displayBuffer = nullptr;  ///< getPixel が読む (= _pool.displayBuffer() のキャッシュ)
+    uint16_t* _decodeBuffer = nullptr;   ///< tjpgが書く (= _pool.decodeBuffer() のキャッシュ)
+
+    // UDP受信バッファ (PSRAM) = チャンク再構成先
     uint8_t* _udpBuffer;         ///< JPEG受信バッファ
     size_t _udpBufferSize;       ///< UDPバッファサイズ
     
@@ -180,25 +154,21 @@ private:
     uint32_t _lastDecodeUs = 0;  ///< 最後のJPEGデコード所要時間 (μs)
 
 public:
-    uint32_t getParseHits() const { return _parseHits; }    ///< parsePacket>0 の回数 (UDP受信診断)
-    uint32_t getDropped() const { return _framesDropped; }  ///< ドロップ数
+    uint32_t getParseHits() const { return _parseHits; }    ///< recvDatagram>0 の回数 (UDP受信診断)
+    /// ドロップ数 = 受信側(キュー溢れ→未完破棄) + 公開側(表示前に上書き)
+    uint32_t getDropped() const { return _framesDropped + _reassembler.framesDropped(); }
 private:
-    uint32_t _parseHits = 0;     ///< parsePacket が >0 を返した累計
-
+    uint32_t _parseHits = 0;     ///< recvDatagram が >0 を返した累計
 
     // --- デコード並列化 (Core分離) ---
     TaskHandle_t _decodeTaskHandle = nullptr;     ///< デコードタスク
-    bool decodeOneFrame();                        ///< 受信+再構成+デコード(swapはしない)
+    bool decodeOneFrame();                        ///< 受信+再構成+デコード(公開はしない)
     static void decodeTaskFunc(void* param);      ///< デコードタスク本体
 
-    // --- チャンク再構成 (decodeタスク専用なのでロック不要) ---
+    // --- チャンク再構成 (decodeタスク専用) ---
     uint8_t _chunkBuf[1500];                      ///< 受信データグラム取り出し用
-    uint32_t _reasmFrameId = 0xFFFFFFFF;          ///< 再構成中フレームID
-    uint16_t _reasmChunkCount = 0;                ///< 総チャンク数
-    uint16_t _reasmReceived = 0;                  ///< 受信済みチャンク数
-    uint32_t _reasmTotalSize = 0;                 ///< 完成JPEGサイズ
-    uint64_t _reasmGotMask = 0;                   ///< 受信済みビットマスク (最大64ch)
-    
+    FrameReassembler _reassembler;                ///< チャンク→JPEG 再構成
+
     /**
      * @brief PSRAMにバッファを確保
      * @return true 確保成功, false 確保失敗
