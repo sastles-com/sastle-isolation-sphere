@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Box, Typography } from '@mui/material';
-import { useSwipeable } from 'react-swipeable';
+import { Box, Typography, BottomNavigation, BottomNavigationAction, Tabs, Tab } from '@mui/material';
+import PublicIcon from '@mui/icons-material/Public';
+import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
+import TuneIcon from '@mui/icons-material/Tune';
+import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import { SphereDashboard } from '../components/sphere/SphereDashboard';
 import { StatusFooter } from '../components/layout/StatusFooter';
-import { VerticalTabContainer } from '../components/ui/VerticalTabContainer';
 import { PlaylistManager } from '../components/playlist/PlaylistManager';
 import { VideoManager } from '../components/playlist/VideoManager';
 import { SphereControl } from '../components/control/SphereControl';
@@ -15,11 +17,19 @@ import { TAB_CONFIG } from '../config/tabConfig';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useStateUpdate } from '../hooks/useSphereState';
 
+// 下部タブのアイコン (TAB_CONFIG の id に対応)
+const TAB_ICONS = {
+    sphere: <PublicIcon />,
+    playlist: <PlaylistPlayIcon />,
+    params: <TuneIcon />,
+    control: <SportsEsportsIcon />,
+};
+
 export const Dashboard = () => {
     const { isConnected, sendMessage } = useWebSocket();
 
     const [currentTab, setCurrentTab] = useState(0);
-    const [rotation, setRotation] = useState(0);
+    const [subTabIndex, setSubTabIndex] = useState(0);
     const [brightness, setBrightness] = useState(80);
     const [color, setColor] = useState(120);
     const [playbackStatus, setPlaybackStatus] = useState('stopped'); // "playing" | "paused" | "stopped"
@@ -35,47 +45,24 @@ export const Dashboard = () => {
         }
     });
 
-    const handleTogglePlay = () => {
-        // Send toggle command to StateManager
-        sendMessage('SET_PLAYBACK', { action: 'toggle' });
-    };
-
-    const handleStop = () => {
-        sendMessage('SET_PLAYBACK', { action: 'stop' });
-    };
+    const handleTogglePlay = () => sendMessage('SET_PLAYBACK', { action: 'toggle' });
+    const handleStop = () => sendMessage('SET_PLAYBACK', { action: 'stop' });
 
     const handleParamChange = (key, value) => {
-        // Optimistic update
         if (key === 'brightness') setBrightness(value);
         if (key === 'hue') setColor(value);
-
-        // Send to backend
         sendMessage('SET_PARAMS', { [key]: value });
     };
 
-    const handleSwipeLeft = () => {
-        setCurrentTab((prev) => (prev + 1) % TAB_CONFIG.length);
-        setRotation((prev) => prev - 90);
+    const changeTab = (index) => {
+        setCurrentTab(index);
+        setSubTabIndex(0);  // タブ切替時はサブタブを先頭へ
     };
 
-    const handleSwipeRight = () => {
-        setCurrentTab((prev) => (prev - 1 + TAB_CONFIG.length) % TAB_CONFIG.length);
-        setRotation((prev) => prev + 90);
-    };
-
-    const swipeHandlers = useSwipeable({
-        onSwipedLeft: handleSwipeLeft,
-        onSwipedRight: handleSwipeRight,
-        trackMouse: true,
-        preventScrollOnSwipe: false, // Allow vertical scrolling
-        delta: 50, // Increase threshold to avoid accidental swipes
-        trackTouch: true,
-    });
-
-    // Render content for SPHERE (Integrated Dashboard)
+    // --- 各タブの内容レンダラー (表示中のものだけ呼ばれる=マウントされる) ---
     const renderSphereContent = () => (
         <SphereDashboard
-            rotation={rotation}
+            rotation={0}
             brightness={brightness}
             color={color}
             playbackStatus={playbackStatus}
@@ -87,29 +74,18 @@ export const Dashboard = () => {
 
     const renderPlaylistContent = (subTab) => {
         const isPlaying = playbackStatus === 'playing';
-        if (subTab.id === 'playlists') {
-            return <PlaylistManager isPlaying={isPlaying} onTogglePlay={handleTogglePlay} onStop={handleStop} />;
-        } else {
-            return <VideoManager />;
-        }
+        return subTab.id === 'playlists'
+            ? <PlaylistManager isPlaying={isPlaying} onTogglePlay={handleTogglePlay} onStop={handleStop} />
+            : <VideoManager />;
     };
 
-    const renderParamsContent = (subTab) => {
-        if (subTab.id === 'config') {
-            return <ConfigEditor />;
-        } else {
-            return <ParamsEditor />;
-        }
-    };
+    const renderParamsContent = (subTab) =>
+        subTab.id === 'config' ? <ConfigEditor /> : <ParamsEditor />;
 
     const renderControlContent = (subTab) => {
-        if (subTab.id === 'sphere_control') {
-            return <SphereControl />;
-        } else if (subTab.id === 'debug_log') {
-            return <LogPanel />;
-        } else {
-            return <PatternControl />;
-        }
+        if (subTab.id === 'sphere_control') return <SphereControl />;
+        if (subTab.id === 'debug_log') return <LogPanel />;
+        return <PatternControl />;
     };
 
     const contentRenderers = {
@@ -119,115 +95,73 @@ export const Dashboard = () => {
         control: renderControlContent,
     };
 
-    return (
-        <Box
-            sx={{
-                width: '100%',
-                height: '100dvh',
-                bgcolor: 'background.default',
-                color: 'text.primary',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-            }}
-        >
-            {/* HEADER */}
-            <Box
-                {...swipeHandlers}
-                sx={{
-                    p: 2,
-                    pt: 'max(20px, calc(env(safe-area-inset-top) + 8px))',
-                    pb: 'max(12px, 8px)',
-                    borderBottom: '2px solid',
-                    borderColor: 'primary.main',
-                    bgcolor: 'rgba(20, 27, 45, 0.98)',
-                    boxShadow: '0 0 20px rgba(0, 229, 255, 0.3)',
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 20,
-                    cursor: 'grab',
-                    touchAction: 'none',
-                    userSelect: 'none',
-                    '&:active': { cursor: 'grabbing' },
-                    flexShrink: 0,
-                }}
-            >
-                <Typography
-                    variant="h6"
-                    sx={{
-                        color: 'primary.main',
-                        textAlign: 'center',
-                        fontWeight: 700,
-                        letterSpacing: '0.15em',
-                        textShadow: '0 0 10px rgba(0, 229, 255, 0.8)',
-                        pointerEvents: 'none',
-                    }}
-                >
-                    {TAB_CONFIG[currentTab].name} MODE
-                </Typography>
-            </Box>
+    const tab = TAB_CONFIG[currentTab];
+    const hasSubTabs = tab.subTabs.length > 0;
+    const activeSubTab = hasSubTabs ? tab.subTabs[Math.min(subTabIndex, tab.subTabs.length - 1)] : null;
+    const renderer = contentRenderers[tab.id];
 
-            {/* BODY - Revolving Cylinder */}
-            <Box
-                sx={{
-                    width: '100%',
-                    flex: 1,
-                    position: 'relative',
-                    overflow: 'hidden',
-                    perspective: '10000px',
-                    perspectiveOrigin: '50% 50%',
-                }}
-            >
-                {/* Rotating Container */}
-                <Box
-                    sx={{
-                        position: 'absolute',
-                        width: '100%',
-                        height: '100%',
-                        left: '50%',
-                        top: '50%',
-                        transform: `translate(-50%, -50%)`,
-                    }}
-                >
-                    <Box
+    return (
+        <Box sx={{
+            width: '100%', height: '100dvh', bgcolor: 'background.default', color: 'text.primary',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+            {/* HEADER */}
+            <Box sx={{
+                px: 2, pt: 'max(16px, calc(env(safe-area-inset-top) + 6px))', pb: 1,
+                borderBottom: '2px solid', borderColor: 'primary.main',
+                bgcolor: 'rgba(20, 27, 45, 0.98)', boxShadow: '0 0 16px rgba(0, 229, 255, 0.25)',
+                flexShrink: 0, zIndex: 20,
+            }}>
+                <Typography variant="h6" sx={{
+                    color: 'primary.main', textAlign: 'center', fontWeight: 700,
+                    letterSpacing: '0.15em', textShadow: '0 0 10px rgba(0, 229, 255, 0.8)',
+                }}>
+                    {tab.name} MODE
+                </Typography>
+
+                {/* サブタブ (上部セグメント。サブタブを持つタブのみ) */}
+                {hasSubTabs && (
+                    <Tabs
+                        value={Math.min(subTabIndex, tab.subTabs.length - 1)}
+                        onChange={(_, v) => setSubTabIndex(v)}
+                        variant="fullWidth"
                         sx={{
-                            width: '100%',
-                            height: '100%',
-                            transformStyle: 'preserve-3d',
-                            transform: `rotateY(${rotation}deg)`,
-                            transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                            minHeight: 36, mt: 0.5,
+                            '& .MuiTab-root': { minHeight: 36, color: 'text.secondary', fontSize: '0.75rem' },
+                            '& .Mui-selected': { color: 'primary.main' },
+                            '& .MuiTabs-indicator': { backgroundColor: 'primary.main' },
                         }}
                     >
-                        {TAB_CONFIG.map((tab, index) => (
-                            <Box
-                                key={tab.id}
-                                sx={{
-                                    position: 'absolute',
-                                    width: '100%',
-                                    height: '100%',
-                                    backfaceVisibility: 'hidden',
-                                    transform: `rotateY(${tab.angle}deg) translateZ(50vw) scale(1.0)`,
-                                    p: 2,
-                                    boxSizing: 'border-box',
-                                    bgcolor: 'background.default',
-                                }}
-                            >
-                                {tab.subTabs.length > 0 ? (
-                                    <VerticalTabContainer
-                                        subTabs={tab.subTabs}
-                                        renderContent={contentRenderers[tab.id]}
-                                    />
-                                ) : (
-                                    contentRenderers[tab.id]()
-                                )}
-                            </Box>
-                        ))}
-                    </Box>
-                </Box>
+                        {tab.subTabs.map((st) => <Tab key={st.id} label={st.name} />)}
+                    </Tabs>
+                )}
             </Box>
 
-            {/* FOOTER */}
-            <StatusFooter isConnected={isConnected} swipeHandlers={swipeHandlers} />
+            {/* BODY - 表示中タブの内容のみマウント */}
+            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+                {hasSubTabs ? renderer(activeSubTab) : renderer()}
+            </Box>
+
+            {/* BOTTOM TAB BAR */}
+            <BottomNavigation
+                value={currentTab}
+                onChange={(_, v) => changeTab(v)}
+                showLabels
+                sx={{
+                    flexShrink: 0, bgcolor: 'rgba(20, 27, 45, 0.98)',
+                    borderTop: '2px solid', borderColor: 'primary.main',
+                    pb: 'env(safe-area-inset-bottom)',
+                    '& .MuiBottomNavigationAction-root': { color: 'text.secondary' },
+                    '& .Mui-selected': { color: 'primary.main' },
+                }}
+            >
+                {TAB_CONFIG.map((t) => (
+                    <BottomNavigationAction key={t.id} label={t.name} icon={TAB_ICONS[t.id]} />
+                ))}
+            </BottomNavigation>
+
+            {/* 接続ステータス (フリック撤去のためスワイプハンドラなし) */}
+            <StatusFooter isConnected={isConnected} swipeHandlers={{}} />
         </Box>
     );
 };
