@@ -201,6 +201,12 @@ void setup() {
         sastle::Log.println("CommandHandler initialization failed");
     }
 
+    // デコードタスクを Core0 で開始 (レンダリングは Core1)。
+    // UDP受信+JPEGデコードを描画と並列実行する。
+    if (imageManager.isInitialized()) {
+        imageManager.startDecodeTask(0, 1, 8192);
+    }
+
     // OTA (espota) 初期化: WiFi 接続済みなので無線書き込みを受け付ける。
     // OTA 開始時はレンダリングタスクを停止する (要件: 更新中は描画停止で可)。
     ota.begin(&ledManager);
@@ -273,18 +279,11 @@ void loop() {
     // 退避済みデバッグログを MQTT へフラッシュ
     sastle::Log.loop();
 
-    // ImageManager更新 (UDP画像受信・デコード)
-    bool newFrameReceived = false;
-    if (imageManager.isInitialized()) {
-        if (imageManager.update()) {
-            newFrameReceived = true;
-            // 新フレームデコード完了 → LEDManagerに通知
-            // Note: LEDManager内部でセマフォ経由で通知される
-        }
-    }
-    
-    // LCD更新 (デバッグモード時のみ)
-    if (lcdManager.isDebugEnabled() && newFrameReceived) {
+    // UDP受信+デコードは Core0 のデコードタスクで実行 (loop からは呼ばない)。
+    // レンダリングは Core1 のレンダリングタスク。decode∥render で並列化。
+
+    // LCD更新 (デバッグモード時のみ。内部で ~10Hz にスロットル)
+    if (lcdManager.isDebugEnabled()) {
         lcdManager.update(&imageManager);
     }
     

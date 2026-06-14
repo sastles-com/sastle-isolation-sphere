@@ -81,7 +81,13 @@ bool ImageManager::begin(ConfigManager& config, NetworkManager& network) {
     TJpgDec.setJpgScale(_jpegScale);  // 縮小デコード (1,2,4,8)
     TJpgDec.setSwapBytes(true);  // RGB565バイトスワップ
     TJpgDec.setCallback(tjpgOutput);
-    
+
+    // バッファ解放セマフォ (decode∥render のハンドシェイク用)。初期はバッファ空き。
+    _bufferFreeSem = xSemaphoreCreateBinary();
+    if (_bufferFreeSem) {
+        xSemaphoreGive(_bufferFreeSem);
+    }
+
     _initialized = true;
     _fpsTimestamp = millis();
     
@@ -160,15 +166,14 @@ void ImageManager::freeBuffers() {
     _decodeBuffer = nullptr;
 }
 
-bool ImageManager::update() {
+// 受信+デコードのみ (バッファswapはしない)。_decodeBuffer に最新フレームを書く。
+bool ImageManager::decodeOneFrame() {
     if (!_initialized || !_network) {
         return false;
     }
-    
-    size_t jpeg_size = 0;
 
+    size_t jpeg_size = 0;
     // 溜まっているUDPデータグラムを全てドレインし、最新フレームのみ採用する。
-    // (バックログを残すと遅延が増えるだけ。受信キュー詰まりの回避にもなる)
     bool got = false;
     size_t latest_size = 0;
     while (receivePacket(jpeg_size)) {
@@ -178,26 +183,64 @@ bool ImageManager::update() {
     if (!got) {
         return false;
     }
-    jpeg_size = latest_size;  // _udpBuffer には最後のデータグラムが入っている
 
-    // JPEG検証済みなので、ヘッダー分スキップしてデコード
     const uint8_t* jpeg_data = _udpBuffer + sizeof(UDPImageHeader);
-    size_t jpeg_data_size = jpeg_size - sizeof(UDPImageHeader);
-    
-    // JPEGデコード
+    size_t jpeg_data_size = latest_size - sizeof(UDPImageHeader);
     if (!decodeJPEG(jpeg_data, jpeg_data_size)) {
         _decodeErrors++;
         return false;
     }
-    
-    // デコード成功 → バッファスワップ
+    return true;
+}
+
+// 後方互換: 単一スレッドでの受信→デコード→swap (現在はデコードタスク経由で未使用)
+bool ImageManager::update() {
+    if (!decodeOneFrame()) {
+        return false;
+    }
     swapBuffers();
     _framesDecoded++;
     _fpsFrameCount++;
-    
     calculateFPS();
-    
     return true;
+}
+
+void ImageManager::decodeTaskFunc(void* param) {
+    ImageManager* self = static_cast<ImageManager*>(param);
+    Serial.printf("[ImageManager] Decode task started on core %d\n", xPortGetCoreID());
+    for (;;) {
+        if (self->decodeOneFrame()) {
+            // renderが前フレームを描き終える(releaseBuffer)まで待ってから swap。
+            // ダブルバッファなのでこれでテアリングなくパイプライン化される。
+            xSemaphoreTake(self->_bufferFreeSem, portMAX_DELAY);
+            self->swapBuffers();   // ポインタ交換 + frameReadyCallback(render起動)
+            self->_framesDecoded++;
+            self->_fpsFrameCount++;
+            self->calculateFPS();
+        } else {
+            vTaskDelay(1);  // フレーム未受信時は譲る
+        }
+    }
+}
+
+bool ImageManager::startDecodeTask(uint8_t core, uint8_t priority, uint32_t stackSize) {
+    if (_decodeTaskHandle) {
+        return true;
+    }
+    BaseType_t r = xTaskCreatePinnedToCore(
+        decodeTaskFunc, "img_decode", stackSize, this, priority, &_decodeTaskHandle, core);
+    if (r != pdPASS) {
+        Serial.println("[ImageManager] Failed to create decode task");
+        return false;
+    }
+    Serial.printf("[ImageManager] Decode task pinned to core %d (prio %d)\n", core, priority);
+    return true;
+}
+
+void ImageManager::releaseBuffer() {
+    if (_bufferFreeSem) {
+        xSemaphoreGive(_bufferFreeSem);
+    }
 }
 
 bool ImageManager::receivePacket(size_t& jpeg_size) {

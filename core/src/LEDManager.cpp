@@ -393,6 +393,12 @@ void LEDManager::renderFrame() {
     showParallel();
     unsigned long outputTime = micros() - outputStart;
     _stats.output_time_us = outputTime;
+
+    // 描画バッファを使い終えたことを ImageManager に通知 (decodeのswap許可)。
+    // これにより decode(別コア) は次フレームのswapを安全に行える。
+    if (_imageManager) {
+        _imageManager->releaseBuffer();
+    }
     
     // 統計更新
     _stats.frames_rendered++;

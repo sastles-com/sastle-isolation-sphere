@@ -76,7 +76,22 @@ public:
      * @note メインループ内で定期的に呼び出す
      */
     bool update();
-    
+
+    /**
+     * @brief デコード専用タスクを開始 (Core分離による並列化)
+     * @param core 実行コア (推奨: 0 = WiFi/lwIP と同居だがCPU処理なので可)
+     * @note レンダリングタスク(別コア)と並列に動作させ、decode∥render を実現する。
+     *       render が Core1, decode が Core0 で走り、ダブルバッファ + bufferFree
+     *       セマフォでテアリングなくパイプライン化する。
+     */
+    bool startDecodeTask(uint8_t core = 0, uint8_t priority = 1, uint32_t stackSize = 8192);
+
+    /**
+     * @brief レンダリング側が描画バッファを使い終えたことを通知 (decodeのswap許可)
+     * @note レンダリングタスクが1フレーム描画後に呼ぶこと。
+     */
+    void releaseBuffer();
+
     /**
      * @brief 指定座標のピクセル色を取得 (RGB)
      * @param x X座標 (0 ~ width-1)
@@ -172,6 +187,12 @@ private:
     uint32_t _parseHits = 0;     ///< parsePacket が >0 を返した累計
 
     FrameReadyCallback _frameReadyCallback;  ///< フレーム準備完了コールバック
+
+    // --- デコード並列化 (Core分離) ---
+    TaskHandle_t _decodeTaskHandle = nullptr;     ///< デコードタスク
+    SemaphoreHandle_t _bufferFreeSem = nullptr;   ///< 描画バッファ解放通知(render→decode)
+    bool decodeOneFrame();                        ///< 受信+デコード(swapはしない)
+    static void decodeTaskFunc(void* param);      ///< デコードタスク本体
     
     /**
      * @brief PSRAMにバッファを確保
