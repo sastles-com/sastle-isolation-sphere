@@ -316,9 +316,28 @@ KiCad 10 (`/Applications/KiCad/KiCad.app/.../kicad-cli`)。
 | LED出力 show() | ~14ms | 800 WS2812 RMT。物理下限 |
 | LCDデバッグ描画 | ~150ms→数ms | **真のFPS律速だった**。1画素 writePixel ×16384 → 一括 pushImage + 10Hzスロットル |
 
-**並列化**: デコード=Core0 専用タスク、レンダリング=Core1 タスク。ダブルバッファ +
-2セマフォ (frameReady/bufferFree) でテアリングなくパイプライン化 → decode∥render。
+### 最終アーキテクチャ (end-to-end)
+```
+サーバー(server/scripts/stream_to_sphere.py): 動画/画像/パターン → 320x160 JPEG化
+   → 16Bヘッダ(magic/frame_id/chunk_index/chunk_count/chunk_size) で ~1400Bチャンクに分割 → UDP:8889
+        ↓ (アプリ層チャンク分割で IP断片化を回避)
+Core0 デコードタスク: AsyncUDP受信(キュー) → frame_id単位でチャンク再構成(_udpBuffer)
+   → JPEGデコード(~45ms) → publishFrame() でトリプルバッファの ready に公開
+        ↓ (display/ready/decode の3枚, インデックス操作のみ排他 → テアリングなし)
+Core1 レンダリングタスク: 連続駆動 ~50Hz: adoptReadyFrame()(新フレーム採用) →
+   最新IMUクォータニオンで球面再マッピング(map ~4ms) + show()(~14ms)
+```
 
-**今後さらに上げるなら**: デコードが律速 (~45ms)。入力解像度の見直し / フレームレート上限 /
-生RGB565転送 等。ただし実映像はデコードがより重くなり得るので現状の余裕(~20fps)は妥当。
-計測用送出器は GMKTec の `/tmp/send_small.py` `/tmp/send_frames.py` (system python3, 要 PIL)。
+**描画(IMU)と動画は分離・並列**:
+- **IMU姿勢追従 ~50Hz**(動画の有無に依存せず連続再マッピング)。
+- **動画差し替え ~15-20Hz**(decode律速、トリプルバッファで独立差替、drop=0)。
+
+**重要な設計判断/落とし穴**:
+- **UDP断片化**: 320x160 JPEG(数KB)はMTU超で断片化し、ESP32(WiFiUDP/AsyncUDPとも)で
+  受信不可。**アプリ層でチャンク分割**(送信=stream_to_sphere.py / 受信=ImageManager再構成)で解決。
+- **受信は AsyncUDP 必須**(WiFiUDPのポーリング受信は本環境で機能しない。§9参照)。
+- マッピングの旧FastMath(double演算)が 27ms→4ms に。LCDデバッグ描画が真のFPS律速だった。
+
+**今後さらに上げるなら**: デコードが律速 (~45ms)。入力解像度/フレームレート/生RGB565転送 等。
+ただしIMU追従は既に~50Hzで滑らかなので、必要なのは動画fpsを上げたい場合のみ。
+計測/送出ツール: `server/scripts/stream_to_sphere.py` (本番), GMKTec `/tmp/send_chunked.py` (テスト)。
