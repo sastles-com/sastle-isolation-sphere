@@ -7,6 +7,7 @@ wifi.udp_port)。ファーム ImageManager の UDPChunkHeader と一致させる
 """
 import json
 import logging
+import math
 import os
 import socket
 import struct
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 MAGIC = 0x4A504547        # "JPEG"
 MAX_CHUNK = 1400          # ファーム MAX_CHUNK_DATA と一致
+# 送出fpsの上限。デバイスのデコード能力(~20fps)に合わせ、かつ送出スレッドが
+# 常に sleep を挟めるようにして uvicorn イベントループの starvation を防ぐ。
+MAX_STREAM_FPS = 20.0
 
 
 def _load_device_target():
@@ -133,16 +137,26 @@ class VideoStreamer:
                     logger.error(f"cannot open video, skipping: {entry['path']}")
                 else:
                     src_fps = float(entry.get("fps") or cap.get(cv2.CAP_PROP_FPS) or 15.0)
-                    period = 1.0 / max(1.0, src_fps)
-                    logger.info(f"streaming {entry['path']} @ {src_fps:.1f}fps -> {self._target}")
+                    # 送出fpsを上限化。速度維持のため skip フレームずつ読み進めて1枚送る。
+                    skip = max(1, math.ceil(src_fps / MAX_STREAM_FPS))
+                    eff_fps = src_fps / skip
+                    period = 1.0 / max(1.0, eff_fps)
+                    logger.info(f"streaming {entry['path']} src={src_fps:.0f}fps "
+                                f"-> {eff_fps:.1f}fps (skip {skip}) -> {self._target}")
                     next_t = time.time()
                     while not self._stop.is_set():
                         if self._pause.is_set():
                             time.sleep(0.05)
                             next_t = time.time()
                             continue
-                        ok, frame = cap.read()
-                        if not ok:
+                        # skip フレーム読み進め、最後の1枚を送る (再生速度を維持)
+                        frame = None
+                        for _ in range(skip):
+                            ok, f = cap.read()
+                            if not ok:
+                                break
+                            frame = f
+                        if frame is None:
                             break  # この動画は終端
                         frame = cv2.resize(frame, (self._w, self._h))
                         ok2, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._q])
@@ -151,9 +165,10 @@ class VideoStreamer:
                             fid += 1
                         next_t += period
                         sleep = next_t - time.time()
-                        if sleep > 0:
-                            time.sleep(sleep)
-                        else:
+                        # 追いついていても最低 3ms は必ず sleep して GIL を譲る
+                        # (これがないと CPU を握り続けイベントループが応答しなくなる)
+                        time.sleep(sleep if sleep > 0.003 else 0.003)
+                        if sleep <= 0:
                             next_t = time.time()  # 追いつけない場合リセット
                     cap.release()
                 if self._stop.is_set():
