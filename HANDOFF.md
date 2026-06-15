@@ -30,6 +30,17 @@
 > ② **真のFPS律速は LCDデバッグ描画**(128×128を毎フレーム writePixel ~150ms)だった
 > → 一括 pushImage + 10Hzスロットルで解消。③ マッピング 27→4ms(FastMath float化)。
 > ④ デコードを Core0 専用タスクへ分離し描画(Core1)と並列化 → ~20fps。
+>
+> **追補 (2026-06-16): M5内蔵IMU切替 + LEDカラー円周マルチサンプリングを実装・ビルド済み、
+> 実機OTA書き込みは未実施(保留)**。詳細は §13。要点:
+> ① **IMU バックエンドをビルド時切替**に (既定 BNO055 / `-D IMU_SENSOR_M5IMU` で内蔵BMI270
+> 6軸+自前Madgwick融合)。env `atoms3r_m5imu` / `atoms3r_m5imu_ota` 追加。
+> ② **LEDカラーの画像空間マルチサンプリング**(中心+半径R円周上N点平均、三角関数は中心1回のみ)。
+> config駆動で可変 (`led.multisample`、既定 ON/2.0px/6点=K7)。検討経緯は §12.2。
+> ③ コミット **f7d0753** を **feat/imu-m5-internal-switch** に作成。**GitHub push は Mac の
+> 認証失効で不可** → GMKTec のリポジトリへ **SSH直push 済み**(origin/GitHub には未反映)。
+> ④ **書き込み未完**: device 192.168.49.101 が無応答(電源リセット要、作業者が現地に不在)。
+> GMKTec USB 接続も無し。**次回は電源リセット → OTA 書き込みから**。手順は §13。
 
 ---
 
@@ -500,3 +511,48 @@ Core1 レンダリングタスク: 連続駆動 ~50Hz: adoptReadyFrame()(新フ�
     x=経度ラップ / y=緯度クランプで継ぎ目・極を処理。
   - **未確認**: 実機でのちらつき低減効果と `[PERF]` map 実測。半径2px は保守的初期値
     (効果弱→3px / ボケ過ぎ→縮小)。`atoms3r`/`atoms3r_m5imu` ともビルド検証済み。
+
+---
+
+## 13. 作業再開メモ (2026-06-16 終了時点) — M5内蔵IMU + LEDマルチサンプルの実機書き込み
+
+**この日の成果はコミット済み・ビルド済みだが、実機への書き込みは未実施。** 次回はここから。
+
+### 現状サマリ
+- **ブランチ**: `feat/imu-m5-internal-switch` / **コミット**: `f7d0753`
+  (M5内蔵IMU切替 + LED円周マルチサンプリング + HANDOFF §12 検討メモ)。
+- **コードの所在**:
+  - Mac (開発機): ローカルにコミット済み。
+  - GMKTec (`~/work/sastle-isolation-sphere`): **SSH直push でブランチ反映済み**
+    (`git checkout feat/imu-m5-internal-switch` 済み、HEAD=f7d0753)。
+  - **GitHub(origin) には未push** — Mac の GitHub 認証(HTTPS/gh token)が失効中。
+    要対応: `gh auth login` 後に `git push -u origin feat/imu-m5-internal-switch`。
+- **ビルド検証済み (GMKTec / Mac両方)**: `atoms3r`(BNO055) / `atoms3r_m5imu`(内蔵IMU) /
+  `atoms3r_m5imu_ota`。Flash ~79%、RAM ~20%。
+- **書き込めなかった理由**: device `192.168.49.101` が **ping無応答**(ARP は STALE/DELAY=
+  関連付けはあるが無応答、ハングの疑い §A+運用の罠)。GMKTec に **USB接続無し**。
+  作業者が現地不在で**電源リセット不可**だったため保留。
+
+### 次回の書き込み手順 (電源リセット → OTA)
+1. **device を電源リセット**(ボール内 AtomS3R)。P2P AP(192.168.49.1)へ再接続を待つ。
+2. GMKTec から到達確認: `ping -c2 192.168.49.101` が応答すればOK。
+3. **OTA 書き込み** (GMKTec、`~/work/sastle-isolation-sphere/core` で):
+   ```
+   export PATH="$HOME/.platformio/penv/bin:$PATH"
+   pio run -e atoms3r_m5imu_ota -t upload      # M5内蔵IMU ファーム (今回の検証対象)
+   ```
+   - BNO055 版に戻すなら `-e atoms3r_ota`。
+   - `--auth=isolation-sphere-ota` は env に内蔵済み。
+4. **config.json (LittleFS) は基本不要**: `led.multisample` の既定値はファーム側
+   デフォルト(ON/2.0px/6点)と一致するため、firmware のみで意図どおり動く。
+   値を変えたい/明示反映したい場合のみ `-t uploadfs`。
+5. **OTA が無応答で失敗する場合**: device がハング。USB(OTG)で最初の1回を書く必要があるかも
+   (§9 の otadata 罠も確認)。USB を GMKTec に挿し `-e atoms3r_m5imu`(OTAでない素のenv,
+   `upload_port=/dev/ttyACM0`) で書く。
+
+### 実機で確認したいこと (書き込み後)
+- **IMU**: 内蔵BMI270 で姿勢追従するか。**6軸ゆえヨー(方位)ドリフト**の実用許容度を実測
+  (§12.1)。`[IMU] Gyro bias ...` ログが起動時に出る。ドリフト次第で既定を BNO055 に戻す判断。
+- **LEDマルチサンプル**: ちらつき低減の効果と `[PERF]` の `map` 実測(見積り §12.2 では
+  K=7 で IMU追従 ~55→~51Hz、動画 ~20Hz不変)。半径は `config.json led.multisample.radius_px`
+  で調整(効果弱→3px / ボケ過ぎ→縮小)。
