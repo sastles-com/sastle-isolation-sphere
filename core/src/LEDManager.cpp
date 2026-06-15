@@ -99,47 +99,52 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     // IMU補正OFF時用に静的UV→ピクセル座標を事前計算 (毎フレームの三角関数を回避)
     precomputeStaticUV();
     
-    // GPIO設定 (BoardConfig.h で一元管理)
+    // GPIO設定 (BoardConfig.h で一元管理)。本数は BOARD_NUM_STRIPS(=kNumStrips)。
     _stripPins[0] = kLedPin0;
     _stripPins[1] = kLedPin1;
     _stripPins[2] = kLedPin2;
     _stripPins[3] = kLedPin3;
-    
-    // FastLED初期化 (4ストリップ)
-    // ストリップ毎のLED数とオフセットを計算
+#if BOARD_NUM_STRIPS >= 5
+    _stripPins[4] = kLedPin4;
+#endif
+
+    // ストリップ毎のLED数とオフセットを計算 (CSVの strip 列から導出)
     memset(_ledsPerStrip, 0, sizeof(_ledsPerStrip));
     memset(_stripStartIndex, 0, sizeof(_stripStartIndex));
-    
+
     for (uint16_t i = 0; i < _numLEDs; i++) {
         uint8_t strip = _ledLayout[i].strip;
-        if (strip < 4) {
+        if (strip < kNumStrips) {
             _ledsPerStrip[strip]++;
         }
     }
-    
+
     // ストリップ開始インデックスを計算
     _stripStartIndex[0] = 0;
-    for (int i = 1; i < 4; i++) {
+    for (int i = 1; i < kNumStrips; i++) {
         _stripStartIndex[i] = _stripStartIndex[i-1] + _ledsPerStrip[i-1];
     }
-    
+
     // ストリップ毎のバッファポインタを設定
-    _stripBuffers[0] = _ledBuffer;
-    _stripBuffers[1] = _ledBuffer + _stripStartIndex[1];
-    _stripBuffers[2] = _ledBuffer + _stripStartIndex[2];
-    _stripBuffers[3] = _ledBuffer + _stripStartIndex[3];
-    
-    Serial.printf("[LEDManager] LEDs per strip: [%d, %d, %d, %d]\n",
-                  _ledsPerStrip[0], _ledsPerStrip[1], _ledsPerStrip[2], _ledsPerStrip[3]);
-    Serial.printf("[LEDManager] Strip offsets: [%d, %d, %d, %d]\n",
-                  _stripStartIndex[0], _stripStartIndex[1], _stripStartIndex[2], _stripStartIndex[3]);
-    
-    // FastLED初期化 (RMT DMA自動使用)
-    // 各ストリップは独立したRMTチャンネルで並列出力される
+    for (int i = 0; i < kNumStrips; i++) {
+        _stripBuffers[i] = _ledBuffer + _stripStartIndex[i];
+    }
+
+    Serial.printf("[LEDManager] Strips=%d, LEDs/strip:", kNumStrips);
+    for (int i = 0; i < kNumStrips; i++) {
+        Serial.printf(" %d", _ledsPerStrip[i]);
+    }
+    Serial.println();
+
+    // FastLED初期化 (RMT DMA自動使用)。各ストリップは独立RMTチャンネルで並列出力。
+    // ピンはコンパイル時定数が必須のため本数は #if で出し分ける。
     FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(_stripBuffers[0], _ledsPerStrip[0]);
     FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(_stripBuffers[1], _ledsPerStrip[1]);
     FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(_stripBuffers[2], _ledsPerStrip[2]);
     FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(_stripBuffers[3], _ledsPerStrip[3]);
+#if BOARD_NUM_STRIPS >= 5
+    FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(_stripBuffers[4], _ledsPerStrip[4]);
+#endif
 
     FastLED.setBrightness(kLedDefaultBrightness);
     FastLED.clear();
@@ -623,8 +628,9 @@ void LEDManager::printStatus() {
     Serial.printf("Initialized: %s\n", _initialized ? "Yes" : "No");
     Serial.printf("Task Running: %s\n", _taskRunning ? "Yes" : "No");
     Serial.printf("Total LEDs: %d\n", _numLEDs);
-    Serial.printf("Strips: 4 [%d, %d, %d, %d]\n",
-                  _ledsPerStrip[0], _ledsPerStrip[1], _ledsPerStrip[2], _ledsPerStrip[3]);
+    Serial.printf("Strips: %d [", kNumStrips);
+    for (int i = 0; i < kNumStrips; i++) Serial.printf("%s%d", i ? ", " : "", _ledsPerStrip[i]);
+    Serial.println("]");
     Serial.println("\n--- Statistics ---");
     Serial.printf("Frames Rendered: %u\n", _stats.frames_rendered);
     Serial.printf("Frames Dropped: %u\n", _stats.frames_dropped);
