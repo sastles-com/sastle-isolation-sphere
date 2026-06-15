@@ -85,9 +85,6 @@ export const Dashboard = () => {
             rotation={0}
             brightness={brightness}
             color={color}
-            playbackStatus={playbackStatus}
-            onTogglePlay={handleTogglePlay}
-            onStop={handleStop}
             onParamChange={handleParamChange}
         />
     );

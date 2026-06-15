@@ -78,6 +78,12 @@ class StateManager:
         """MQTTクライアントを設定（MQTTServiceから呼ばれる）"""
         self._mqtt_client = mqtt_client
         logger.info("MQTT client set in StateManager")
+
+    def set_initial_params(self, params: Dict[str, Any]):
+        """起動時に config の既定パラメータを反映する（クライアント接続前の初期化用）。"""
+        if isinstance(params, dict):
+            self._state["params"].update({k: v for k, v in params.items() if k in self._state["params"]})
+            logger.info(f"initial params applied from config: {self._state['params']}")
     
     def get_state(self) -> Dict[str, Any]:
         """現在の状態を取得"""

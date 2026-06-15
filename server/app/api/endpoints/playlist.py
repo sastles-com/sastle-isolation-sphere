@@ -279,6 +279,48 @@ async def play_playlist(request: Request, playlist_id: int):
     return {"status": "ok", "playback": streamer.get_status()}
 
 
+def start_configured_playback(db, streamer, config_service):
+    """config.playback の active_playlist を loop/shuffle 設定どおりに再生開始する。
+
+    SPHERE ポータルの「再生」と起動時 autoplay の共通処理。
+    戻り値: (ok: bool, detail: str)
+    """
+    pb = config_service.get_playback()
+    pid = pb.get("active_playlist")
+    if not pid:
+        return False, "no active playlist configured"
+    p = db.get_playlist(pid)
+    if not p:
+        return False, f"active playlist {pid} not found"
+    items = db.get_playlist_items_detailed(pid)
+    entries = [
+        {"path": it.get("converted_path"), "fps": it.get("fps") or None, "video_id": it.get("id")}
+        for it in items
+        if it.get("converted_path") and os.path.exists(it["converted_path"])
+    ]
+    if not entries:
+        return False, "active playlist has no playable videos"
+    if pb.get("shuffle"):
+        import random
+        random.shuffle(entries)
+    streamer.play_entries(entries, loop=bool(pb.get("loop")), playlist_id=pid)
+    logger.info(f"start configured playback: playlist {pid}, {len(entries)} videos")
+    return True, "ok"
+
+
+@router.post("/playback/start")
+async def start_playback(request: Request):
+    """config の active playlist を再生開始する (SPHERE ポータルの主要操作)。"""
+    db = request.app.state.db
+    streamer = request.app.state.video_streamer
+    config_service = request.app.state.config_service
+    ok, detail = start_configured_playback(db, streamer, config_service)
+    if not ok:
+        raise HTTPException(status_code=400, detail=detail)
+    _sync_playback_state(db, streamer)
+    return {"status": "ok", "playback": streamer.get_status()}
+
+
 @router.post("/playback/pause")
 async def pause_playback(request: Request):
     streamer = request.app.state.video_streamer

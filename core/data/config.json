@@ -40,6 +40,18 @@
     "overlay_mode": "overlay",
     "brightness_profile": "auto"
   },
+  "params": {
+    "brightness": 80,
+    "speed": 50,
+    "hue": 120,
+    "saturation": 100
+  },
+  "playback": {
+    "active_playlist": null,
+    "loop": true,
+    "shuffle": false,
+    "autoplay": false
+  },
   "sound": {
     "enabled": true,
     "gpio": 39,
