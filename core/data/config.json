@@ -16,7 +16,7 @@
       "config": "/config.json",
       "images": "/images/",
       "opening": "/images/opening/",
-      "layout": "/led_layout.csv",
+      "layout": "/led_layouts-5strip.csv",
       "logs": "/logs/"
     }
   },
