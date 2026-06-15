@@ -156,7 +156,21 @@ public:
      */
     void setAxisIndicator(bool enabled) { _axisIndicatorEnabled = enabled; }
     bool getAxisIndicator() const { return _axisIndicatorEnabled; }
-    
+
+    /**
+     * @brief マルチサンプリング(中心+半径R円周上N点の画像空間平均)を設定する
+     *
+     * 設定変更時に円周オフセットを1回だけ前計算するため、ここで cos/sin を回す。
+     * 毎フレームの描画ループでは前計算済みオフセットを使うので三角関数は増えない。
+     * @param enabled  false で中心1点のみ(従来動作)
+     * @param radiusPx サンプリング円の半径 [px] (0以下は中心のみ)
+     * @param points   円周上の点数 (0..kMaxSamplePoints)。実機チューニング用に可変
+     */
+    void setMultisample(bool enabled, float radiusPx, uint8_t points);
+    bool  getMultisampleEnabled() const { return _multisampleEnabled; }
+    float getMultisampleRadius() const { return _sampleRadiusPx; }
+    uint8_t getMultisamplePoints() const { return _sampleCount; }
+
     /**
      * @brief デバッグ情報を出力
      */
@@ -236,7 +250,18 @@ private:
      * @param x,y,z そのLEDのワールド系方向 (IMU補正後の単位ベクトル)
      */
     void overlayAxisIndicator(CRGB& led, float x, float y, float z);
-    
+
+    /**
+     * @brief 画像空間で 7点(中心+六角形6点)を平均サンプリングする
+     *
+     * 球面→画像の座標変換は呼び出し側で1回だけ行い (中心 px,py)、本関数はその周囲を
+     * 画像空間で平滑化する。三角関数を増やさずエイリアシング(ちらつき)を低減する狙い。
+     * x(経度)方向はラップ、y(緯度)方向はクランプして継ぎ目/極での破綻を防ぐ。
+     * @param cx,cy 中心ピクセル座標 (sphereToUV 由来)
+     * @param r,g,b 平均後の色 (出力)
+     */
+    void sampleAveraged(uint16_t cx, uint16_t cy, uint8_t& r, uint8_t& g, uint8_t& b);
+
     // メンバー変数
     bool _initialized;               ///< 初期化フラグ
     bool _taskRunning;               ///< タスク実行フラグ
@@ -247,7 +272,16 @@ private:
     
     bool _imuCompensationEnabled;    ///< IMU姿勢補正の有効化フラグ
     bool _axisIndicatorEnabled = false;  ///< XYZ軸インジケータ表示フラグ
-    
+
+    // --- マルチサンプリング (中心 + 半径R円周上のN点を画像空間で平均) ---
+    // 座標変換(三角関数)は中心1点のみ。円周オフセットは設定変更時に1回だけ前計算し、
+    // 毎フレームは整数オフセット加算 + getPixel + 平均のみ (毎フレームの三角関数ゼロ)。
+    static constexpr uint8_t kMaxSamplePoints = 12;  ///< 円周上サンプル点の上限
+    bool _multisampleEnabled = true;     ///< マルチサンプル有効化
+    float _sampleRadiusPx = 2.0f;        ///< サンプリング円の半径 [px]
+    uint8_t _sampleCount = 6;            ///< 円周上のサンプル点数 (中心を除く)
+    int16_t _sampleOff[kMaxSamplePoints][2] = {{0, 0}};  ///< 前計算した円周オフセット[dx,dy]
+
     TaskHandle_t _renderTaskHandle;  ///< レンダリングタスクハンドル
     
     CRGB* _ledBuffer;                ///< LEDバッファ (SRAM)

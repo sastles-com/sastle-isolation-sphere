@@ -98,6 +98,11 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
 
     // IMU補正OFF時用に静的UV→ピクセル座標を事前計算 (毎フレームの三角関数を回避)
     precomputeStaticUV();
+
+    // マルチサンプリング設定 (config駆動。円周オフセットをここで前計算)
+    setMultisample(config.getLedMultisampleEnabled(),
+                   config.getLedMultisampleRadius(),
+                   config.getLedMultisamplePoints());
     
     // GPIO設定 (BoardConfig.h で一元管理)。本数は BOARD_NUM_STRIPS(=kNumStrips)。
     _stripPins[0] = kLedPin0;
@@ -458,7 +463,7 @@ void LEDManager::updateLEDBuffer() {
         }
 
         uint8_t r, g, b;
-        _imageManager->getPixel(px, py, r, g, b);
+        sampleAveraged(px, py, r, g, b);  // 中心+六角形6点の画像空間平均 (K=7)
         _ledBuffer[i] = CRGB(r, g, b);
 
         // XYZ軸インジケータを重畳 (IMU時は wx,wy,wz=ワールド座標, OFF時はbody座標)
@@ -466,6 +471,61 @@ void LEDManager::updateLEDBuffer() {
             overlayAxisIndicator(_ledBuffer[i], wx, wy, wz);
         }
     }
+}
+
+void LEDManager::setMultisample(bool enabled, float radiusPx, uint8_t points) {
+    if (points > kMaxSamplePoints) points = kMaxSamplePoints;
+    _multisampleEnabled = enabled;
+    _sampleRadiusPx = radiusPx;
+    _sampleCount = points;
+
+    // 半径Rの円周上に points 個を等間隔配置したオフセットを前計算 (cos/sin はここだけ)。
+    // 以後の毎フレーム描画では整数オフセットを足すだけで三角関数は発生しない。
+    for (uint8_t i = 0; i < points; ++i) {
+        float ang = (2.0f * (float)M_PI * i) / (float)points;
+        _sampleOff[i][0] = (int16_t)lroundf(radiusPx * cosf(ang));
+        _sampleOff[i][1] = (int16_t)lroundf(radiusPx * sinf(ang));
+    }
+
+    Serial.printf("[LEDManager] Multisample: %s radius=%.1fpx points=%d (K=%d)\n",
+                  enabled ? "ON" : "OFF", radiusPx, points,
+                  (enabled && points > 0) ? (points + 1) : 1);
+}
+
+void LEDManager::sampleAveraged(uint16_t cx, uint16_t cy, uint8_t& r, uint8_t& g, uint8_t& b) {
+    // 中心は常にサンプル
+    _imageManager->getPixel(cx, cy, r, g, b);
+
+    if (!_multisampleEnabled || _sampleCount == 0 || _sampleRadiusPx <= 0.0f) {
+        return;  // 中心1点のみ (従来動作)
+    }
+
+    const int w = (int)_imageManager->getWidth();
+    const int h = (int)_imageManager->getHeight();
+
+    // 中心の値を含めて加算 (合計 _sampleCount + 1 点)
+    uint16_t rs = r, gs = g, bs = b;
+    for (uint8_t s = 0; s < _sampleCount; ++s) {
+        int sx = (int)cx + _sampleOff[s][0];
+        int sy = (int)cy + _sampleOff[s][1];
+
+        // x=経度: ラップ (継ぎ目 u=0↔1 をまたいでも正しい隣を拾う)
+        if (w > 0) {
+            sx %= w;
+            if (sx < 0) sx += w;
+        }
+        // y=緯度: クランプ (極をまたがない)
+        if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
+
+        uint8_t pr = 0, pg = 0, pb = 0;
+        _imageManager->getPixel((uint16_t)sx, (uint16_t)sy, pr, pg, pb);
+        rs += pr; gs += pg; bs += pb;
+    }
+
+    const uint16_t n = (uint16_t)_sampleCount + 1;
+    r = (uint8_t)(rs / n);
+    g = (uint8_t)(gs / n);
+    b = (uint8_t)(bs / n);
 }
 
 void LEDManager::overlayAxisIndicator(CRGB& led, float x, float y, float z) {

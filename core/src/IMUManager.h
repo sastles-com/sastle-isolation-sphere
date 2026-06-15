@@ -1,28 +1,48 @@
 /**
  * @file IMUManager.h
- * @brief IMUセンサー (BNO055) 管理クラス
+ * @brief IMUセンサー管理クラス (BNO055 / M5Atom 内蔵 BMI270 をビルド時に切替)
  * @author sastle-com
  * @date 2025-12-01
+ *
+ * バックエンドは build_flags の -D で選択する:
+ *   -D IMU_SENSOR_BNO055  : 外部 BNO055 (9軸オンチップ融合, NDOF) ※既定
+ *   -D IMU_SENSOR_M5IMU   : M5Atom 内蔵 BMI270 (6軸) + ソフト Madgwick 融合
+ * いずれの場合も公開 API (getQuaternion/getEuler/getAccel/getGyro) は同一で、
+ * 戻り値型 imu::Quaternion / imu::Vector<3> も共通 (imumaths.h はヘッダオンリ)。
  */
 
 #pragma once
 
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
 #include "ConfigManager.h"
 #include "BoardConfig.h"
+
+// --- バックエンド選択 ---
+//   既定は BNO055。build_flags に -D IMU_SENSOR_M5IMU を足すと、(BNO055 が同時に
+//   定義されていても) M5内蔵IMU を優先する。これにより M5IMU 用 env は通常 env を
+//   extends したうえで -D IMU_SENSOR_M5IMU を1行足すだけで切替できる。
+#if !defined(IMU_SENSOR_BNO055) && !defined(IMU_SENSOR_M5IMU)
+#define IMU_SENSOR_BNO055
+#endif
+
+#if defined(IMU_SENSOR_M5IMU)
+#include <M5Unified.h>
+#include "MadgwickAHRS.h"
+#else
+#include <Adafruit_BNO055.h>
+#endif
 
 namespace sastle {
 
 /**
  * @class IMUManager
- * @brief BNO055 IMUセンサーを管理するクラス
- * 
- * 9軸センサーフュージョンによるクォータニオン、オイラー角、
- * 加速度、ジャイロデータの取得機能を提供します。
+ * @brief IMUセンサーを管理するクラス
+ *
+ * クォータニオン、オイラー角、加速度、ジャイロデータの取得機能を提供します。
  * 100Hzでの高速データ更新に対応しています。
+ * BNO055 はオンチップ9軸融合、M5IMU は BMI270(6軸)+ソフト融合で姿勢を推定します。
  */
 class IMUManager {
 public:
@@ -144,16 +164,28 @@ public:
     int8_t getTemperature();
     
 private:
-    Adafruit_BNO055 _bno;          ///< BNO055センサーオブジェクト
     bool _initialized;             ///< 初期化状態フラグ
-    
+
     imu::Quaternion _quat;         ///< 最新クォータニオン
-    imu::Vector<3> _euler;         ///< 最新オイラー角
-    imu::Vector<3> _accel;         ///< 最新加速度
-    imu::Vector<3> _gyro;          ///< 最新ジャイロ
-    
+    imu::Vector<3> _euler;         ///< 最新オイラー角 (x=heading, y=roll, z=pitch)
+    imu::Vector<3> _accel;         ///< 最新加速度 [m/s²]
+    imu::Vector<3> _gyro;          ///< 最新ジャイロ [rad/s]
+
     unsigned long _lastUpdate;     ///< 最終更新時刻 (ms)
     const unsigned long UPDATE_INTERVAL = 10; ///< 更新間隔 10ms = 100Hz
+
+#if defined(IMU_SENSOR_M5IMU)
+    MadgwickAHRS _ahrs;            ///< ソフト姿勢推定フィルタ (6軸)
+    unsigned long _lastMicros;     ///< 前回更新のマイクロ秒 (dt算出用)
+    bool _biasReady;               ///< ジャイロバイアス校正済みフラグ
+    float _gyroBias[3];            ///< ジャイロゼロ点バイアス [deg/s] (x,y,z)
+    unsigned long _lastDriftLog;   ///< ドリフト計測ログの最終出力時刻 (ms)
+
+    /// @brief 起動時に静止状態のジャイロを平均してバイアスを推定
+    void calibrateGyroBias();
+#else
+    Adafruit_BNO055 _bno;          ///< BNO055センサーオブジェクト
+#endif
 };
 
 } // namespace sastle

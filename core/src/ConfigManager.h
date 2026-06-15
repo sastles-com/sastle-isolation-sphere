@@ -227,7 +227,13 @@ public:
      * @return true デバッグ表示有効, false 無効
      */
     bool getLCDDebugEnabled() { return doc["sphere"]["features"]["LCD"]["debug"] | false; }
-    
+
+    // LEDカラーのマルチサンプリング (中心+半径R円周上N点を画像空間で平均)。
+    // 実機でちらつき低減↔ボケ/負荷のトレードオフを調整するための可変パラメータ。
+    bool getLedMultisampleEnabled() { return doc["led"]["multisample"]["enabled"] | true; }
+    float getLedMultisampleRadius() { return doc["led"]["multisample"]["radius_px"] | 2.0f; }
+    uint8_t getLedMultisamplePoints() { return doc["led"]["multisample"]["points"] | 6; }
+
     // デバッグ出力
     void printConfig();
     
