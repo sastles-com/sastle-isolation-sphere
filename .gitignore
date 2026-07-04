@@ -18,6 +18,9 @@ yarn-error.log*
 # Runtime data
 server/data/
 
+# Claude Code (personal, not shared)
+.claude/settings.local.json
+
 # OS generated files
 .DS_Store
 .DS_Store?
