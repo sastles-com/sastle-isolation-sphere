@@ -51,6 +51,14 @@ const rotateByQuaternion = (x, y, z, qw, qx, qy, qz, out) => {
     out[2] = z + 2.0 * cross2z;
 };
 
+// rotateByQuaternion の z 成分だけを返す軽量版 (前面判定 §5.2b 用)。
+const rotatedZ = (x, y, z, qw, qx, qy, qz) => {
+    const cross1x = qy * z - qz * y + qw * x;
+    const cross1y = qz * x - qx * z + qw * y;
+    const cross2z = qx * cross1y - qy * cross1x;
+    return z + 2.0 * cross2z;
+};
+
 // LEDManager.cpp:242 sphereToUV の逐語移植。out に [u,v] を書く。
 const sphereToUV = (x, y, z, out) => {
     const len = Math.sqrt(x * x + y * y + z * z);
@@ -68,6 +76,11 @@ const sphereToUV = (x, y, z, out) => {
 // spec §5.2 の擬似コードは q をそのまま使う形で書かれているため、ここを実機照合で
 // 反転できるよう定数化する (静止時 = 恒等回転では両者は同一で、差は実機回転時のみ)。
 const CONJUGATE_SAMPLING = true;
+
+// live 表示ルール (§5.2b)
+const BACKFACE_GRAY = 0.5;               // 裏面 LED = #808080 固定 (brightness 乗算なし)
+const WIREFRAME_LIVE_OPACITY = 0.0;      // live 中はワイヤーフレーム非表示 (0.05 で薄表示に切替可)
+const WIREFRAME_DEFAULT_OPACITY = 0.12;  // params / strip モード
 
 // 円形スプライト (radial gradient の白丸) を一度だけ生成してキャッシュ。
 // 外部画像ファイルを使わず points を丸ドットにする。
@@ -134,7 +147,7 @@ const buildStripColors = (stripIds) => {
 
 // ============================================================================
 // useLedLiveColors — FRAME_PREVIEW + IMU quaternion から 800 点の実発色を再計算する
-// (デジタルツイン)。ファーム描画パスの逐語移植。spec §5.2。
+// (デジタルツイン)。ファーム描画パスの逐語移植。spec §5.2 / §5.2b。
 // ============================================================================
 const FRAME_TIMEOUT_MS = 3000;   // これ以上フレームが来なければ params にフォールバック
 const COMPUTE_MIN_INTERVAL_MS = 1000 / 15;   // 色計算は最大 15Hz
@@ -170,8 +183,11 @@ const useLedLiveColors = ({ layout, geomRef, quaternionRef, brightness, enabled 
         lastComputeRef.current = now;
 
         const q = quaternionRef.current;
-        let qw = q.w, qx = q.x, qy = q.y, qz = q.z;
-        if (CONJUGATE_SAMPLING) { qx = -qx; qy = -qy; qz = -qz; }
+        const qw = q.w, qx = q.x, qy = q.y, qz = q.z;
+        // サンプリング用は共役 (ファーム LEDManager.cpp:436)。前面判定は非共役 (表示と同じ)。
+        const sx = CONJUGATE_SAMPLING ? -qx : qx;
+        const sy = CONJUGATE_SAMPLING ? -qy : qy;
+        const sz = CONJUGATE_SAMPLING ? -qz : qz;
 
         const pos = layout.positions;
         const { data, w, h } = frame;
@@ -179,14 +195,22 @@ const useLedLiveColors = ({ layout, geomRef, quaternionRef, brightness, enabled 
         const rot = [0, 0, 0];
         const uv = [0, 0];
         for (let i = 0; i < layout.count; i++) {
-            rotateByQuaternion(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], qw, qx, qy, qz, rot);
-            sphereToUV(rot[0], rot[1], rot[2], uv);
-            const px = Math.trunc(uv[0] * (w - 1));   // (uint16) 量子化 = 正数の trunc
-            const py = Math.trunc(uv[1] * (h - 1));
-            const idx = (py * w + px) * 4;
-            colors[i * 3] = data[idx] * bscale;
-            colors[i * 3 + 1] = data[idx + 1] * bscale;
-            colors[i * 3 + 2] = data[idx + 2] * bscale;
+            const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+            // 前面判定 (§5.2b): 表示用(非共役)回転の法線 z 成分。カメラは +Z 固定。
+            if (rotatedZ(x, y, z, qw, qx, qy, qz) > 0) {
+                // 前面 → 映像色 (サンプリングは共役回転)
+                rotateByQuaternion(x, y, z, qw, sx, sy, sz, rot);
+                sphereToUV(rot[0], rot[1], rot[2], uv);
+                const px = Math.trunc(uv[0] * (w - 1));   // (uint16) 量子化 = 正数の trunc
+                const py = Math.trunc(uv[1] * (h - 1));
+                const idx = (py * w + px) * 4;
+                colors[i * 3] = data[idx] * bscale;
+                colors[i * 3 + 1] = data[idx + 1] * bscale;
+                colors[i * 3 + 2] = data[idx + 2] * bscale;
+            } else {
+                // 裏面 → 50% グレー固定
+                colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = BACKFACE_GRAY;
+            }
         }
         const geom = geomRef.current;
         if (geom && geom.attributes.color) geom.attributes.color.needsUpdate = true;
@@ -227,9 +251,63 @@ const useLedLiveColors = ({ layout, geomRef, quaternionRef, brightness, enabled 
     return { active, colors };
 };
 
-const LedPointCloud = ({ hue, brightness, colorMode = 'params', quaternionRef }) => {
+const LedPointCloud = ({ geomRef, layout, effectiveMode, liveColors, hue, brightness }) => {
+    // 頂点属性を layout / effectiveMode に応じて構築
+    useEffect(() => {
+        if (!layout || !geomRef.current) return;
+        const geom = geomRef.current;
+        geom.setAttribute('position', new THREE.BufferAttribute(layout.positions, 3));
+        if (effectiveMode === 'strip') {
+            geom.setAttribute('color', new THREE.BufferAttribute(buildStripColors(layout.strip), 3));
+        } else if (effectiveMode === 'live' && liveColors) {
+            geom.setAttribute('color', new THREE.BufferAttribute(liveColors, 3));
+        } else {
+            geom.deleteAttribute('color');
+        }
+        geom.attributes.position.needsUpdate = true;
+    }, [layout, effectiveMode, liveColors, geomRef]);
+
+    if (!layout) return null;
+
+    const isLive = effectiveMode === 'live';
+    const useVertexColors = effectiveMode === 'strip' || isLive;
+    const sphereColor = hueToRgb(hue);
+
+    return (
+        <points>
+            <bufferGeometry ref={geomRef} />
+            {/* effectiveMode を key に含め、vertexColors/blending 切替時にマテリアルを作り直す */}
+            <pointsMaterial
+                key={effectiveMode}
+                map={dotTexture()}
+                color={useVertexColors ? '#ffffff' : sphereColor}
+                vertexColors={useVertexColors}
+                size={0.05}
+                sizeAttenuation
+                transparent
+                // live: 手前の LED が奥を隠す (裏面グレーが前面色に濁らない §5.2b)
+                depthWrite={isLive}
+                blending={isLive ? THREE.NormalBlending : THREE.AdditiveBlending}
+                opacity={isLive ? 1.0 : 0.35 + 0.65 * (brightness / 100)}
+            />
+        </points>
+    );
+};
+
+const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
+    const groupRef = useRef();
     const geomRef = useRef();
+    const quaternionRef = useRef(new THREE.Quaternion(0, 0, 0, 1)); // x, y, z, w
     const [layout, setLayout] = useState(_layoutCache);
+
+    // Safe WebSocket usage with error handling
+    let lastMessage = null;
+    try {
+        const wsContext = useWebSocket();
+        lastMessage = wsContext?.lastMessage;
+    } catch (error) {
+        console.warn('WebSocket context not available:', error);
+    }
 
     useEffect(() => {
         if (layout) return;
@@ -241,63 +319,8 @@ const LedPointCloud = ({ hue, brightness, colorMode = 'params', quaternionRef })
     const live = useLedLiveColors({
         layout, geomRef, quaternionRef, brightness, enabled: colorMode === 'live',
     });
-
     // live 選択中でもフレーム未着なら params 着色にフォールバック (spec §5.3)
     const effectiveMode = colorMode === 'live' ? (live.active ? 'live' : 'params') : colorMode;
-
-    // 頂点属性を layout / effectiveMode に応じて構築
-    useEffect(() => {
-        if (!layout || !geomRef.current) return;
-        const geom = geomRef.current;
-        geom.setAttribute('position', new THREE.BufferAttribute(layout.positions, 3));
-        if (effectiveMode === 'strip') {
-            geom.setAttribute('color', new THREE.BufferAttribute(buildStripColors(layout.strip), 3));
-        } else if (effectiveMode === 'live' && live.colors) {
-            geom.setAttribute('color', new THREE.BufferAttribute(live.colors, 3));
-        } else {
-            geom.deleteAttribute('color');
-        }
-        geom.attributes.position.needsUpdate = true;
-    }, [layout, effectiveMode, live.colors]);
-
-    if (!layout) return null;
-
-    const useVertexColors = effectiveMode === 'strip' || effectiveMode === 'live';
-    const sphereColor = hueToRgb(hue);
-    const opacity = effectiveMode === 'live' ? 0.9 : 0.35 + 0.65 * (brightness / 100);
-
-    return (
-        <points>
-            {/* effectiveMode を key に含め、vertexColors 切替時にマテリアルを作り直す */}
-            <bufferGeometry ref={geomRef} />
-            <pointsMaterial
-                key={effectiveMode}
-                map={dotTexture()}
-                color={useVertexColors ? '#ffffff' : sphereColor}
-                vertexColors={useVertexColors}
-                size={0.05}
-                sizeAttenuation
-                transparent
-                depthWrite={false}
-                blending={THREE.AdditiveBlending}
-                opacity={opacity}
-            />
-        </points>
-    );
-};
-
-const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
-    const groupRef = useRef();
-    const quaternionRef = useRef(new THREE.Quaternion(0, 0, 0, 1)); // x, y, z, w
-
-    // Safe WebSocket usage with error handling
-    let lastMessage = null;
-    try {
-        const wsContext = useWebSocket();
-        lastMessage = wsContext?.lastMessage;
-    } catch (error) {
-        console.warn('WebSocket context not available:', error);
-    }
 
     useEffect(() => {
         // Update quaternion when IMU data received
@@ -319,25 +342,29 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
     const sphereColor = hueToRgb(hue);
     // Convert brightness (0-100) to emissive intensity (0-1)
     const emissiveIntensity = brightness / 100;
+    // live 中はワイヤーフレーム非表示 (§5.2b)
+    const wireframeOpacity = effectiveMode === 'live' ? WIREFRAME_LIVE_OPACITY : WIREFRAME_DEFAULT_OPACITY;
 
     return (
         <group ref={groupRef} scale={2.2}>
-            {/* 骨格として薄く残すワイヤーフレーム球。LED 点群を主役にする。 */}
-            <Sphere args={[1, 32, 32]}>
+            {/* 骨格として薄く残すワイヤーフレーム球 (live 中は非表示)。LED 点群を主役にする。 */}
+            <Sphere args={[1, 32, 32]} visible={wireframeOpacity > 0}>
                 <meshStandardMaterial
                     color={sphereColor}
                     wireframe={true}
                     emissive={sphereColor}
                     emissiveIntensity={emissiveIntensity}
                     transparent
-                    opacity={0.12}
+                    opacity={wireframeOpacity}
                 />
             </Sphere>
             <LedPointCloud
+                geomRef={geomRef}
+                layout={layout}
+                effectiveMode={effectiveMode}
+                liveColors={live.colors}
                 hue={hue}
                 brightness={brightness}
-                colorMode={colorMode}
-                quaternionRef={quaternionRef}
             />
         </group>
     );
