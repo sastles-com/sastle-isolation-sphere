@@ -1,3 +1,6 @@
+import csv
+import os
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
@@ -17,6 +20,39 @@ class SettingsUpdate(BaseModel):
 async def get_settings(request: Request):
     """config.json の params / playback を返す。"""
     return request.app.state.config_service.get_public()
+
+
+# ===== LED 物理レイアウト配信 (実機と同一の core/data CSV が単一ソース) =====
+
+# CONFIG_SEARCH_PATHS と同じ流儀 (サーバーは server/ から起動される前提)
+LED_LAYOUT_SEARCH_PATHS = [
+    "../core/data/led_layouts-5strip.csv",
+    "data/led_layouts-5strip.csv",
+]
+
+
+@router.get("/led-layout")
+async def get_led_layout():
+    """LED 物理レイアウトをフラット配列で返す。
+
+    返り値: {count, strips, positions: [x0,y0,z0, x1,y1,z1, ...], strip: [s0, s1, ...]}
+    positions はそのまま Float32Array に流し込める形式。
+    """
+    for path in LED_LAYOUT_SEARCH_PATHS:
+        if not os.path.exists(path):
+            continue
+        positions, strip_ids = [], []
+        with open(path, newline="") as f:
+            for row in csv.DictReader(f):
+                positions.extend((float(row["x"]), float(row["y"]), float(row["z"])))
+                strip_ids.append(int(row["strip"]))
+        return {
+            "count": len(strip_ids),
+            "strips": (max(strip_ids) + 1) if strip_ids else 0,
+            "positions": positions,
+            "strip": strip_ids,
+        }
+    raise HTTPException(status_code=404, detail="LED layout CSV not found")
 
 
 @router.put("/settings")

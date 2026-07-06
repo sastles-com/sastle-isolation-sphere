@@ -14,6 +14,9 @@ export const WebSocketProvider = ({ children }) => {
     const [logs, setLogs] = useState([]);
     const ws = useRef(null);
     const reconnectTimeout = useRef(null);
+    // FRAME_PREVIEW は 5fps の base64 JPEG。React state に載せると購読者が毎フレーム
+    // 再レンダーされるため、LOG_LINE と同様に別経路 (ref ベースの購読) で流す。
+    const frameSubscribers = useRef(new Set());
 
     const MAX_LOG_LINES = 500; // 古い行は破棄してメモリ肥大を防ぐ
     const clearLogs = useCallback(() => setLogs([]), []);
@@ -48,6 +51,11 @@ export const WebSocketProvider = ({ children }) => {
                         return next.length > MAX_LOG_LINES
                             ? next.slice(next.length - MAX_LOG_LINES)
                             : next;
+                    });
+                } else if (data.type === 'FRAME_PREVIEW') {
+                    // 映像プレビューは購読者へ直接渡す (state 経由の再レンダーを避ける)
+                    frameSubscribers.current.forEach((cb) => {
+                        try { cb(data.payload); } catch (e) { console.error('frame subscriber failed:', e); }
                     });
                 } else {
                     setLastMessage(data);
@@ -93,10 +101,16 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, []);
 
+    // FRAME_PREVIEW の購読 (返り値は解除関数)。identity は不変なので再レンダーを誘発しない。
+    const subscribeFrame = useCallback((cb) => {
+        frameSubscribers.current.add(cb);
+        return () => frameSubscribers.current.delete(cb);
+    }, []);
+
     // main値はメモ化し、logs更新では identity を変えない(購読者を再レンダーさせない)
     const wsValue = useMemo(
-        () => ({ isConnected, lastMessage, sendMessage }),
-        [isConnected, lastMessage, sendMessage]
+        () => ({ isConnected, lastMessage, sendMessage, subscribeFrame }),
+        [isConnected, lastMessage, sendMessage, subscribeFrame]
     );
     const logValue = useMemo(() => ({ logs, clearLogs }), [logs, clearLogs]);
 

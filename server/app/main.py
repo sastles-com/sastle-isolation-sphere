@@ -43,6 +43,8 @@ async def lifespan(app: FastAPI):
 
     # 動画ストリーマ初期化 (再生時に動画→JPEGチャンク→UDPでデバイスへ送出)
     video_streamer = VideoStreamer()
+    # 再生フレームを間引いて UI へも配信 (デジタルツイン用 FRAME_PREVIEW)
+    video_streamer.set_preview_broadcaster(state_manager, loop)
 
     # 共有 config.json の運用設定 (params / playback)
     config_service = ConfigService()

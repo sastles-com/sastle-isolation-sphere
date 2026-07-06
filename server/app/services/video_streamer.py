@@ -5,6 +5,8 @@
 play()/pause()/resume()/stop() で制御。送信先は config.json (sphere.static_ip /
 wifi.udp_port)。ファーム ImageManager の UDPChunkHeader と一致させること。
 """
+import asyncio
+import base64
 import json
 import logging
 import math
@@ -23,6 +25,10 @@ MAX_CHUNK = 1400          # ファーム MAX_CHUNK_DATA と一致
 # 送出fpsの上限。デバイスのデコード能力(~20fps)に合わせ、かつ送出スレッドが
 # 常に sleep を挟めるようにして uvicorn イベントループの starvation を防ぐ。
 MAX_STREAM_FPS = 20.0
+# UI デジタルツイン用プレビュー配信レート。デバイス宛 UDP とは別に、間引いた
+# フレームを WebSocket で UI へ流す (30fps は UI プレビューに不要・WS を圧迫しない)。
+PREVIEW_FPS = 5.0
+PREVIEW_PERIOD = 1.0 / PREVIEW_FPS
 
 
 def _load_device_target():
@@ -57,7 +63,31 @@ class VideoStreamer:
         self.current_video_id = None
         self.current_playlist_id = None
         self._loop = True                # ループ再生フラグ (再生中も変更可能)
+        # UI プレビュー配信 (デジタルツイン用)。main.py で set_preview_broadcaster() 済み。
+        self._preview_sm = None          # StateManager
+        self._preview_loop = None        # uvicorn イベントループ (別スレッドから投入する)
         logger.info(f"VideoStreamer target={self._target} size={self._w}x{self._h}")
+
+    def set_preview_broadcaster(self, state_manager, loop):
+        """UI へのプレビュー配信先 (StateManager) とイベントループを登録する。
+
+        送出は別スレッド (_run) から run_coroutine_threadsafe でループへ投入する
+        (mqtt_service._submit_coroutine と同じ流儀)。
+        """
+        self._preview_sm = state_manager
+        self._preview_loop = loop
+
+    def _emit_preview(self, seq: int, jpeg_bytes: bytes):
+        """デコード済み JPEG 1枚を UI へ WebSocket 配信する (5fps に間引き済み)。"""
+        sm, loop = self._preview_sm, self._preview_loop
+        if not sm or not loop:
+            return
+        try:
+            b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+            asyncio.run_coroutine_threadsafe(
+                sm.broadcast_frame_preview(b64, self._w, self._h, seq), loop)
+        except Exception as e:
+            logger.debug(f"preview emit failed: {e}")
 
     def get_status(self):
         return {"status": self.status, "video_id": self.current_video_id,
@@ -144,6 +174,7 @@ class VideoStreamer:
                     logger.info(f"streaming {entry['path']} src={src_fps:.0f}fps "
                                 f"-> {eff_fps:.1f}fps (skip {skip}) -> {self._target}")
                     next_t = time.time()
+                    next_preview = 0.0   # 次に UI プレビューを送る時刻 (即送出から開始)
                     while not self._stop.is_set():
                         if self._pause.is_set():
                             time.sleep(0.05)
@@ -161,7 +192,13 @@ class VideoStreamer:
                         frame = cv2.resize(frame, (self._w, self._h))
                         ok2, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._q])
                         if ok2:
-                            self._send_frame(fid, jpg.tobytes())
+                            data = jpg.tobytes()
+                            self._send_frame(fid, data)
+                            # UI プレビューを PREVIEW_FPS に間引いて配信 (再生中のみ)
+                            now = time.time()
+                            if now >= next_preview:
+                                self._emit_preview(fid, data)
+                                next_preview = now + PREVIEW_PERIOD
                             fid += 1
                         next_t += period
                         sleep = next_t - time.time()

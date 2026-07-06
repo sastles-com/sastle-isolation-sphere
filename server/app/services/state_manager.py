@@ -354,3 +354,14 @@ class StateManager:
     async def broadcast_log(self, line: str):
         """デバイスのデバッグログ1行を配信する (状態スナップショットには保持しない)"""
         await self._broadcast({"type": "LOG_LINE", "payload": {"line": line}})
+
+    async def broadcast_frame_preview(self, jpeg_b64: str, w: int, h: int, seq: int):
+        """再生中の映像プレビュー1枚(base64 JPEG)を配信する。
+
+        UI 側デジタルツイン(LED 800点のライブ発色)用。LOG_LINE と同じ流儀で
+        _state には保持せず、STATE_UPDATE とは別経路で流す (retained 不要・高頻度)。
+        """
+        await self._broadcast({
+            "type": "FRAME_PREVIEW",
+            "payload": {"jpeg_b64": jpeg_b64, "w": w, "h": h, "seq": seq},
+        })
