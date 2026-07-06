@@ -68,6 +68,7 @@ export const SpherePlayer = () => {
     const libRef = useRef(null);
     const ctlRef = useRef(null);
     const stageRef = useRef(null);
+    const kb = useRef({}); // 最新の操作ハンドラを保持 (キーボード/フリックから参照)
 
     // ---- エッジドラッグのゲージ表示 (右端=brightness / 左端=hue) ----
     const [gauge, setGauge] = useState(null); // { side, param, value, min, max, unit, visible }
@@ -106,13 +107,21 @@ export const SpherePlayer = () => {
     const handlePan = useCallback((_, info) => {
         if (panMode.current === 'ignore') return;
 
-        // 中央領域: 縦優位ならシート、横優位は無視 (トラック送りは将来)
+        // 中央領域: 縦優位ならシート開閉、横優位はトラック送り (仕様 §2.5)
         if (panMode.current === null) {
-            if (Math.abs(info.offset.y) <= Math.abs(info.offset.x)) return;
-            const dir = info.offset.y < 0 ? 'lib' : 'ctl';
-            panMode.current = dir;
-            (dir === 'lib' ? libRef : ctlRef).current?.panStart();
+            const { x, y } = info.offset;
+            if (Math.abs(y) > Math.abs(x)) {
+                const dir = y < 0 ? 'lib' : 'ctl';
+                panMode.current = dir;
+                (dir === 'lib' ? libRef : ctlRef).current?.panStart();
+            } else if (Math.abs(x) > 40) {
+                panMode.current = 'skip'; // 送り方向は panEnd で確定
+                return;
+            } else {
+                return; // まだ方向が定まらない
+            }
         }
+        if (panMode.current === 'skip') return;
 
         if (panMode.current === 'lib' || panMode.current === 'ctl') {
             (panMode.current === 'lib' ? libRef : ctlRef).current?.panMove(info.offset.y);
@@ -140,6 +149,8 @@ export const SpherePlayer = () => {
         panMode.current = null;
         if (mode === 'lib' || mode === 'ctl') {
             (mode === 'lib' ? libRef : ctlRef).current?.panEnd(info.velocity.y);
+        } else if (mode === 'skip') {
+            if (info.offset.x < 0) kb.current.skipNext(); else kb.current.skipPrev(); // 左フリック=次
         } else if (mode === 'brightness' || mode === 'hue') {
             brtDragging.current = false;
             hueDragging.current = false;
@@ -152,15 +163,23 @@ export const SpherePlayer = () => {
     }, []);
     useEffect(() => () => clearTimeout(gaugeFadeTimer.current), []);
 
-    // ---- PC キーボードフォールバック (Space / L / ,) ----
-    const togglePlayRef = useRef(pb.togglePlay);
-    togglePlayRef.current = pb.togglePlay;
+    // ---- PC キーボードフォールバック (仕様 §2.6) ----
+    // Space=再生/一時停止, L=LIBRARY, ,=CONTROL, ←→=トラック送り, ↑↓=明るさ
+    // 最新ハンドラを ref に反映 (キーボード/フリックのリスナーから参照)
+    useEffect(() => {
+        kb.current = { togglePlay: pb.togglePlay, skipNext: pb.skipNext, skipPrev: pb.skipPrev, brightness, handleBrightness };
+    });
     useEffect(() => {
         const onKey = (e) => {
             if (e.target.closest?.('input, textarea, select, [role="slider"]')) return;
-            if (e.code === 'Space') { e.preventDefault(); togglePlayRef.current(); }
+            const k = kb.current;
+            if (e.code === 'Space') { e.preventDefault(); k.togglePlay(); }
             else if (e.key === 'l' || e.key === 'L') setLibOpen((o) => (o === null ? 0 : null));
             else if (e.key === ',') setCtlOpen((o) => (o === null ? 0 : null));
+            else if (e.key === 'ArrowRight') { e.preventDefault(); k.skipNext(); }
+            else if (e.key === 'ArrowLeft') { e.preventDefault(); k.skipPrev(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); k.handleBrightness(Math.min(100, k.brightness + 5)); }
+            else if (e.key === 'ArrowDown') { e.preventDefault(); k.handleBrightness(Math.max(0, k.brightness - 5)); }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
@@ -215,6 +234,8 @@ export const SpherePlayer = () => {
                     onTogglePlay={pb.togglePlay}
                     onStop={pb.stop}
                     onToggleLoop={pb.toggleLoop}
+                    onPrev={pb.skipPrev}
+                    onNext={pb.skipNext}
                     brightness={brightness}
                     onBrightnessChange={handleBrightness}
                     onBrightnessDragState={(d) => { brtDragging.current = d; }}

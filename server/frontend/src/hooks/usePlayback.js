@@ -107,6 +107,29 @@ export const usePlayback = () => {
         return r.ok;
     }, [fetchPlayback]);
 
+    // トラック送り/戻し。サーバーに skip API が無いため、アクティブ (再生中) プレイリストの
+    // items を取得し、現在の video_id の前後を /play/{id} で直接再生する (仕様 §2.5 の代替実装)。
+    const skip = useCallback(async (dir) => {
+        const pid = playback.playlist_id ?? activeId;
+        if (!pid) return false;
+        let items;
+        try {
+            const r = await apiGet(`${PB}/playlists/${pid}`);
+            if (!r.ok) return false;
+            items = (await r.json()).items || [];
+        } catch { return false; }
+        if (items.length === 0) return false;
+        const ids = items.map((it) => it.id); // items[].id = videos.id
+        const cur = ids.indexOf(playback.video_id);
+        // 現在位置不明なら先頭/末尾から。ループ考慮で剰余送り。
+        const base = cur >= 0 ? cur : (dir > 0 ? -1 : 0);
+        const next = ((base + dir) % ids.length + ids.length) % ids.length;
+        return playVideo(ids[next]);
+    }, [playback.playlist_id, playback.video_id, activeId, playVideo]);
+
+    const skipNext = useCallback(() => skip(1), [skip]);
+    const skipPrev = useCallback(() => skip(-1), [skip]);
+
     // ---- ライブラリ CRUD (成功時に一覧を再取得) ----
     const createPlaylist = useCallback(async (name) => {
         const r = await apiPost(`${PB}/playlists`, { name, loop: true });
@@ -140,7 +163,7 @@ export const usePlayback = () => {
         playback, playlists, videos, settings,
         isPlaying, isStreaming, loopOn, activeId, currentPlaylist, currentVideo,
         play, pauseToggle, togglePlay, stop, toggleLoop, setActivePlaylist,
-        activateAndPlay, playVideo,
+        activateAndPlay, playVideo, skipNext, skipPrev,
         createPlaylist, deletePlaylist, uploadVideo, deleteVideo,
         refresh: fetchPlayback, refreshPlaylists: fetchPlaylists, refreshVideos: fetchVideos,
     };

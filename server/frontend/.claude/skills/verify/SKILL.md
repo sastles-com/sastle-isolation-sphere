@@ -44,6 +44,17 @@ dist を配信しつつ `/ws` を受ける最小 Node サーバー (http + `ws` 
 ファイルに書き出してドライバから読めば、送信内容・60ms デバウンス・エコー抑制まで確認できる。
 `--sphere-hue` / `--accent` の追従は `getComputedStyle(document.documentElement).getPropertyValue()` で読む。
 
+## 本番ビルド (dist) の検証
+
+FastAPI は `frontend/dist` を配信する (`/assets` を StaticFiles マウント + それ以外は
+index.html にフォールバックする SPA catch-all)。本番ビルドの検証はこの配信形態を
+再現する: dist をそのまま配信し `/assets` とルートフォールバックを持つ静的サーバー +
+`/ws` + `/api` を立てる。確認すべき点:
+- `document.fonts.check('16px "Manrope Variable"')` でフォント同梱を確認
+- `page.on('request')` で localhost 以外へのリクエストが 0 (オフライン LAN)
+- `npm run build` に警告が出ないこと (three.js は独立チャンク + chunkSizeWarningLimit で対応済み)
+- reducedMotion:'reduce' コンテキストでシート開閉が壊れないこと
+
 ## 落とし穴
 
 - TransportDock は stage のパン誤爆防止に pointerdown の伝播を止めている。

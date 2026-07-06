@@ -91,7 +91,28 @@ button {
 }
 
 button:focus-visible,
-[role="slider"]:focus-visible {
+[role="slider"]:focus-visible,
+[role="switch"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ホバー可能なデバイスのみ hover 状態を定義 (仕様 §2.6) */
+@media (hover: hover) {
+  button.glass:not(:disabled):hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  [role="button"]:hover,
+  [role="tab"]:not([aria-selected="true"]):hover {
+    filter: brightness(1.15);
+  }
+}
+
+/* reduced-motion: CSS トランジションも短縮 (framer-motion 側は MotionConfig で対応) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
