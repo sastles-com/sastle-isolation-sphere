@@ -1,36 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#141b2d" />
+  <meta name="theme-color" content="#05080f" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-  <title>Isolation Sphere Server</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600;700&family=Source+Code+Pro:wght@300;400;500&display=swap"
-    rel="stylesheet">
+  <title>Sphere Player</title>
+  <!-- フォントは @fontsource で同梱 (オフライン LAN 配信のため外部 CDN 参照禁止) -->
 </head>
 
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
-  <script>
-    // Auto-hide address bar on mobile browsers
-    window.addEventListener('load', function() {
-      setTimeout(function() {
-        window.scrollTo(0, 1);
-      }, 0);
-    });
-    
-    // Prevent pull-to-refresh on mobile
-    document.body.style.overscrollBehavior = 'none';
-  </script>
 </body>
 
 </html>
