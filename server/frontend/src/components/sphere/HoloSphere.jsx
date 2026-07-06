@@ -51,12 +51,14 @@ const rotateByQuaternion = (x, y, z, qw, qx, qy, qz, out) => {
     out[2] = z + 2.0 * cross2z;
 };
 
-// rotateByQuaternion の z 成分だけを返す軽量版 (前面判定 §5.2b 用)。
-const rotatedZ = (x, y, z, qw, qx, qy, qz) => {
+// rotateByQuaternion の y 成分だけを返す軽量版 (前面判定 §5.2b 用)。
+// 外側固定回転 Rx(-90°) が (x,y,z)→(x,z,-y) なので、合成後のワールド z は
+// z_world = -( R(q)·p ).y。前面判定にはこの y 成分だけあれば足りる。
+const rotatedY = (x, y, z, qw, qx, qy, qz) => {
     const cross1x = qy * z - qz * y + qw * x;
-    const cross1y = qz * x - qx * z + qw * y;
-    const cross2z = qx * cross1y - qy * cross1x;
-    return z + 2.0 * cross2z;
+    const cross1z = qx * y - qy * x + qw * z;
+    const cross2y = qz * cross1x - qx * cross1z;
+    return y + 2.0 * cross2y;
 };
 
 // LEDManager.cpp:242 sphereToUV の逐語移植。out に [u,v] を書く。
@@ -77,8 +79,8 @@ const sphereToUV = (x, y, z, out) => {
 // 反転できるよう定数化する (静止時 = 恒等回転では両者は同一で、差は実機回転時のみ)。
 const CONJUGATE_SAMPLING = true;
 
-// live 表示ルール (§5.2b)
-const BACKFACE_GRAY = 0.5;               // 裏面 LED = #808080 固定 (brightness 乗算なし)
+// live 表示ルール (§5.2b, 2026-07-06 改訂)
+const BACKFACE_COLOR = 0.0;              // 裏面 LED = 黒 (0,0,0)。AdditiveBlending で黒=完全不可視
 const WIREFRAME_LIVE_OPACITY = 0.0;      // live 中はワイヤーフレーム非表示 (0.05 で薄表示に切替可)
 const WIREFRAME_DEFAULT_OPACITY = 0.12;  // params / strip モード
 
@@ -196,8 +198,9 @@ const useLedLiveColors = ({ layout, geomRef, quaternionRef, brightness, enabled 
         const uv = [0, 0];
         for (let i = 0; i < layout.count; i++) {
             const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-            // 前面判定 (§5.2b): 表示用(非共役)回転の法線 z 成分。カメラは +Z 固定。
-            if (rotatedZ(x, y, z, qw, qx, qy, qz) > 0) {
+            // 前面判定 (§5.2b): 表示用(非共役)回転 + 外側 Rx(-90°) 合成後のワールド z。
+            // z_world = -( R(q)·p ).y。カメラは +Z 固定なので z_world > 0 が前面。
+            if (-rotatedY(x, y, z, qw, qx, qy, qz) > 0) {
                 // 前面 → 映像色 (サンプリングは共役回転)
                 rotateByQuaternion(x, y, z, qw, sx, sy, sz, rot);
                 sphereToUV(rot[0], rot[1], rot[2], uv);
@@ -208,8 +211,8 @@ const useLedLiveColors = ({ layout, geomRef, quaternionRef, brightness, enabled 
                 colors[i * 3 + 1] = data[idx + 1] * bscale;
                 colors[i * 3 + 2] = data[idx + 2] * bscale;
             } else {
-                // 裏面 → 50% グレー固定
-                colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = BACKFACE_GRAY;
+                // 裏面 → 黒 (AdditiveBlending で不可視)
+                colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = BACKFACE_COLOR;
             }
         }
         const geom = geomRef.current;
@@ -285,9 +288,8 @@ const LedPointCloud = ({ geomRef, layout, effectiveMode, liveColors, hue, bright
                 size={0.05}
                 sizeAttenuation
                 transparent
-                // live: 手前の LED が奥を隠す (裏面グレーが前面色に濁らない §5.2b)
-                depthWrite={isLive}
-                blending={isLive ? THREE.NormalBlending : THREE.AdditiveBlending}
+                // 全モード AdditiveBlending。live の裏面は黒=不可視なので白濁しない (§5.2b 改訂)
+                blending={THREE.AdditiveBlending}
                 opacity={isLive ? 1.0 : 0.35 + 0.65 * (brightness / 100)}
             />
         </points>
@@ -346,26 +348,30 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
     const wireframeOpacity = effectiveMode === 'live' ? WIREFRAME_LIVE_OPACITY : WIREFRAME_DEFAULT_OPACITY;
 
     return (
-        <group ref={groupRef} scale={2.2}>
-            {/* 骨格として薄く残すワイヤーフレーム球 (live 中は非表示)。LED 点群を主役にする。 */}
-            <Sphere args={[1, 32, 32]} visible={wireframeOpacity > 0}>
-                <meshStandardMaterial
-                    color={sphereColor}
-                    wireframe={true}
-                    emissive={sphereColor}
-                    emissiveIntensity={emissiveIntensity}
-                    transparent
-                    opacity={wireframeOpacity}
+        // Z-up → Y-up 補正 (§5.2b): レイアウト CSV は CAD 由来 Z-up。この外側固定回転で
+        // 映像の上=画面の上 (+Y) にする。IMU quaternion は内側 groupRef に適用 (無影響)。
+        <group rotation={[-Math.PI / 2, 0, 0]}>
+            <group ref={groupRef} scale={2.2}>
+                {/* 骨格として薄く残すワイヤーフレーム球 (live 中は非表示)。LED 点群を主役にする。 */}
+                <Sphere args={[1, 32, 32]} visible={wireframeOpacity > 0}>
+                    <meshStandardMaterial
+                        color={sphereColor}
+                        wireframe={true}
+                        emissive={sphereColor}
+                        emissiveIntensity={emissiveIntensity}
+                        transparent
+                        opacity={wireframeOpacity}
+                    />
+                </Sphere>
+                <LedPointCloud
+                    geomRef={geomRef}
+                    layout={layout}
+                    effectiveMode={effectiveMode}
+                    liveColors={live.colors}
+                    hue={hue}
+                    brightness={brightness}
                 />
-            </Sphere>
-            <LedPointCloud
-                geomRef={geomRef}
-                layout={layout}
-                effectiveMode={effectiveMode}
-                liveColors={live.colors}
-                hue={hue}
-                brightness={brightness}
-            />
+            </group>
         </group>
     );
 };
