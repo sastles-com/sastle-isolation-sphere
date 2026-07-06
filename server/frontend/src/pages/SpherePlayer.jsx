@@ -4,6 +4,7 @@ import { useWebSocket } from '../contexts/WebSocketContext';
 import { useStateUpdate } from '../hooks/useSphereState';
 import { usePlayback } from '../hooks/usePlayback';
 import { useDynamicAccent } from '../hooks/useDynamicAccent';
+import { useParamSender } from '../hooks/useParamSender';
 import { SphereStage } from '../components/stage/SphereStage';
 import { StatusBar } from '../components/stage/StatusBar';
 import { NowPlaying } from '../components/stage/NowPlaying';
@@ -16,7 +17,6 @@ import { ControlDrawer } from '../components/sheets/ControlDrawer';
 const LIB_PEEK = 28;           // LIBRARY のグラブハンドル露出高さ
 const LIB_DETENTS = [0.55, 1]; // half / full
 const CTL_DETENTS = [0.75];    // CONTROL DRAWER は 1 デテント
-const PARAM_DEBOUNCE_MS = 60;  // SET_PARAMS 送信デバウンス (仕様 §2.4)
 const EDGE_RATIO = 0.2;        // 左右端 20% をエッジドラッグ領域とする (仕様 §2.4)
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -26,8 +26,9 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
  * タブバーは廃止し、画面遷移はすべてシートの出し入れで表現する。
  */
 export const SpherePlayer = () => {
-    const { isConnected, sendMessage } = useWebSocket();
+    const { isConnected } = useWebSocket();
     const pb = usePlayback();
+    const sendParam = useParamSender();
 
     // ---- WS STATE_UPDATE からのライブ状態 ----
     const [brightness, setBrightness] = useState(80);
@@ -51,22 +52,6 @@ export const SpherePlayer = () => {
         }
         if (payload.system) setSystem(payload.system);
     });
-
-    // ---- パラメータ送信: key ごとに 60ms デバウンス (仕様 §2.4) ----
-    const paramTimers = useRef({});
-    const paramPending = useRef({});
-    useEffect(() => () => {
-        Object.values(paramTimers.current).forEach(clearTimeout);
-    }, []);
-    const sendParam = useCallback((key, value) => {
-        paramPending.current[key] = value;
-        if (!paramTimers.current[key]) {
-            paramTimers.current[key] = setTimeout(() => {
-                paramTimers.current[key] = null;
-                sendMessage('SET_PARAMS', { [key]: paramPending.current[key] });
-            }, PARAM_DEBOUNCE_MS);
-        }
-    }, [sendMessage]);
 
     const handleBrightness = useCallback((v) => {
         setBrightness(v);
