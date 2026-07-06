@@ -224,43 +224,44 @@ WebSocket observer へ配信する:
 | IMU quaternion | WS `STATE_UPDATE` payload.imu | **10Hz** (ファーム `IMU_PUBLISH_INTERVAL`) |
 | 映像フレーム | WS `FRAME_PREVIEW` (§5.1) | 5fps |
 
-**フレーム受信処理**: `jpeg_b64` → `Image` → offscreen canvas (320×160) に drawImage →
+**フレーム受信処理**: `jpeg_b64` → `Image` → offscreen canvas に drawImage →
 `getImageData()` で `Uint8ClampedArray` を保持 (最新1枚のみ)。
 
-**色計算 (フレーム受信時 or quaternion 更新時、最大 15Hz にスロットル):**
+**色計算 — 参照元はファームウェアの実装 (これが正、本仕様の文章より優先):**
 
-LED ごとに以下を実行。**式はファームの逐語移植であり、「数学的に正しい形」への修正を禁止する**
-(実機と同じ絵が出ることが唯一の正解基準):
+「320×160 画像 → 800 LED の RGB」の変換はファームウェアに完全な実装が存在する。
+**下表の関数を JS へ逐語移植する**こと。「数学的に正しい形」への修正・最適化を禁止する
+(実機と同じ絵が出ることが唯一の正解基準。コード中のコメントは一部不正確なので挙動を正とする):
 
-```js
-// (1) rotateByQuaternion — LEDManager.cpp:274 の逐語移植
-//     v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
-// (2) sphereToUV — LEDManager.cpp:242 の逐語移植。ただし内部の _atan2 は
-//     FastMath.h の多項式近似で「度/180 (-1..1)」を返す規約。
-//     JS では Math.atan2 で等価に書ける:
-const atan2n = (y, x) => Math.atan2(y, x) * (180 / Math.PI) / 180;  // -1..1
-// u = (atan2n(sqrt(nx²+nz²), ny) + 1) / 2   … 第1引数≥0 なので u ∈ [0.5, 1.0] にしか分布しない
-// v = (atan2n(nx, nz) + 1) / 2              … v ∈ [0, 1]
-// (3) ピクセル座標 (LEDManager.cpp:452 と同一の量子化):
-//     px = trunc(u * (W-1)) , py = trunc(v * (H-1))    // W=320, H=160
-// (4) ImageData から RGB 取得: idx = (py * W + px) * 4
-// (5) brightness (0-100) を乗算して color 属性 (Float32Array) へ書き込み
-```
+| ファームウェア参照 (core/src/) | 役割 | 移植時の注意 |
+|---|---|---|
+| `LEDManager.cpp` **`updateLEDBuffer()`** (~L422) | **メインループ**。全体の処理順序はこの関数に従う | 冒頭で quaternion を **共役化 (`qx=-qx; qy=-qy; qz=-qz`) してから**回転に使う。UI も同じにすること (見落としやすい) |
+| `LEDManager.cpp` `rotateByQuaternion()` (L274) | LED body座標の回転: `v' = v + 2*cross(q.xyz, cross(q.xyz,v) + q.w*v)` | そのまま移植 |
+| `LEDManager.cpp` `sphereToUV()` (L242) | 回転後座標 → (u,v) | 内部の `_sqrt`/`_atan2` は `FastMath.h` 参照。`_atan2` は**度/180 (-1..1) を返す多項式近似**。JS では `Math.atan2(y,x)/Math.PI` で等価 (誤差<0.2°、量子化後ほぼ同一) |
+| `updateLEDBuffer()` 内の量子化 (L452) | `px = trunc(u*(W-1))`, `py = trunc(v*(H-1))` | W,H は**デバイスのデコード解像度** (下記⚠️) |
+| `LEDManager.cpp` **`sampleAveraged()`** (L495) + `setMultisample()` (L476) | **中心 + 半径2.0pxの円周6点 (K=7) の平均**。オフセットは前計算。x はラップ (`sx %= w`)、y はクランプ | config `led.multisample` (既定 ON/2.0px/6点) と同じ挙動で移植する。オフセットも同式で前計算 |
+| `ImageManager.cpp` `getPixel()` (L255) | フレームバッファから RGB 取得。**RGB565 → RGB888** (`r=5bit<<3, g=6bit<<2, b=5bit<<3`) | UI は fullcolor JPEG から取るため、忠実度を上げるなら取得後に RGB565 量子化 (`r&0xF8, g&0xFC, b&0xF8`) を掛ける (任意だが推奨) |
 
-> ⚠️ **`u ∈ [0.5, 1.0]` は仕様である**。ファームの `_atan2(hd, ny)` は hd≥0 のため
-> 0..180° しか返さず、px は画像の右半分 (160..319) しか使わない。
-> これは映像コンテンツ側がこの前提で作られているため、**UI で勝手に補正しないこと**。
-> (厳密なビット一致が必要になったら FastMath.h の多項式を移植する。通常は Math.atan2 で
-> 十分 — 誤差 <0.2°、px 量子化後はほぼ同一)
+処理順序 (updateLEDBuffer と同一):
+`quaternion共役化 → LED毎に[回転 → sphereToUV → px,py量子化 → sampleAveraged(K7)] → brightness乗算 → color属性へ`
 
-**回転の整合 (二重補正の整理)**: ファームは「LED body 座標を quaternion で回してから
+> ⚠️ **デコード解像度**: デバイスは `ImageManager._jpegScale = 2` で **160×80 に縮小デコード**
+> しており、px/py の量子化もその解像度で行われる。UI で厳密一致させるなら offscreen canvas を
+> **160×80** にして同じ W,H で量子化する (推奨)。320×160 のままでも視認上の差はほぼ無いが、
+> 差異が出たらまずここを疑うこと。
+
+> ⚠️ **u の分布**: `_atan2(hd, ny)` は第1引数≥0 のため 0..180° しか返さず、
+> **u ∈ [0.5, 1.0] → px は画像幅の右半分しか使わない**。映像コンテンツ側が
+> この前提で作られているため、UI で勝手に補正しないこと。
+
+**回転の整合 (二重補正の整理)**: ファームは「LED body 座標を (共役) quaternion で回してから
 サンプリング」する = LED には世界固定の映像が映る。UI では点群グループ自体も quaternion で
-回転しているが、**サンプリングもファームと同一に『回転後の座標』で行う**。
+回転しているが、**サンプリングもファームと同一に『共役 quaternion で回転後の座標』で行う**。
 結果として UI の球体は「その姿勢の実機を外から見た絵」になる。これが正しいツイン。
 グループ回転を止めたり、無回転 UV でサンプリングしたりしないこと。
 
-**マルチサンプリング**: ファームの円周マルチサンプル (K7) は再現しない (中心1点)。
-プレビュー用途では視認差なし。意図的な近似として記録する。
+**スコープ外 (移植しない)**: `overlayAxisIndicator()` (XYZ軸マーカー重畳) は Phase B では
+移植しない (実機デバッグ用オーバーレイ。必要になれば同関数を参照して追加)。
 
 ### 5.3 colorMode の拡張とフォールバック
 
