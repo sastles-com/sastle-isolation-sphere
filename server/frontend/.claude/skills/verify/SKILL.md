@@ -36,8 +36,21 @@ npm run dev -- --port 5173 --strictPort   # バックグラウンドで起動
 5. BRT スライダーのドラッグで aria-valuenow が変わる
 6. デスクトップ (1280x800): `L` / `,` / `Space` キーのフォールバック
 
+## WebSocket 送信 (SET_PARAMS) を検証したいとき
+
+Vite dev は `/ws` を返さないので SET_PARAMS 送信は観測できない。
+dist を配信しつつ `/ws` を受ける最小 Node サーバー (http + `ws` パッケージ) を立て、
+`npm run build` 済みの dist をそこから配信してブラウザで開く。受信した SET_PARAMS を
+ファイルに書き出してドライバから読めば、送信内容・60ms デバウンス・エコー抑制まで確認できる。
+`--sphere-hue` / `--accent` の追従は `getComputedStyle(document.documentElement).getPropertyValue()` で読む。
+
 ## 落とし穴
 
 - TransportDock は stage のパン誤爆防止に pointerdown の伝播を止めている。
   **capture で止めると子のスライダーが死ぬ** — bubble (`onPointerDown`) で止めること。
 - Playwright スクリプト内でトップレベル定数を `URL` と名付けると `new URL()` が壊れる。
+- **ローカルに別プロジェクトの Vite dev が動いていることがある** (例: 5173/5174)。
+  検証サーバーは空きポートを確認してから使う (`/dev/tcp` チェック)。listen 成功しても
+  別サーバーの応答を掴んでいないか curl でタイトル確認する。
+- エッジゲージのフェードは opacity で行うため Playwright の `isVisible()` は true のまま。
+  フェード確認は `getComputedStyle(el).opacity` を読む。
