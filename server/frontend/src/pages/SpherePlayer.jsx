@@ -96,7 +96,9 @@ export const SpherePlayer = () => {
         return () => window.removeEventListener('keydown', onKey);
     }, []);
 
-    const videoName = pb.playback.path ? pb.playback.path.split('/').pop() : null;
+    // 再生中の動画名: video_id からタイトル解決、無ければパス末尾
+    const videoName = pb.currentVideo?.title
+        || (pb.playback.path ? pb.playback.path.split('/').pop() : null);
 
     return (
         <div style={{
@@ -158,7 +160,7 @@ export const SpherePlayer = () => {
                 onOpenChange={setLibOpen}
                 zIndex={20}
             >
-                <LibrarySheet />
+                <LibrarySheet pb={pb} />
             </GlassSheet>
 
             {/* CONTROL DRAWER (上端から下フリック / ⚙︎) */}

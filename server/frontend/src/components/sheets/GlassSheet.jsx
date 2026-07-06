@@ -1,7 +1,7 @@
 import React, {
     forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
-import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
+import { motion, useMotionValue, useTransform, useDragControls, animate } from 'framer-motion';
 
 // 仕様 §3.3: シートはオーバーシュートなしの spring
 const SPRING = { type: 'spring', stiffness: 400, damping: 40 };
@@ -51,6 +51,8 @@ export const GlassSheet = forwardRef(function GlassSheet(
     const renderH = maxOpenPx + OVERDRAG_SLACK;
 
     const y = useMotionValue(offsetFor(open));
+    // ドラッグはハンドルからのみ開始 (内容はネイティブスクロールさせる, 仕様 §4.4)
+    const dragControls = useDragControls();
 
     // 制御 prop の変化に追従 (スナップ後の同値 animate は実質 no-op)
     useEffect(() => {
@@ -104,12 +106,25 @@ export const GlassSheet = forwardRef(function GlassSheet(
     );
 
     const isOpen = open !== null;
+    // ハンドルの pointerdown からのみシートドラッグを開始する。
+    // クリック(タップ)とドラッグを区別するため、pointerup までの移動量で判定。
+    const pressPos = useRef(null);
     const handleBar = (
         <div
             role="button"
             tabIndex={0}
             aria-label={isOpen ? 'シートを閉じる' : 'シートを開く'}
-            onClick={() => onOpenChange?.(isOpen ? null : 0)}
+            onPointerDown={(e) => {
+                pressPos.current = { x: e.clientX, y: e.clientY };
+                dragControls.start(e);
+            }}
+            onPointerUp={(e) => {
+                const p = pressPos.current;
+                pressPos.current = null;
+                if (p && Math.abs(e.clientY - p.y) < 6 && Math.abs(e.clientX - p.x) < 6) {
+                    onOpenChange?.(isOpen ? null : 0); // 移動が小さければタップとして扱う
+                }
+            }}
             onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
@@ -119,6 +134,7 @@ export const GlassSheet = forwardRef(function GlassSheet(
             style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 height: Math.max(peek, 28), flexShrink: 0, cursor: 'grab',
+                touchAction: 'none',
             }}
         >
             <div style={{
@@ -143,6 +159,8 @@ export const GlassSheet = forwardRef(function GlassSheet(
             <motion.div
                 className="glass"
                 drag="y"
+                dragListener={false}
+                dragControls={dragControls}
                 dragConstraints={dragConstraints}
                 dragElastic={0.04}
                 dragMomentum={false}
@@ -164,7 +182,6 @@ export const GlassSheet = forwardRef(function GlassSheet(
                         ? 'var(--radius) var(--radius) 0 0'
                         : '0 0 var(--radius) var(--radius)',
                     borderWidth: side === 'bottom' ? '1px 0 0 0' : '0 0 1px 0',
-                    touchAction: 'none',
                 }}
             >
                 {handleBar}
