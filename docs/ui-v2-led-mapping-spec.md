@@ -26,8 +26,8 @@
 
 | Phase | 内容 | 状態 |
 |---|---|---|
-| **A** | LED 物理配置 800 点を球体上に描画し、hue/brightness パラメータで着色 | **本仕様の必須スコープ** |
-| **B** | サーバーがプレビューフレームを UI にも配信し、UI 側で同じ UV マッピングを再現して**実際の映像色**で 800 点を光らせる (デジタルツイン) | 任意・別タスク (§5 に設計指針のみ) |
+| **A** | LED 物理配置 800 点を球体上に描画し、hue/brightness パラメータで着色 | **実装済み** (HoloSphere.jsx の LedPointCloud) |
+| **B** | サーバーがプレビューフレームを UI にも配信し、UI 側で **IMU quaternion を使ってファームと同一の回転+UV変換** を再現、**実際の映像色**で 800 点を光らせる (デジタルツイン) | **実装対象** (§5 が本仕様) |
 
 ---
 
@@ -177,7 +177,7 @@ const dotTexture = (() => {
 
 ---
 
-## 4. 受け入れ基準
+## 4. 受け入れ基準 (Phase A — 実装済み、リグレッション基準として維持)
 
 1. STAGE の球体上に **800 点**が描画され、実機と同じ縦縞 5 ストリップの配置が視認できる
    (赤道付近に LED が無い千鳥配置、極に点が無い、が CSV 通り再現される)
@@ -192,21 +192,100 @@ const dotTexture = (() => {
 
 ---
 
-## 5. Phase B 設計指針 (今回は実装しない — 別タスク起票用)
+## 5. Phase B 実装仕様 — IMU を使った 800 点 RGB 算出 (デジタルツイン)
 
-UI で「実際に流れている映像の色」を 800 点に反映するデジタルツイン。実装する場合:
+**目的**: 再生中の映像と IMU quaternion から、**実機の各 LED が今まさに表示している色**を
+UI 側で再計算し、800 点に反映する。実機ファームの描画パス
+(`LEDManager.cpp` renderFrame: 回転 → UV 変換 → 画像サンプリング) の忠実な JS 移植。
 
-- **プレビュー配信**: `video_streamer.py` は既に 320×160 JPEG を持っている。
-  同フレームを **2〜5fps に間引いて** WebSocket の新メッセージ
-  `{"type":"FRAME_PREVIEW","payload":{"jpeg_b64":...}}` で配信する
-  (毎フレーム送らない。UI プレビューに 30fps は不要で、WS と UI スレッドを圧迫しない)
-- **UI 側サンプリング**: 受信 JPEG を `<img>` → offscreen canvas に描画し、
-  LED 毎に UV サンプリング。**UV 変換式はファームウェア
-  `core/src/LEDManager.cpp` の `sphereToUV()` と完全に一致させること**
-  (equirect: u = atan2 系 / v = asin 系。円周マルチサンプリングまでは再現不要、中心 1 点で十分)
-- 色は `BufferGeometry` の `color` 属性を毎プレビューフレーム更新 (`needsUpdate = true`)
-- IMU 姿勢補正: 実機はデバイス側で回転補正した UV を使う。UI は点群自体が quaternion で
-  回っているため、**画像サンプリングは無回転の素の UV で行う** (二重補正しない)
+### 5.1 サーバー: FRAME_PREVIEW 配信 (WS 新メッセージ)
+
+`video_streamer.py` はデコード済み 320×160 JPEG を毎フレーム持っている。これを間引いて
+WebSocket observer へ配信する:
+
+- メッセージ: `{"type": "FRAME_PREVIEW", "payload": {"jpeg_b64": "<base64>", "w": 320, "h": 160, "seq": n}}`
+- **配信レート: 5fps** (200ms スロットル、定数化しておく)。停止中は送らない
+- 実装位置: `video_streamer` の送信ループ内でスロットル判定 → `state_manager` に
+  ブロードキャスト用メソッド (例 `notify_frame(jpeg_bytes)`) を追加して呼ぶ。
+  streamer は別スレッドなので **mqtt_service と同じ `run_coroutine_threadsafe` パターン**で
+  イベントループに投入する (`_submit_coroutine` を参考)
+- `_state` には**入れない** (retained 不要、STATE_UPDATE と混ぜない — LOG_LINE と同じ流儀)
+- 帯域: ~10KB × 5fps = 50KB/s/クライアント。LAN 前提で問題なし
+
+### 5.2 UI: ファームと同一の変換パイプライン (逐語移植)
+
+新規フック `useLedLiveColors(layout)` を作り、`LedPointCloud` の `colorMode='live'` で使う。
+
+**入力 (すべて既存チャネルで揃う):**
+
+| データ | 供給元 | レート |
+|---|---|---|
+| LED 座標 800 点 | `/api/config/led-layout` (Phase A 実装済み) | 初回1回 |
+| IMU quaternion | WS `STATE_UPDATE` payload.imu | **10Hz** (ファーム `IMU_PUBLISH_INTERVAL`) |
+| 映像フレーム | WS `FRAME_PREVIEW` (§5.1) | 5fps |
+
+**フレーム受信処理**: `jpeg_b64` → `Image` → offscreen canvas (320×160) に drawImage →
+`getImageData()` で `Uint8ClampedArray` を保持 (最新1枚のみ)。
+
+**色計算 (フレーム受信時 or quaternion 更新時、最大 15Hz にスロットル):**
+
+LED ごとに以下を実行。**式はファームの逐語移植であり、「数学的に正しい形」への修正を禁止する**
+(実機と同じ絵が出ることが唯一の正解基準):
+
+```js
+// (1) rotateByQuaternion — LEDManager.cpp:274 の逐語移植
+//     v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+// (2) sphereToUV — LEDManager.cpp:242 の逐語移植。ただし内部の _atan2 は
+//     FastMath.h の多項式近似で「度/180 (-1..1)」を返す規約。
+//     JS では Math.atan2 で等価に書ける:
+const atan2n = (y, x) => Math.atan2(y, x) * (180 / Math.PI) / 180;  // -1..1
+// u = (atan2n(sqrt(nx²+nz²), ny) + 1) / 2   … 第1引数≥0 なので u ∈ [0.5, 1.0] にしか分布しない
+// v = (atan2n(nx, nz) + 1) / 2              … v ∈ [0, 1]
+// (3) ピクセル座標 (LEDManager.cpp:452 と同一の量子化):
+//     px = trunc(u * (W-1)) , py = trunc(v * (H-1))    // W=320, H=160
+// (4) ImageData から RGB 取得: idx = (py * W + px) * 4
+// (5) brightness (0-100) を乗算して color 属性 (Float32Array) へ書き込み
+```
+
+> ⚠️ **`u ∈ [0.5, 1.0]` は仕様である**。ファームの `_atan2(hd, ny)` は hd≥0 のため
+> 0..180° しか返さず、px は画像の右半分 (160..319) しか使わない。
+> これは映像コンテンツ側がこの前提で作られているため、**UI で勝手に補正しないこと**。
+> (厳密なビット一致が必要になったら FastMath.h の多項式を移植する。通常は Math.atan2 で
+> 十分 — 誤差 <0.2°、px 量子化後はほぼ同一)
+
+**回転の整合 (二重補正の整理)**: ファームは「LED body 座標を quaternion で回してから
+サンプリング」する = LED には世界固定の映像が映る。UI では点群グループ自体も quaternion で
+回転しているが、**サンプリングもファームと同一に『回転後の座標』で行う**。
+結果として UI の球体は「その姿勢の実機を外から見た絵」になる。これが正しいツイン。
+グループ回転を止めたり、無回転 UV でサンプリングしたりしないこと。
+
+**マルチサンプリング**: ファームの円周マルチサンプル (K7) は再現しない (中心1点)。
+プレビュー用途では視認差なし。意図的な近似として記録する。
+
+### 5.3 colorMode の拡張とフォールバック
+
+- `colorMode: 'params' | 'strip' | 'live'` に拡張
+- `'live'`: vertexColors 使用、material color=#fff、brightness は頂点色に焼き込み済みのため
+  opacity は固定 (0.9)。AdditiveBlending は維持
+- **フレームが 3 秒以上届かない場合は自動で `'params'` 表示に落とす** (再生停止・切断時)。
+  復帰したら `'live'` に戻る。ユーザー操作は不要
+- `document.hidden` 中は色計算を停止 (バックグラウンドタブで無駄な計算をしない)
+
+### 5.4 性能予算
+
+- 色計算: 800 × (quat回転 + atan2×2 + 配列参照) ≈ 0.1ms/回、最大 15Hz → 無視できる
+- JPEG デコード: ブラウザネイティブ (Image) 5fps → 無視できる
+- **60fps 維持が受け入れ条件** (色計算は useFrame 内でやらない。フレーム/IMU イベント駆動)
+
+### 5.5 Phase B 受け入れ基準
+
+1. テスト動画 (上半分赤/下半分青、または経度グリッド) を再生し、**UI の 800 点の模様が
+   実機 LED の発色と一致**する (向き・境界位置まで)
+2. 実機を手で回転させると、UI 上で点群 (球) が回る一方、**映像の模様は世界固定に見える**
+   — 実機の見た目と同じ挙動
+3. 再生停止 → 3 秒で params 着色へフォールバック、再生再開で live に自動復帰
+4. FRAME_PREVIEW 配信中も WS の STATE_UPDATE / コマンドが遅延しない
+5. スマホ実機で 60fps 維持、バックグラウンドタブで CPU を食わない
 
 ---
 
@@ -216,10 +295,17 @@ UI で「実際に流れている映像の色」を 800 点に反映するデジ
 git fetch && git switch feat/ui-v2
 ```
 
-1. §2 のエンドポイントを `server/app/api/endpoints/config.py` に追加
-2. `curl localhost:8000/api/config/led-layout | python3 -m json.tool | head` で
-   count=800, strips=5 を確認
-3. §3 の `LedPointCloud` を `HoloSphere.jsx` 内 (同ファイルでよい) に実装、group 化
-4. 受け入れ基準 1-4, 7, 8 を確認 (Playwright + 実ブラウザ)
-5. コミットは server / frontend を分けず 1 コミットでよい
-   (`feat(frontend): 実機LEDレイアウト800点を3D球体にマッピング表示` 等)
+**Phase A (実装済み)**: §2 エンドポイント + §3 LedPointCloud → HoloSphere.jsx に反映済み。
+
+**Phase B (今回の実装対象)**:
+
+1. §5.1 サーバー側 FRAME_PREVIEW 配信 (`video_streamer.py` + `state_manager.py`)。
+   `verify_server_comm.py` の流儀で、WS を張って FRAME_PREVIEW が 5fps で届くことを
+   スクリプト確認できるとよい (動画再生は `POST /api/playlist/playback/start`)
+2. §5.2 `useLedLiveColors` フック + `LedPointCloud` の `colorMode='live'` 対応。
+   **ファーム式の逐語移植** (`rotateByQuaternion` / `sphereToUV`) がこのタスクの核心。
+   `core/src/LEDManager.cpp:242-297` と `core/src/FastMath.h` を必ず原文参照すること
+3. §5.3 フォールバック (3秒 → params) と `document.hidden` 対応
+4. §5.5 受け入れ基準を確認。1 と 2 は実機 LED との突き合わせが必要なため、
+   実機がない場合は「テスト動画 + UI 単体の模様検証」まで行い、実機照合は発注者に依頼
+5. コミット例: `feat(server+frontend): FRAME_PREVIEW配信とIMU連動デジタルツイン (LED 800点のライブ発色)`
