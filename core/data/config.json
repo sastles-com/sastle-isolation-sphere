@@ -11,7 +11,7 @@
       "username": "admin",
       "password": "sphere",
       "listen_port": 3232
-    }, 
+    },
     "paths": {
       "config": "/config.json",
       "images": "/images/",
@@ -25,7 +25,7 @@
     "password": "isolation-sphere-p2p",
     "enabled": true,
     "broker": "192.168.49.1",
-    "mqtt_port": 1883, 
+    "mqtt_port": 1883,
     "udp_port": 8889
   },
   "image": {
@@ -54,7 +54,7 @@
     "saturation": 100
   },
   "playback": {
-    "active_playlist": null,
+    "active_playlist": 1,
     "loop": true,
     "shuffle": false,
     "autoplay": false
@@ -76,7 +76,10 @@
         "width": 128,
         "height": 128,
         "rotation": 0,
-        "offset": [0, 0],
+        "offset": [
+          0,
+          0
+        ],
         "color_depth": 16,
         "switch": true,
         "debug": true
@@ -85,4 +88,3 @@
     }
   }
 }
-
