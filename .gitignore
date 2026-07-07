@@ -18,6 +18,9 @@ yarn-error.log*
 # Runtime data
 server/data/
 
+# Audit logs (local work artifacts)
+config-audit-log-*.md
+
 # OS generated files
 .DS_Store
 .DS_Store?
