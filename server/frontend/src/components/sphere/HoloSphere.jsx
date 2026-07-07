@@ -61,14 +61,18 @@ const rotatedY = (x, y, z, qw, qx, qy, qz) => {
     return y + 2.0 * cross2y;
 };
 
-// LEDManager.cpp:242 sphereToUV の逐語移植。out に [u,v] を書く。
+// LEDManager.cpp:242 sphereToUV の移植 + 映像軸 Y↔Z 入替 (ツイン先行, 2026-07-07)。
+// ※ 現ファームは極軸=Y。ここは意図的に極軸=Z へ変更しており、ファーム側の
+//   sphereToUV(+オープニングアニメ) を Z極化するまで実機と絵が一致しない。
+//   ファーム追従後にこの差分は解消する予定 (逐語移植の不変条件を一時的に破る)。
+// 極軸=Z (緯度=nz), 経度平面=X-Y。out に [u,v] を書く。
 const sphereToUV = (x, y, z, out) => {
     const len = Math.sqrt(x * x + y * y + z * z);
     if (len < 0.0001) { out[0] = 0.5; out[1] = 0.5; return; }
     const nx = x / len, ny = y / len, nz = z / len;
-    const horizontalDist = Math.sqrt(nx * nx + nz * nz);
-    let u = (atan2n(horizontalDist, ny) + 1.0) / 2.0;  // hd≥0 なので u ∈ [0.5, 1.0] (仕様)
-    let v = (atan2n(nx, nz) + 1.0) / 2.0;
+    const horizontalDist = Math.sqrt(nx * nx + ny * ny);
+    let u = (atan2n(horizontalDist, nz) + 1.0) / 2.0;  // 緯度: Z極から測定
+    let v = (atan2n(nx, ny) + 1.0) / 2.0;              // 経度: X-Y平面
     if (u < 0.0) u = 0.0; else if (u > 1.0) u = 1.0;
     if (v < 0.0) v = 0.0; else if (v > 1.0) v = 1.0;
     out[0] = u; out[1] = v;
@@ -78,6 +82,13 @@ const sphereToUV = (x, y, z, out) => {
 // spec §5.2 の擬似コードは q をそのまま使う形で書かれているため、ここを実機照合で
 // 反転できるよう定数化する (静止時 = 恒等回転では両者は同一で、差は実機回転時のみ)。
 const CONJUGATE_SAMPLING = true;
+
+// LED 点サイズの物理由来 (φ100 球体 = 半径50mm、レイアウト座標は半径1に正規化)。
+// sizeAttenuation の size はワールド単位・モデルスケール非依存なので GROUP_SCALE を掛け戻す。
+const SPHERE_RADIUS_MM = 50;   // φ100 → 半径 50mm
+const LED_SIZE_MM = 5;         // LED 相当の見た目 (好みで 1.5〜5 に調整可)
+const GROUP_SCALE = 2.2;       // IMUControlledSphere の <group scale> と共有
+const LED_POINT_SIZE = (LED_SIZE_MM / SPHERE_RADIUS_MM) * GROUP_SCALE;  // ≈ 0.088
 
 // live 表示ルール (§5.2b, 2026-07-06 改訂)
 const BACKFACE_COLOR = 0.0;              // 裏面 LED = 黒 (0,0,0)。AdditiveBlending で黒=完全不可視
@@ -285,7 +296,7 @@ const LedPointCloud = ({ geomRef, layout, effectiveMode, liveColors, hue, bright
                 map={dotTexture()}
                 color={useVertexColors ? '#ffffff' : sphereColor}
                 vertexColors={useVertexColors}
-                size={0.05}
+                size={LED_POINT_SIZE}
                 sizeAttenuation
                 transparent
                 // 全モード AdditiveBlending。live の裏面は黒=不可視なので白濁しない (§5.2b 改訂)
@@ -351,7 +362,7 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
         // Z-up → Y-up 補正 (§5.2b): レイアウト CSV は CAD 由来 Z-up。この外側固定回転で
         // 映像の上=画面の上 (+Y) にする。IMU quaternion は内側 groupRef に適用 (無影響)。
         <group rotation={[-Math.PI / 2, 0, 0]}>
-            <group ref={groupRef} scale={2.2}>
+            <group ref={groupRef} scale={GROUP_SCALE}>
                 {/* 骨格として薄く残すワイヤーフレーム球 (live 中は非表示)。LED 点群を主役にする。 */}
                 <Sphere args={[1, 32, 32]} visible={wireframeOpacity > 0}>
                     <meshStandardMaterial
