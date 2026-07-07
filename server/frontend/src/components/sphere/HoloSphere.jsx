@@ -61,18 +61,22 @@ const rotatedY = (x, y, z, qw, qx, qy, qz) => {
     return y + 2.0 * cross2y;
 };
 
-// LEDManager.cpp:242 sphereToUV の移植 + 映像軸 Y↔Z 入替 (ツイン先行, 2026-07-07)。
-// ※ 現ファームは極軸=Y。ここは意図的に極軸=Z へ変更しており、ファーム側の
-//   sphereToUV(+オープニングアニメ) を Z極化するまで実機と絵が一致しない。
-//   ファーム追従後にこの差分は解消する予定 (逐語移植の不変条件を一時的に破る)。
-// 極軸=Z (緯度=nz), 経度平面=X-Y。out に [u,v] を書く。
+// 正距円筒 (equirectangular) パノラマ → 球面 UV マッピング (ツイン先行, 2026-07-07 改訂)。
+// 極軸=Z。out[0]=u→px(幅)=経度、out[1]=v→py(高さ)=緯度。
+// ※ 現ファーム LEDManager.cpp:242 は「u=緯度(第1引数≥0で 0.5..1.0) / v=経度」で
+//   画像幅の右半分しか使わない実装 (spec §5.2 L253 の注記どおり)。本ツインはこれを是正し、
+//   経度 -180..180 を幅全域、緯度 0..180 を高さ全域へ割り当てる標準の正距円筒へ変更。
+//   → 実機一致にはファーム sphereToUV も同式へ改修が必要 (逐語移植の不変条件を一時破る)。
+//   経度の継ぎ目/左右方向は実機で要検証。
 const sphereToUV = (x, y, z, out) => {
     const len = Math.sqrt(x * x + y * y + z * z);
     if (len < 0.0001) { out[0] = 0.5; out[1] = 0.5; return; }
     const nx = x / len, ny = y / len, nz = z / len;
     const horizontalDist = Math.sqrt(nx * nx + ny * ny);
-    let u = (atan2n(horizontalDist, nz) + 1.0) / 2.0;  // 緯度: Z極から測定
-    let v = (atan2n(nx, ny) + 1.0) / 2.0;              // 経度: X-Y平面
+    // 経度 (X-Y平面, -180..180) → 幅 全域 [0,1]
+    let u = (atan2n(nx, ny) + 1.0) / 2.0;
+    // 緯度 (Z極からの極角 0..180) → 高さ 全域 [0,1] (hd≥0 で atan2n∈[0,1]、(+1)/2 は付けない)
+    let v = atan2n(horizontalDist, nz);
     if (u < 0.0) u = 0.0; else if (u > 1.0) u = 1.0;
     if (v < 0.0) v = 0.0; else if (v > 1.0) v = 1.0;
     out[0] = u; out[1] = v;
