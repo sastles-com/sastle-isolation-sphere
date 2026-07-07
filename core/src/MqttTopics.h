@@ -13,6 +13,7 @@ namespace topics {
 
 // 購読 (サーバー → デバイス)
 constexpr const char* kAllState          = "sphere/all/state";
+constexpr const char* kAllClock          = "sphere/all/clock";   // 時刻同期ビーコン (1秒周期)
 constexpr const char* kAllCommandWild    = "sphere/all/command/#";
 constexpr const char* kCommandParams     = "sphere/all/command/params";
 constexpr const char* kCommandPlayback   = "sphere/all/command/playback";

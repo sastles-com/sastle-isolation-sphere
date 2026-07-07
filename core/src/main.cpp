@@ -15,6 +15,7 @@
 #include "MqttTopics.h"
 #include "RemoteLog.h"
 #include "OtaManager.h"
+#include "TimeSync.h"
 
 using namespace sastle;
 
@@ -32,6 +33,7 @@ LEDManager ledManager;
 LCDManager lcdManager;
 CommandHandler commandHandler;
 OtaManager ota;
+TimeSync timeSync;
 
 unsigned long lastIMUPublish = 0;
 const unsigned long IMU_PUBLISH_INTERVAL = 100; // 100ms = 10Hz
@@ -41,6 +43,8 @@ unsigned long lastStatePublish = 0;
 const unsigned long STATE_PUBLISH_INTERVAL = 5000; // 5秒に1回状態パブリッシュ
 unsigned long lastPerfLog = 0;
 const unsigned long PERF_LOG_INTERVAL = 2000; // 2秒に1回 性能計測ログ
+unsigned long lastTimeSyncLog = 0;
+const unsigned long TIMESYNC_LOG_INTERVAL = 5000; // 5秒に1回 時刻同期状態ログ
 
 // MQTTメッセージ受信コールバック
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
@@ -55,6 +59,13 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     unsigned int len = (length < sizeof(payloadCopy) - 1) ? length : sizeof(payloadCopy) - 1;
     memcpy(payloadCopy, payload, len);
     payloadCopy[len] = '\0';
+
+    // 時刻同期ビーコン (sphere/all/clock) は TimeSync へ。1秒周期で頻繁に来るため
+    // command 判定より先に捌き、ログも出さない (ログ洪水を避ける)。
+    if (strcmp(topicCopy, sastle::topics::kAllClock) == 0) {
+        timeSync.onClockMessage(payloadCopy);
+        return;
+    }
 
     sastle::Log.printf("\n[MQTT] ← Message on topic: %s\n", topicCopy);
 
@@ -132,6 +143,7 @@ void setup() {
     mqtt.subscribe(topics::kCommandPlayback);
     mqtt.subscribe(topics::kCommandLed);
     mqtt.subscribe(topics::kCommandSystem);
+    mqtt.subscribe(topics::kAllClock);        // 時刻同期ビーコン
     sastle::Log.println("MQTT topics subscribed");
     
     // CommandHandler初期化 (LEDManager初期化後に移動)
@@ -269,6 +281,23 @@ static void publishPerfStatsIfDue(unsigned long now) {
         (unsigned long)imageManager.getDropped(), (unsigned)ESP.getFreeHeap());
 }
 
+// 時刻同期状態ログ (5秒間隔): 同期可否・offset・syncedNow を確認する検証用
+static void publishTimeSyncIfDue(unsigned long now) {
+    if (now - lastTimeSyncLog < TIMESYNC_LOG_INTERVAL) {
+        return;
+    }
+    lastTimeSyncLog = now;
+
+    if (timeSync.isSynced()) {
+        int64_t nowMs = timeSync.syncedNow();
+        sastle::Log.printf("[TIMESYNC] synced now=%lld ms offset=%lld ms seq=%lu\n",
+                           (long long)nowMs, (long long)timeSync.offset(),
+                           (unsigned long)timeSync.lastSeq());
+    } else {
+        sastle::Log.println("[TIMESYNC] not synced yet (no clock beacon received)");
+    }
+}
+
 void loop() {
     // OTA 要求を最優先で処理。書き込みセッション中は handle() が転送完了まで
     // ブロックするため、描画・配信は自然に停止する (要件どおり)。
@@ -332,6 +361,9 @@ void loop() {
 
     // 性能計測ログ
     publishPerfStatsIfDue(now);
+
+    // 時刻同期状態ログ (検証用)
+    publishTimeSyncIfDue(now);
 
     // 映像UDP受信+デコードは Core0 のデコードタスクが担当 (loop では扱わない)
     delay(10);

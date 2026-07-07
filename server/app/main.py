@@ -37,7 +37,10 @@ async def lifespan(app: FastAPI):
     
     # MQTT接続開始
     mqtt_service.start()
-    
+
+    # 時刻同期ビーコンを1秒周期でブロードキャスト (複数コアの共通タイムベース)
+    clock_task = asyncio.create_task(mqtt_service.clock_publisher_loop())
+
     # SQLite データベース初期化 (動画/プレイリスト)
     db = Database(DB_PATH)
 
@@ -72,6 +75,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    clock_task.cancel()
     video_streamer.stop()
     mqtt_service.stop()
     db.close()

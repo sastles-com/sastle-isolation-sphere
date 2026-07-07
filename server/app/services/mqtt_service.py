@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import threading
+import time
 from typing import Optional
 import logging
 
@@ -19,6 +20,8 @@ from app.core.config import (
     CONFIG_SEARCH_PATHS,
     MQTT_BROKER_PORT,
     MQTT_CLIENT_ID,
+    MQTT_CLOCK_INTERVAL_SEC,
+    MQTT_CLOCK_TOPIC,
     MQTT_COMMAND_TOPIC_WILDCARD,
     MQTT_DEVICE_ID,
 )
@@ -50,6 +53,7 @@ class MQTTService:
         self.client: Optional[mqtt.Client] = None
         self.state_manager: Optional[StateManager] = None  # 外部からセット
         self._loop = None  # set_event_loop() でセットされる
+        self._clock_seq = 0  # 時刻ビーコンの連番
 
         # Load config from config.json
         self.broker_host = self._load_broker_config()
@@ -283,6 +287,39 @@ class MQTTService:
                 )
         except Exception as e:
             logger.error(f"Error handling status data: {e}")
+
+    def publish_clock(self):
+        """時刻ビーコンを1回 publish する (sphere/all/clock)。
+
+        複数コアの共通タイムベース用。epoch_ms は UTC エポックのミリ秒 (整数)。
+        QoS0・非retain: 再送遅延で古い時刻が届くのを避ける (古さは epoch_ms で自明)。
+        設計: core/doc/time_sync_show.md
+        """
+        if not self.client or not self.is_connected:
+            return
+        self._clock_seq += 1
+        payload = json.dumps({
+            "epoch_ms": int(time.time() * 1000),
+            "seq": self._clock_seq,
+        })
+        try:
+            self.client.publish(MQTT_CLOCK_TOPIC, payload, qos=0, retain=False)
+        except Exception as e:
+            logger.error(f"Failed to publish clock beacon: {e}")
+
+    async def clock_publisher_loop(self, interval: float = MQTT_CLOCK_INTERVAL_SEC):
+        """時刻ビーコンを一定周期で送出し続ける asyncio タスク。
+
+        main.py の lifespan から create_task で起動し、shutdown で cancel する。
+        """
+        logger.info(f"Clock publisher started (interval={interval}s, topic={MQTT_CLOCK_TOPIC})")
+        try:
+            while True:
+                self.publish_clock()
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            logger.info("Clock publisher stopped")
+            raise
 
     def set_event_loop(self, loop):
         """Set event loop for async operations (called from main.py)"""

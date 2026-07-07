@@ -11,6 +11,11 @@ MQTT_STATE_TOPIC = "sphere/all/state"
 MQTT_COMMAND_TOPIC_PREFIX = "sphere/all/command"
 MQTT_COMMAND_TOPIC_WILDCARD = "sphere/all/command/#"
 
+# 時刻同期ビーコン (複数コアの共通タイムベース。設計: core/doc/time_sync_show.md)
+# 1秒周期・QoS0・非retain でブロードキャストする。
+MQTT_CLOCK_TOPIC = "sphere/all/clock"
+MQTT_CLOCK_INTERVAL_SEC = 1.0
+
 # プレイリスト/動画システムの保存先 (server/ 起動前提の相対パス)
 DB_PATH = "data/sphere.db"            # SQLite データベース
 MEDIA_VIDEOS_DIR = "data/videos"      # アップロード動画の保存先
