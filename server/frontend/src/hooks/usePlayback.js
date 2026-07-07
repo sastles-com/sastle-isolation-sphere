@@ -63,8 +63,12 @@ export const usePlayback = () => {
     }, [fetchPlayback]);
 
     const togglePlay = useCallback(async () => {
-        if (playback.status === 'stopped') await play();
-        else await pauseToggle();
+        // playing → 一時停止 / paused → 再開 (どちらも /playback/pause の toggle で処理)。
+        // それ以外 (stopped / error / 未知) はクリーンに /playback/start で開始する。
+        // 以前は stopped 以外を一律 pauseToggle に流していたため、error 状態では
+        // toggle() が無反応となり再生ボタンが死ぬ (core に何も送出されない) 不具合があった。
+        if (playback.status === 'playing' || playback.status === 'paused') await pauseToggle();
+        else await play();
     }, [playback.status, play, pauseToggle]);
 
     const stop = useCallback(async () => {
