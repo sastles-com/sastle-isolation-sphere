@@ -27,10 +27,11 @@ export const VideoCard = ({ video, playing, onPlay, onDelete }) => (
                 background: 'rgb(0 0 0 / .35)', cursor: 'pointer',
             }}
         >
-            {video.thumbnail_path ? (
+            {(video.thumbnail_url || video.thumbnail_path) ? (
                 <img
-                    src={video.thumbnail_path}
+                    src={video.thumbnail_url || video.thumbnail_path}
                     alt={video.title}
+                    loading="lazy"
                     style={{
                         position: 'absolute', inset: 0,
                         width: '100%', height: '100%', objectFit: 'cover',

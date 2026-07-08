@@ -19,6 +19,7 @@ MQTT_CLOCK_INTERVAL_SEC = 1.0
 # プレイリスト/動画システムの保存先 (server/ 起動前提の相対パス)
 DB_PATH = "data/sphere.db"            # SQLite データベース
 MEDIA_VIDEOS_DIR = "data/videos"      # アップロード動画の保存先
+MEDIA_THUMBNAILS_DIR = "data/thumbnails"  # 動画サムネイルの保存先
 
 # MQTT ブローカー設定 (config.json) の探索パス。
 # サーバーは server/ ディレクトリから起動される前提の相対パス(順序も既存実装と同一)

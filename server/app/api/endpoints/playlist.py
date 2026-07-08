@@ -12,9 +12,10 @@ import uuid as uuidlib
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.core.config import MEDIA_VIDEOS_DIR
+from app.core.config import MEDIA_VIDEOS_DIR, MEDIA_THUMBNAILS_DIR
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,11 +42,64 @@ def _extract_metadata(path: str):
         return (0, 0, 0, 30)
 
 
+# ---- サムネイル (代表フレームを 2:1 JPEG で保存。カードは objectFit:cover で 1:1 表示) ----
+
+def _thumb_path(uuid: str) -> str:
+    """uuid からサムネイルファイルパスを導出 (DB に依存しない規約ベース)。"""
+    return os.path.join(MEDIA_THUMBNAILS_DIR, f"{uuid}.jpg")
+
+
+def _generate_thumbnail(video_path: str, out_path: str) -> bool:
+    """動画の代表フレーム(先頭~10%位置)を 320x160 JPEG で書き出す。成功で True。"""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return False
+        total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        if total > 0:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(total * 0.1))
+        ok, frame = cap.read()
+        if not ok or frame is None:  # シーク失敗時は先頭にフォールバック
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
+        cap.release()
+        if not ok or frame is None:
+            return False
+        frame = cv2.resize(frame, (320, 160))
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        return bool(cv2.imwrite(out_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 82]))
+    except Exception as e:
+        logger.warning(f"thumbnail generate failed ({video_path}): {e}")
+        return False
+
+
+def _with_thumb_url(v: dict) -> dict:
+    """動画 dict にサムネイル URL を付与して返す (フロントの <img src> 用)。"""
+    if v and v.get("id") is not None:
+        v["thumbnail_url"] = f"/api/playlist/videos/{v['id']}/thumbnail"
+    return v
+
+
 # ============================ 動画 (素材) ============================
 
 @router.get("/videos")
 async def get_videos(request: Request):
-    return request.app.state.db.get_videos()
+    return [_with_thumb_url(v) for v in request.app.state.db.get_videos()]
+
+
+@router.get("/videos/{video_id}/thumbnail")
+async def get_video_thumbnail(request: Request, video_id: int):
+    """動画サムネイルを返す。未生成なら元動画から遅延生成する(既存動画のバックフィル)。"""
+    v = request.app.state.db.get_video(video_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="video not found")
+    thumb = _thumb_path(v["uuid"])
+    if not os.path.exists(thumb):
+        src = v.get("converted_path")
+        if not src or not os.path.exists(src) or not _generate_thumbnail(src, thumb):
+            raise HTTPException(status_code=404, detail="thumbnail unavailable")
+    return FileResponse(thumb, media_type="image/jpeg")
 
 
 @router.post("/videos")
@@ -78,17 +132,21 @@ async def upload_video(
         raise HTTPException(status_code=500, detail=f"save failed: {e}")
 
     dur, w, h, fps = _extract_metadata(dest)
+    # サムネイルを生成 (失敗しても致命ではない。GET 時にも遅延生成でフォールバックする)
+    thumb = _thumb_path(vid)
+    thumb_ok = _generate_thumbnail(dest, thumb)
     db = request.app.state.db
     row = db.create_video(
         uuid=vid,
         title=title or (file.filename or vid),
         filename=file.filename or f"{vid}{ext}",
         converted_path=dest,   # 元ファイル(再生時にライブ変換)
+        thumbnail_path=thumb if thumb_ok else None,
         duration_ms=dur, width=w, height=h, fps=fps,
         size_bytes=size, codec=ext.lstrip("."),
     )
-    logger.info(f"uploaded video {vid}: {size}B {w}x{h} {dur}ms")
-    return row
+    logger.info(f"uploaded video {vid}: {size}B {w}x{h} {dur}ms thumb={thumb_ok}")
+    return _with_thumb_url(row)
 
 
 @router.delete("/videos/{video_id}")
@@ -113,6 +171,12 @@ async def delete_video(request: Request, video_id: int):
             os.remove(path)
         except Exception as e:
             logger.warning(f"file remove failed ({path}): {e}")
+    thumb = _thumb_path(v["uuid"])
+    if os.path.exists(thumb):
+        try:
+            os.remove(thumb)
+        except Exception as e:
+            logger.warning(f"thumbnail remove failed ({thumb}): {e}")
     db.delete_video(video_id)
     return {"status": "ok", "deleted": video_id}
 
@@ -151,7 +215,7 @@ async def get_playlist_detail(request: Request, playlist_id: int):
     p = db.get_playlist(playlist_id)
     if not p:
         raise HTTPException(status_code=404, detail="playlist not found")
-    p["items"] = db.get_playlist_items_detailed(playlist_id)
+    p["items"] = [_with_thumb_url(it) for it in db.get_playlist_items_detailed(playlist_id)]
     return p
 
 
