@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
+VIDEO_KINDS = {"video", "pattern"}
 
 
 def _extract_metadata(path: str):
@@ -84,8 +85,11 @@ def _with_thumb_url(v: dict) -> dict:
 # ============================ 動画 (素材) ============================
 
 @router.get("/videos")
-async def get_videos(request: Request):
-    return [_with_thumb_url(v) for v in request.app.state.db.get_videos()]
+async def get_videos(request: Request, kind: Optional[str] = None):
+    """素材動画一覧。kind ('video'|'pattern') で種別フィルタ可能。"""
+    if kind is not None and kind not in VIDEO_KINDS:
+        raise HTTPException(status_code=400, detail=f"invalid kind: {kind}")
+    return [_with_thumb_url(v) for v in request.app.state.db.get_videos(kind=kind)]
 
 
 @router.get("/videos/{video_id}/thumbnail")
@@ -107,11 +111,14 @@ async def upload_video(
     request: Request,
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
+    kind: str = Form("video"),
 ):
-    """動画をアップロードして保存・DB登録する。"""
+    """動画をアップロードして保存・DB登録する。kind='pattern' でパターン動画として登録。"""
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXT:
         raise HTTPException(status_code=400, detail=f"unsupported format: {ext or '(none)'}")
+    if kind not in VIDEO_KINDS:
+        raise HTTPException(status_code=400, detail=f"invalid kind: {kind}")
 
     os.makedirs(MEDIA_VIDEOS_DIR, exist_ok=True)
     vid = f"v_{int(time.time())}_{uuidlib.uuid4().hex[:6]}"
@@ -143,9 +150,9 @@ async def upload_video(
         converted_path=dest,   # 元ファイル(再生時にライブ変換)
         thumbnail_path=thumb if thumb_ok else None,
         duration_ms=dur, width=w, height=h, fps=fps,
-        size_bytes=size, codec=ext.lstrip("."),
+        size_bytes=size, codec=ext.lstrip("."), kind=kind,
     )
-    logger.info(f"uploaded video {vid}: {size}B {w}x{h} {dur}ms thumb={thumb_ok}")
+    logger.info(f"uploaded {kind} {vid}: {size}B {w}x{h} {dur}ms thumb={thumb_ok}")
     return _with_thumb_url(row)
 
 

@@ -63,6 +63,7 @@ class Database:
                 fps INTEGER DEFAULT 30,
                 size_bytes INTEGER,
                 codec TEXT,
+                kind TEXT NOT NULL DEFAULT 'video',
                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -117,7 +118,19 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_uploaded_at ON videos(uploaded_at DESC)")
         
         self.conn.commit()
-    
+        self._migrate_schema()
+
+    def _migrate_schema(self):
+        """既存DBへの後方互換マイグレーション (欠けている列を追加する)。"""
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(videos)")
+        video_cols = {row[1] for row in cursor.fetchall()}
+        if "kind" not in video_cols:
+            # 既存の全動画は素材('video')として扱う
+            cursor.execute("ALTER TABLE videos ADD COLUMN kind TEXT NOT NULL DEFAULT 'video'")
+            logger.info("migrated: added videos.kind (default 'video')")
+        self.conn.commit()
+
     def _initialize_playback_state(self):
         """playback_state初期化 (シングルトンレコード作成)"""
         cursor = self.conn.cursor()
@@ -157,11 +170,15 @@ class Database:
         thumbnail_path: Optional[str] = None,
         fps: int = 30,
         size_bytes: Optional[int] = None,
-        codec: Optional[str] = None
+        codec: Optional[str] = None,
+        kind: str = "video"
     ) -> Dict[str, Any]:
         """
         動画作成
-        
+
+        Args:
+            kind: 種別 ('video' 素材動画 | 'pattern' パターン動画)
+
         Returns:
             作成された動画レコード (dict)
         """
@@ -169,11 +186,11 @@ class Database:
         cursor.execute("""
             INSERT INTO videos (
                 uuid, title, description, filename, converted_path, thumbnail_path,
-                duration_ms, width, height, fps, size_bytes, codec
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_ms, width, height, fps, size_bytes, codec, kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             uuid, title, description, filename, converted_path, thumbnail_path,
-            duration_ms, width, height, fps, size_bytes, codec
+            duration_ms, width, height, fps, size_bytes, codec, kind
         ))
         self.conn.commit()
         
@@ -191,32 +208,36 @@ class Database:
         self,
         limit: int = 100,
         offset: int = 0,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        kind: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         動画一覧取得
-        
+
         Args:
             limit: 取得件数
             offset: オフセット
             search: タイトル検索 (LIKE検索)
+            kind: 種別フィルタ ('video' | 'pattern'。None なら全件)
         """
         cursor = self.conn.cursor()
-        
+
+        where = []
+        params: list = []
         if search:
-            cursor.execute("""
-                SELECT * FROM videos
-                WHERE title LIKE ?
-                ORDER BY uploaded_at DESC
-                LIMIT ? OFFSET ?
-            """, (f"%{search}%", limit, offset))
-        else:
-            cursor.execute("""
-                SELECT * FROM videos
-                ORDER BY uploaded_at DESC
-                LIMIT ? OFFSET ?
-            """, (limit, offset))
-        
+            where.append("title LIKE ?")
+            params.append(f"%{search}%")
+        if kind:
+            where.append("kind = ?")
+            params.append(kind)
+
+        sql = "SELECT * FROM videos"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY uploaded_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor.execute(sql, params)
         return [dict(row) for row in cursor.fetchall()]
     
     def delete_video(self, video_id: int):
