@@ -3,10 +3,12 @@ import { motion } from 'framer-motion';
 import { SegmentControl } from '../ui/SegmentControl';
 import { PlaylistList } from '../library/PlaylistList';
 import { VideoGrid } from '../library/VideoGrid';
+import { PatternGrid } from '../library/PatternGrid';
 
 const SEGMENTS = [
     { value: 'playlists', label: 'Playlists' },
     { value: 'videos', label: 'Videos' },
+    { value: 'patterns', label: 'Patterns' },
 ];
 
 /**
@@ -19,9 +21,12 @@ export const LibrarySheet = ({ pb }) => {
     // 横フリックでセグメント切替 (縦優位のジェスチャーは無視 = シート縦ドラッグを妨げない)
     const handlePanEnd = (_, info) => {
         if (Math.abs(info.offset.x) < 60 || Math.abs(info.offset.x) <= Math.abs(info.offset.y)) return;
-        setSeg((s) => (info.offset.x < 0
-            ? (s === 'playlists' ? 'videos' : s)
-            : (s === 'videos' ? 'playlists' : s)));
+        const dir = info.offset.x < 0 ? 1 : -1; // 左フリック=次 / 右フリック=前
+        setSeg((s) => {
+            const i = SEGMENTS.findIndex((o) => o.value === s);
+            const next = Math.min(SEGMENTS.length - 1, Math.max(0, i + dir));
+            return SEGMENTS[next].value;
+        });
     };
 
     const handleActivatePlay = async (pl) => {
@@ -58,7 +63,7 @@ export const LibrarySheet = ({ pb }) => {
                     paddingBottom: 'max(20px, env(safe-area-inset-bottom))',
                 }}
             >
-                {seg === 'playlists' ? (
+                {seg === 'playlists' && (
                     <PlaylistList
                         playlists={pb.playlists}
                         currentPlaylistId={pb.currentPlaylist?.id}
@@ -67,9 +72,20 @@ export const LibrarySheet = ({ pb }) => {
                         onCreate={handleCreatePlaylist}
                         onDelete={handleDeletePlaylist}
                     />
-                ) : (
+                )}
+                {seg === 'videos' && (
                     <VideoGrid
-                        videos={pb.videos}
+                        videos={pb.materialVideos}
+                        currentVideoId={pb.currentVideo?.id}
+                        isStreaming={pb.isStreaming}
+                        onPlay={(v) => pb.playVideo(v.id)}
+                        onDelete={handleDeleteVideo}
+                        onUpload={pb.uploadVideo}
+                    />
+                )}
+                {seg === 'patterns' && (
+                    <PatternGrid
+                        patterns={pb.patterns}
                         currentVideoId={pb.currentVideo?.id}
                         isStreaming={pb.isStreaming}
                         onPlay={(v) => pb.playVideo(v.id)}

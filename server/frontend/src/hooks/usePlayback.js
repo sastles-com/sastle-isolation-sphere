@@ -39,6 +39,10 @@ export const usePlayback = () => {
         return () => clearInterval(id);
     }, [fetchPlayback]);
 
+    // kind でライブラリを分割 (素材動画 / パターン動画)。旧レコードは kind 未設定でも 'video' 扱い。
+    const materialVideos = videos.filter((v) => (v.kind || 'video') === 'video');
+    const patterns = videos.filter((v) => v.kind === 'pattern');
+
     const isPlaying = playback.status === 'playing';
     const isStreaming = playback.status !== 'stopped';
     const loopOn = settings.playback?.loop ?? true;
@@ -147,10 +151,11 @@ export const usePlayback = () => {
         return r.ok;
     }, [fetchPlaylists]);
 
-    const uploadVideo = useCallback(async (file) => {
+    const uploadVideo = useCallback(async (file, kind = 'video') => {
         const fd = new FormData();
         fd.append('file', file);
         fd.append('title', file.name);
+        if (kind && kind !== 'video') fd.append('kind', kind);
         // FormData は Content-Type を自動設定させるため fetch を直接使う
         const r = await fetch(`${PB}/videos`, { method: 'POST', body: fd });
         if (r.ok) fetchVideos();
@@ -164,7 +169,7 @@ export const usePlayback = () => {
     }, [fetchVideos, fetchPlayback]);
 
     return {
-        playback, playlists, videos, settings,
+        playback, playlists, videos, materialVideos, patterns, settings,
         isPlaying, isStreaming, loopOn, activeId, currentPlaylist, currentVideo,
         play, pauseToggle, togglePlay, stop, toggleLoop, setActivePlaylist,
         activateAndPlay, playVideo, skipNext, skipPrev,
