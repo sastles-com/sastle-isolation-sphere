@@ -106,6 +106,10 @@ from fastapi.responses import FileResponse
 if os.path.exists("frontend/dist/assets"):
     app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
 
+# Pattern Studio (別 Vite アプリ) を /studio に mount。catch-all より前に置く (spec §8)。
+if os.path.exists("frontend-studio/dist/assets"):
+    app.mount("/studio/assets", StaticFiles(directory="frontend-studio/dist/assets"), name="studio-assets")
+
 # WebSocket route (no /api prefix)
 app.include_router(websocket.router, tags=["websocket"])
 
@@ -115,6 +119,15 @@ app.include_router(api_router, prefix="/api")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+# Pattern Studio の index (catch-all より前)。/studio と /studio/ の両方に対応。
+@app.get("/studio")
+@app.get("/studio/")
+async def serve_studio():
+    studio_index = "frontend-studio/dist/index.html"
+    if os.path.exists(studio_index):
+        return FileResponse(studio_index)
+    return {"message": "Pattern Studio not built. Run 'npm run build' in frontend-studio."}
 
 # Catch-all route for SPA (must be LAST)
 @app.get("/{full_path:path}")
