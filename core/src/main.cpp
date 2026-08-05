@@ -78,6 +78,33 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     }
 }
 
+// Grove I2C バスを走査して検出アドレスを MQTT ログに出す (診断用)。
+// BNO055 は ADR ピンにより 0x28 (L) / 0x29 (H) に応答する。
+static void scanI2cBus(uint8_t sda, uint8_t scl) {
+    Wire.begin(sda, scl, 400000);
+    delay(50);
+
+    sastle::Log.printf("\n[I2C] Scanning bus (SDA=GPIO%u, SCL=GPIO%u)\n", sda, scl);
+
+    int found = 0;
+    bool bnoFound = false;
+    for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            ++found;
+            const bool isBno = (addr == 0x28 || addr == 0x29);
+            if (isBno) {
+                bnoFound = true;
+            }
+            sastle::Log.printf("[I2C]   found 0x%02X%s\n", addr, isBno ? "  <- BNO055" : "");
+            delay(2);
+        }
+    }
+
+    sastle::Log.printf("[I2C] Scan done: %d device(s), BNO055(0x28/0x29)=%s\n",
+                       found, bnoFound ? "PRESENT" : "ABSENT");
+}
+
 void setup() {
     // シリアル初期化
     Serial.begin(115200);
@@ -156,6 +183,9 @@ void setup() {
         sound.playEffect(SoundEffect::STARTUP);
     }
     
+    // IMU初期化前に I2C バスを走査 (BNO055 の有無を切り分けるため)
+    scanI2cBus(kImuI2cSda, kImuI2cScl);
+
     // IMU初期化
     if (!imuSensor.begin(config)) {
         sastle::Log.println("IMU initialization failed (continuing without IMU)");
