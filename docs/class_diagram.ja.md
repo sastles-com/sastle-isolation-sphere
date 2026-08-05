@@ -1,10 +1,10 @@
-> **English** · [日本語](class_diagram.ja.md)
+> [English](class_diagram.md) · **日本語**
 
-# Class Diagram and Component Structure
+# クラス図とコンポーネント構成
 
-Last updated: 2025-12-02
+最終更新: 2025-12-02
 
-## Python Server Class Structure
+## Python Server クラス構成
 
 ```mermaid
 classDiagram
@@ -77,7 +77,7 @@ classDiagram
     ROSManager : Singleton
 ```
 
-## React Frontend Component Structure
+## React Frontend コンポーネント構成
 
 ```mermaid
 classDiagram
@@ -139,7 +139,7 @@ classDiagram
     Dashboard --> WebSocketContext : uses
 ```
 
-## ESP32 Class Structure
+## ESP32 クラス構成
 
 ```mermaid
 classDiagram
@@ -211,9 +211,9 @@ classDiagram
     ConfigManager --> NetworkManager : configures
 ```
 
-## Data Flow
+## データフロー
 
-### IMU Quaternion Data Flow
+### IMU Quaternion データフロー
 
 ```mermaid
 sequenceDiagram
@@ -237,7 +237,7 @@ sequenceDiagram
     end
 ```
 
-### WebSocket State Synchronization
+### WebSocket 状態同期
 
 ```mermaid
 sequenceDiagram
@@ -260,7 +260,7 @@ sequenceDiagram
     WS->>Browser: STATE_UPDATE
 ```
 
-## File Structure
+## ファイル構成
 
 ### Server
 ```
@@ -314,29 +314,29 @@ core/
 └── platformio.ini             # Build config
 ```
 
-## Singleton Pattern
+## Singleton パターン
 
-The following classes are implemented using the Singleton pattern:
+以下のクラスはSingletonパターンで実装されています：
 
 - **Python Server**
-  - `ROSManager`: ROS2 node management
-  - `MQTTService`: MQTT connection management
-  - `StateManager`: global state management
+  - `ROSManager`: ROS2ノード管理
+  - `MQTTService`: MQTT接続管理
+  - `StateManager`: グローバル状態管理
 
-Reasons:
-- A single instance is required across the entire application
-- Prevents duplication of resources (network connections, threads)
-- Guarantees state consistency
+理由：
+- アプリケーション全体で単一のインスタンスが必要
+- リソース（ネットワーク接続、スレッド）の重複を防ぐ
+- 状態の一貫性を保証
 
-## Asynchronous Processing
+## 非同期処理
 
 ### Python Server
-- FastAPI: ASGI asynchronous framework
-- WebSocket: asynchronous handler
-- StateManager: asynchronous notification via `async def update_state()`
-- MQTTService: runs on a separate thread, synchronized with `asyncio.new_event_loop()`
+- FastAPI: ASGI非同期フレームワーク
+- WebSocket: 非同期ハンドラ
+- StateManager: `async def update_state()`で非同期通知
+- MQTTService: 別スレッドで動作、`asyncio.new_event_loop()`で同期
 
 ### Frontend
-- WebSocket: event-driven
-- React Hooks: asynchronous updates with `useEffect` and `useState`
-- Three.js: animation loop with `useFrame`
+- WebSocket: イベントドリブン
+- React Hooks: `useEffect`, `useState`で非同期更新
+- Three.js: `useFrame`でアニメーションループ

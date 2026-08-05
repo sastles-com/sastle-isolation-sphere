@@ -1,165 +1,168 @@
-# Pattern Studio 仕様 & 実装計画
+> **English** · [日本語](pattern-studio-spec.ja.md)
 
-> 状態: **草案 / 協議用**。最終更新: 2026-07-08
-> 関連: [playlist_system_design.md](./playlist_system_design.md) /
-> [ui-v2-design-spec.md](./ui-v2-design-spec.md) / VideoStreamer(320x160 equirectangular JPEG/UDP)
+# Pattern Studio spec & implementation plan
 
----
-
-## 0. 背景と決定事項
-
-- スフィアの表示コンテンツは **equirectangular 320×160・2:1・JPEG・≤20fps**。
-  サーバ(`VideoStreamer`)が OpenCV でデコード→`cv2.resize(320,160)`→JPEG→UDP送出。
-  **投影変換はせず、アップロード動画そのものが equirectangular マップ**。コアは表示専用。
-- パターン(手書き文字＋エフェクト等)の**最終成果物は「普通の動画」**であり、
-  既存の video/playlist パイプラインにそのまま乗せられる。
-- よって編集は操作アプリに詰め込まず、**専用 Web「Pattern Studio」に分離**する。
-  操作アプリには **「Pattern」タブ = 素材一覧 ＋ Studio 起動リンク（ランチャー）** を追加。
-- パターン＝**video の一種**（`kind` で区別）。プレイリストの動画間への挿入は既存機能のまま可能。
-- **コア/ファーム変更は一切なし**。DB は最小追加のみ。
+> Status: **draft / for discussion**. Last updated: 2026-07-08
+> Related: [playlist_system_design.md](./playlist_system_design.md) /
+> [ui-v2-design-spec.md](./ui-v2-design-spec.md) / VideoStreamer (320x160 equirectangular JPEG/UDP)
 
 ---
 
-## 1. スコープ
+## 0. Background and decisions
 
-### In scope（初期）
-- 手書き文字/テキスト・基本図形・色・背景。
-- エフェクト: 球面スピン(経度スクロール)/面内回転/拡大パルス/フェード。
-- 尺・fps・ループ回数の設定。**ループ不変条件の強制**(§2)。
-- equirectangular 2:1 の WYSIWYG プレビュー(ループ再生でシーム確認)＋任意で球面プレビュー。
-- クライアント描画 → 動画書き出し → 既存 `POST /api/playlist/videos` へアップロード。
-
-### Out of scope（初期。将来オプション）
-- サーバ側ライブ生成(パラメータをリアルタイム描画)。P5 で昇格候補。
-- コア/ファーム変更。
-- フル機能タイムライン/キーフレームエディタ(初期は数値＋イージング程度)。
+- The sphere's display content is **equirectangular 320×160, 2:1, JPEG, ≤20fps**.
+  The server (`VideoStreamer`) decodes with OpenCV → `cv2.resize(320,160)` → JPEG → UDP send.
+  **No projection transform is applied; the uploaded video itself is the equirectangular map.** The core is display-only.
+- The **final deliverable of a pattern (handwritten text + effects, etc.) is "an ordinary video"**,
+  which can ride directly on the existing video/playlist pipeline.
+- Therefore, do not cram editing into the operation app; **separate it into a dedicated web "Pattern Studio".**
+  Add to the operation app a **"Pattern" tab = material list + a link to launch the Studio (launcher)**.
+- A pattern is **a kind of video** (distinguished by `kind`). Inserting it between videos in a playlist is still possible as an existing function.
+- **No core/firmware changes at all.** Only minimal additions to the DB.
 
 ---
 
-## 2. 出力仕様（デバイス整合＝不変条件）
+## 1. Scope
 
-- **アスペクト 2:1（equirectangular）必須**。作業解像度は 640×320 等の2倍でも可
-  (サーバが 320×160 に resize する)。
-- **fps ≤ 20**（推奨 15–20。デバイスのデコード ~20fps 上限）。
-- **コーデック**: 既存動画は mp4(H.264)。デバイス側は `cv2.VideoCapture` でデコードするため、
-  **mp4/H.264 を第一とする**(§10 の webm リスク参照)。
-- **ループ不変条件（loopy パノラマ＋ループ再生）**:
-  1. **経度ラップ**: 右端(+180°)からはみ出た分は左端(−180°)へ回り込む。
-     全幅レイヤの水平ロール、またはシームまたぎ時は水平タイル合成(x, x−W, x+W)で担保。
-  2. **時間ループ**: 先頭↔末尾を連続に。**総移動＝幅Wの整数倍**、
-     **全可変パラメータは尺内で整数周期**(面内回転=360°整数回転、拡大=sinパルス、スピン=整数周回)。
-  3. **末尾フレーム(t=T)を重複させない**(t=T≡t=0)。N枚は位相 0..(N−1)/N を出力。
-- 文字は **赤道帯**に置く(equirectangular の面内回転は極付近で歪むため)。
+### In scope (initial)
+- Handwritten characters/text, basic shapes, color, background.
+- Effects: spherical spin (longitude scroll) / in-plane rotation / zoom pulse / fade.
+- Duration / fps / loop-count settings. **Enforcement of the loop invariants** (§2).
+- WYSIWYG preview of equirectangular 2:1 (loop playback to check the seam) + an optional spherical preview.
+- Client-side rendering → video export → upload to the existing `POST /api/playlist/videos`.
 
----
-
-## 3. UX / 編集機能
-
-- **手書きキャンバス**(タッチ/マウス、透過)。**テキスト入力**(フォント選択)。基本図形。
-- レイヤ(初期は1〜数枚)、色/背景/不透明度。
-- **エフェクト**: 球面スピン(経度スクロール)/面内回転(360°整数)/拡大パルス(sin)/フェード。
-- 尺・fps・ループ周回数(整数)・速度。
-- **プレビュー**: 2:1 キャンバス(ループ再生でシーム確認)＋任意で球面プレビュー
-  (既存 `HoloSphere`/three.js を流用可)。
-- **保存**: 「Sphere へ保存」= 動画書き出し→アップロード。タイトル指定。
+### Out of scope (initial; future options)
+- Server-side live generation (rendering parameters in real time). A promotion candidate in P5.
+- Core/firmware changes.
+- A full-feature timeline / keyframe editor (initially about numbers + easing).
 
 ---
 
-## 4. 統合契約（サーバ連携＝最小）
+## 2. Output spec (device conformance = invariants)
 
-- **フォーマット取得**: `GET /api/config/settings`(image width/height/fps 上限)。
-  無ければ軽量 `GET /api/config/image` を追加。
-- **アップロード**: 既存 `POST /api/playlist/videos`(multipart: file + title)。
-  **`kind=pattern` を渡す**ため Form に `kind` を追加(既定 'video')。
-- 結果は `videos` に登録され、Pattern タブに一覧・playlist に挿入可能。
-
----
-
-## 5. 操作アプリ側の変更（Pattern タブ = ランチャー）
-
-- `LibrarySheet` の `SEGMENTS` に `patterns` 追加 → **Playlists / Videos / Patterns** の3セグメント。
-- Patterns セグメント: `kind==='pattern'` の素材を `VideoGrid` 同様に一覧
-  (`PatternGrid`/`PatternCard` は `VideoCard` を流用・軽微改変)。
-  - 各カードに「**Studio で編集**」リンク(`/studio?video={id}`)。
-  - 「**新規作成**」ボタン(`/studio`)。
-- 素材は video なので、Videos セグメントにも出す/出さないはフィルタ選択(既定: 分離表示)。
-- **用語衝突注意**: 既存 `control/PatternPanel.jsx`(LED表示モード SPHERE/OFF)は別物。
-  混乱回避のため LED 側を「Display / LED Mode」へ改称検討(任意)。
+- **Aspect 2:1 (equirectangular) required.** The working resolution may be 2× such as 640×320
+  (the server resizes to 320×160).
+- **fps ≤ 20** (recommended 15–20. The device's decode limit is ~20fps).
+- **Codec**: existing videos are mp4 (H.264). Since the device decodes with `cv2.VideoCapture`,
+  **make mp4/H.264 the first choice** (see the webm risk in §10).
+- **Loop invariants (loopy panorama + loop playback)**:
+  1. **Longitude wrap**: whatever spills past the right edge (+180°) wraps around to the left edge (−180°).
+     Ensured by a horizontal roll of a full-width layer, or by horizontal tile compositing (x, x−W, x+W) when straddling the seam.
+  2. **Time loop**: make the head ↔ tail continuous. **Total movement = an integer multiple of the width W**,
+     **all variable parameters have integer periods within the duration** (in-plane rotation = integer 360° turns, zoom = sin pulse, spin = integer revolutions).
+  3. **Do not duplicate the last frame (t=T)** (t=T ≡ t=0). N frames output phases 0..(N−1)/N.
+- Place text in the **equatorial band** (in-plane rotation in equirectangular distorts near the poles).
 
 ---
 
-## 6. データモデル変更（最小）
+## 3. UX / editing features
 
-- `videos` に **`kind TEXT DEFAULT 'video'`** 追加('video' | 'pattern')。
-  - マイグレーション: `ALTER TABLE videos ADD COLUMN kind TEXT DEFAULT 'video'`(既存行は 'video')。
-- `create_video(..., kind='video')` 追加。`get_videos(kind=None)` に絞り込み。
-- `GET /api/playlist/videos?kind=pattern` でフィルタ。`upload_video` が Form `kind` を受ける。
-
----
-
-## 7. サムネイル修正（別要望・同時対応）
-
-**原因**: `upload_video` がサムネを生成しておらず `thumbnail_path` が常に Null。
-加えてメディアの HTTP 配信経路が無い(`/assets` のみ mount)。`VideoCard` は
-`video.thumbnail_path` を `<img src>` に使うため、常にプレースホルダ表示になる。
-
-**対応**:
-1. `upload_video` で OpenCV により代表フレーム(先頭〜10%位置の非黒フレーム)を抽出 →
-   `data/thumbnails/{uuid}.jpg` 保存 → `thumbnail_path` 格納。1:1 クロップ(カードは 1:1)。
-2. 配信: `GET /api/playlist/videos/{id}/thumbnail`(FileResponse) 追加。
-   API 応答に **`thumbnail_url`**(= 上記URL) を付与。
-3. `VideoCard`: `src = video.thumbnail_url || video.thumbnail_path`(後方互換)。
-4. 既存動画のバックフィル: 初回リクエスト時の遅延生成、または一括スクリプト。
-- パターン動画にも同じサムネが付く(Pattern カードでも表示)。
+- **Handwriting canvas** (touch/mouse, transparent). **Text input** (font selection). Basic shapes.
+- Layers (initially 1 to a few), color/background/opacity.
+- **Effects**: spherical spin (longitude scroll) / in-plane rotation (integer 360°) / zoom pulse (sin) / fade.
+- Duration / fps / loop revolutions (integer) / speed.
+- **Preview**: a 2:1 canvas (loop playback to check the seam) + an optional spherical preview
+  (the existing `HoloSphere`/three.js can be reused).
+- **Save**: "Save to Sphere" = video export → upload. Specify a title.
 
 ---
 
-## 8. 技術選定 / ホスティング
+## 4. Integration contract (server coordination = minimal)
 
-- **Studio**: 別 Vite + React アプリ(three.js 既存流用可)。描画 Canvas2D/WebGL。
-  書き出しは **mp4(H.264)**。手段: `ffmpeg.wasm`(確実) を第一、`MediaRecorder`(webm) は §10 検証後。
-- **配信案**:
-  - **A) 同一 FastAPI の別ルート `/studio`**(`frontend-studio/dist` を StaticFiles で mount)。
-    → 同一オリジンで**アップロードが CORS フリー**、配布一括。**推奨**。
-  - B) 完全独立の静的アプリ(別ポート/ホスト)。開発は速いが CORS 対応要。
-- **注意**: 現在 catch-all `@app.get("/{full_path:path}")` が全て拾うため、
-  `/studio` の mount は **catch-all より前**に置く(既存 `/assets` mount と同様)。
+- **Format retrieval**: `GET /api/config/settings` (image width/height/fps limit).
+  If absent, add a lightweight `GET /api/config/image`.
+- **Upload**: the existing `POST /api/playlist/videos` (multipart: file + title).
+  To pass **`kind=pattern`**, add `kind` to the Form (default 'video').
+- The result is registered in `videos` and can be listed in the Pattern tab and inserted into a playlist.
 
 ---
 
-## 9. 実装計画（フェーズ）
+## 5. Changes on the operation app side (Pattern tab = launcher)
 
-| P | 内容 | 依存 | 規模 |
+- Add `patterns` to `LibrarySheet`'s `SEGMENTS` → three segments: **Playlists / Videos / Patterns**.
+- Patterns segment: list materials with `kind==='pattern'` like `VideoGrid`
+  (`PatternGrid`/`PatternCard` reuse `VideoCard` with minor modifications).
+  - Each card has an "**Edit in Studio**" link (`/studio?video={id}`).
+  - A "**Create new**" button (`/studio`).
+- Since materials are videos, whether to also show them in the Videos segment is a filter choice (default: separated display).
+- **Terminology-collision caution**: the existing `control/PatternPanel.jsx` (LED display mode SPHERE/OFF) is a different thing.
+  To avoid confusion, consider renaming the LED side to "Display / LED Mode" (optional).
+
+---
+
+## 6. Data model changes (minimal)
+
+- Add **`kind TEXT DEFAULT 'video'`** to `videos` ('video' | 'pattern').
+  - Migration: `ALTER TABLE videos ADD COLUMN kind TEXT DEFAULT 'video'` (existing rows become 'video').
+- Add `create_video(..., kind='video')`. Add narrowing to `get_videos(kind=None)`.
+- Filter with `GET /api/playlist/videos?kind=pattern`. `upload_video` receives the Form `kind`.
+
+---
+
+## 7. Thumbnail fix (a separate request, handled at the same time)
+
+**Cause**: `upload_video` does not generate a thumbnail, so `thumbnail_path` is always Null.
+In addition, there is no HTTP distribution path for media (only `/assets` is mounted). Because `VideoCard`
+uses `video.thumbnail_path` for `<img src>`, it always shows a placeholder.
+
+**Response**:
+1. In `upload_video`, extract a representative frame (a non-black frame at the 0–10% position) with OpenCV →
+   save to `data/thumbnails/{uuid}.jpg` → store `thumbnail_path`. 1:1 crop (the card is 1:1).
+2. Distribution: add `GET /api/playlist/videos/{id}/thumbnail` (FileResponse).
+   Attach **`thumbnail_url`** (= the above URL) to the API response.
+3. `VideoCard`: `src = video.thumbnail_url || video.thumbnail_path` (backward compatible).
+4. Backfill for existing videos: lazy generation on first request, or a batch script.
+- Pattern videos also get the same thumbnail (also displayed on the Pattern card).
+
+---
+
+## 8. Technology selection / hosting
+
+- **Studio**: a separate Vite + React app (the existing three.js can be reused). Rendering Canvas2D/WebGL.
+  Export is **mp4 (H.264)**. Method: `ffmpeg.wasm` (reliable) first, `MediaRecorder` (webm) after §10 verification.
+- **Distribution options**:
+  - **A) A separate route `/studio` on the same FastAPI** (mount `frontend-studio/dist` with StaticFiles).
+    → Same origin, so **upload is CORS-free**, single-package distribution. **Recommended.**
+  - B) A fully independent static app (separate port/host). Fast to develop but requires CORS handling.
+- **Caution**: currently the catch-all `@app.get("/{full_path:path}")` picks up everything, so
+  place the `/studio` mount **before the catch-all** (same as the existing `/assets` mount).
+
+---
+
+## 9. Implementation plan (phases)
+
+| P | Content | Depends on | Size |
 |---|------|------|------|
-| **P0** | **サムネイル修正**(upload生成＋配信＋VideoCard) | なし | 小・即効 |
-| P1 | データモデル: `videos.kind` 追加＋API フィルタ＋upload の kind | P0 | 小 |
-| P2 | 操作アプリ Pattern タブ(一覧＋Studio リンク・新規/編集) | P1 | 中 |
-| P3 | Pattern Studio 最小版: 手書き＋テキスト＋球面スピン＋ループ不変条件＋mp4書出＋アップロード。`/studio` 同一オリジン配信 | P1 | 中〜大 |
-| P4 | Studio 拡充: 面内回転/拡大パルス/フェード・色/背景・球面プレビュー・複数レイヤ・尺/fps/周回数 | P3 | 大 |
-| P5 | (将来)サーバ側ライブ生成へ昇格(同一描画ロジック再利用・コア無改修) | P3 | 大 |
+| **P0** | **Thumbnail fix** (upload generation + distribution + VideoCard) | none | small, immediate effect |
+| P1 | Data model: add `videos.kind` + API filter + upload's kind | P0 | small |
+| P2 | Operation app Pattern tab (list + Studio link, new/edit) | P1 | medium |
+| P3 | Pattern Studio minimal version: handwriting + text + spherical spin + loop invariants + mp4 export + upload. Same-origin `/studio` distribution | P1 | medium–large |
+| P4 | Studio expansion: in-plane rotation / zoom pulse / fade, color/background, spherical preview, multiple layers, duration/fps/revolutions | P3 | large |
+| P5 | (future) promote to server-side live generation (reuse the same rendering logic, no core modification) | P3 | large |
 
-- **P0 は独立**して先行実装可(サムネ表示は今すぐ効く価値)。
-- Studio(P3) は操作アプリと疎結合(接点はアップロード契約のみ)なので並行開発可。
-
----
-
-## 10. リスク・要検証
-
-1. **コーデック互換(最重要)**: デバイス配信は `cv2.VideoCapture` で開く。
-   **webm(VP8/9) が OpenCV ビルドでデコードできるか未確認**。ALLOWED_EXT に webm はあるが、
-   実際に再生できるかは要検証。**不可なら Studio は mp4(H.264/ffmpeg.wasm) を出力**、
-   または upload 時にサーバ側で正規化トランスコード(汎用アップロードにも有効・スコープ増)。
-2. **equirectangular 面内回転の極歪み** → 文字は赤道帯運用をUIでガイド。
-3. **320×160 / ≤20fps の見え方** は実機確認(細い文字・高速回転の破綻)。
-4. **用語衝突**: 既存 `PatternPanel`(LEDモード) と Pattern タブ/Studio。改称で整理(任意)。
-5. **ループ端の連続性**: 総移動=W整数倍・整数周期・末尾非重複を Studio 側で強制(自動スナップ)。
+- **P0 is independent** and can be implemented ahead (thumbnail display has value that takes effect right now).
+- The Studio (P3) is loosely coupled to the operation app (the only contact point is the upload contract), so it can be developed in parallel.
 
 ---
 
-## 11. 未解決の論点（次回協議）
+## 10. Risks / to be verified
 
-- Studio の書き出し方式: `ffmpeg.wasm`(mp4確実・重い) か `MediaRecorder`(webm軽い・要検証)。
-- Studio の配信: 同一オリジン `/studio`(推奨) か 独立アプリ。
-- `videos.kind` 分離表示か、Videos に統合表示＋バッジか。
-- サムネ配信: 専用エンドポイント か `data/` 静的 mount。
-- 既存 LED `PatternPanel` の改称可否。
+1. **Codec compatibility (most important)**: device distribution opens with `cv2.VideoCapture`.
+   **Whether webm (VP8/9) can be decoded by the OpenCV build is unconfirmed.** webm is in ALLOWED_EXT, but
+   whether it actually plays needs verification. **If not, have the Studio output mp4 (H.264/ffmpeg.wasm)**,
+   or normalize-transcode on the server side at upload time (also useful for general uploads, scope increase).
+2. **Pole distortion of equirectangular in-plane rotation** → guide text to equatorial-band operation in the UI.
+3. **The look of 320×160 / ≤20fps** needs real-device checking (breakdown of thin text / fast rotation).
+4. **Terminology collision**: the existing `PatternPanel` (LED mode) and the Pattern tab/Studio. Sort it out with a rename (optional).
+5. **Loop-end continuity**: enforce total movement = integer multiple of W, integer periods, non-duplicated tail on the Studio side (auto-snap).
+
+---
+
+## 11. Open issues (next discussion)
+
+- Studio export method: `ffmpeg.wasm` (mp4 reliable, heavy) or `MediaRecorder` (webm light, needs verification).
+- Studio distribution: same-origin `/studio` (recommended) or an independent app.
+- `videos.kind` separated display, or integrated display in Videos + a badge.
+- Thumbnail distribution: a dedicated endpoint or a `data/` static mount.
+- Whether the existing LED `PatternPanel` can be renamed.
+</content>

@@ -1,30 +1,32 @@
-# TimeSync ホスト単体テスト
+> **English** · [日本語](README.ja.md)
 
-実機・MQTT broker なしで `TimeSync` の時刻計算ロジックを検証するテスト。
-`millis()` をシム (`shim/Arduino.h`) で差し替え、実際の `core/src/TimeSync.cpp`
-をそのままホスト (g++) でコンパイル・リンクして実行する。
+# TimeSync Host Unit Test
 
-PlatformIO の `test/` ではなく `tools/` 配下に置いているのは、`pio test` が
-ターゲット (ESP32) 向けにビルドしようとして干渉するのを避けるため。
+A test that verifies the time-calculation logic of `TimeSync` without a physical device or an MQTT broker.
+It replaces `millis()` with a shim (`shim/Arduino.h`) and compiles, links, and runs the actual
+`core/src/TimeSync.cpp` as-is on the host (g++).
 
-## 実行
+It is placed under `tools/` rather than PlatformIO's `test/` to avoid interference from `pio test`,
+which would try to build it for the target (ESP32).
+
+## Running
 
 ```sh
 cd core
-pio run              # 一度ビルドして ArduinoJson を .pio/libdeps に用意 (初回のみ)
+pio run              # Build once to place ArduinoJson into .pio/libdeps (first time only)
 bash tools/timesync_test/run.sh
 ```
 
-全チェックが `[ok]` で `0 failures` なら合格 (終了コード 0)。
+It passes if all checks are `[ok]` with `0 failures` (exit code 0).
 
-## 検証項目
+## Verification Items
 
-1. 初回同期とクロック補間 (`syncedNow()` が経過に追従)
-2. EMA 平滑化 (小ジッタは 1/4 だけ反映)
-3. 単発外れ値の棄却 (WiFi ジッタスパイクを弾く)
-4. 連続外れ値での追従再同期 (サーバー再起動等の実クロック飛びに追従)
-5. **millis() 32bit ラップ跨ぎの吸収** (最重要: `syncedNow()` が連続し、
-   ラップ後ビーコンが外れ値誤判定されない)
-6. 不正ペイロード (非JSON / `epoch_ms` 欠落) の拒否
+1. Initial synchronization and clock interpolation (`syncedNow()` follows elapsed time)
+2. EMA smoothing (small jitter is applied at only 1/4)
+3. Rejection of single outliers (rejects WiFi jitter spikes)
+4. Re-synchronization following consecutive outliers (follows real clock jumps such as a server restart)
+5. **Absorbing the millis() 32-bit wrap-around** (most important: `syncedNow()` stays continuous and
+   post-wrap beacons are not misjudged as outliers)
+6. Rejection of invalid payloads (non-JSON / missing `epoch_ms`)
 
-設計: `core/doc/time_sync_show.md`
+Design: `core/doc/time_sync_show.md`

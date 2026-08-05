@@ -1,27 +1,29 @@
-# Isolation Sphere Server (MiniPC) 要求仕様書
+> **English** · [日本語](requirements_specification.ja.md)
 
-## 変更履歴
-| バージョン | 日付 | 変更内容 | 承認者 |
+# Isolation Sphere Server (MiniPC) Requirements Specification
+
+## Change History
+| Version | Date | Change description | Approver |
 |-----------|------|----------|--------|
-| 3.0.0 | 2025/12/02 | ROS2削除・MQTT+UDP+WebSocket統一 | - |
-| 2.5.0 | 2025/11/21 | UI詳細確定 (Arwes + Neon Dials) | - |
-| 2.4.0 | 2025/11/21 | UIデザイン方針確定 (Arwes + 3D Sphere) | - |
-| 2.3.0 | 2025/11/21 | 技術スタック確定 (FastAPI, React, Python Joystick) | - |
-| 2.2.0 | 2025/11/21 | Joystick Daemon追加・UI情報詳細化 | - |
-| 2.1.0 | 2025/11/21 | 画像データのJPEG圧縮・通信方式見直し | - |
-| 2.0.0 | 2025/11/21 | MiniPC移行に伴う全面改訂 | - |
+| 3.0.0 | 2025/12/02 | Removed ROS2, unified on MQTT+UDP+WebSocket | - |
+| 2.5.0 | 2025/11/21 | UI details finalized (Arwes + Neon Dials) | - |
+| 2.4.0 | 2025/11/21 | UI design direction finalized (Arwes + 3D Sphere) | - |
+| 2.3.0 | 2025/11/21 | Technology stack finalized (FastAPI, React, Python Joystick) | - |
+| 2.2.0 | 2025/11/21 | Added Joystick Daemon, detailed UI information | - |
+| 2.1.0 | 2025/11/21 | JPEG compression of image data, communication method review | - |
+| 2.0.0 | 2025/11/21 | Full revision for MiniPC migration | - |
 
-## 1. プロジェクト概要
+## 1. Project Overview
 
-### 1.1 目的
-Isolation Sphereの制御機能をUbuntu MiniPC（以下「Server」）に集約し、ESP32との通信を**MQTT (制御・状態) + UDP (映像)** に統一する。
-WebUIと物理ジョイスティック（オプション）の双方から、統一されたインターフェースでシステムを制御可能にする。
+### 1.1 Purpose
+Consolidate the control functions of the Isolation Sphere onto an Ubuntu MiniPC (hereafter "Server"), and unify communication with ESP32 on **MQTT (control/status) + UDP (video)**.
+Enable control of the system through a unified interface from both the WebUI and a physical joystick (optional).
 
-### 1.2 システム構成図
+### 1.2 System Architecture Diagram
 ```mermaid
 graph TD
     subgraph "Server (MiniPC / Ubuntu 22.04)"
-        WLAN0[内蔵WiFi (wlan0)] -- "WebUI Access" --> Router[外部ルーター]
+        WLAN0[Built-in WiFi (wlan0)] -- "WebUI Access" --> Router[External Router]
         USBWiFi[USB WiFi (wlx...)] -- "AP Mode (192.168.100.1)" --> ESP32Network
         
         subgraph "Software Stack"
@@ -47,20 +49,20 @@ graph TD
     end
 ```
 
-### 1.3 開発・運用環境
+### 1.3 Development/Operation Environment
 - **Hardware**: MiniPC (Ubuntu 22.04 LTS)
 - **Network**:
-    - `wlan0`: インターネット/LAN接続用 (DHCP Client)
-    - `USB WiFi`: 専用AP構築用 (Static IP: 192.168.100.1)
+    - `wlan0`: for Internet/LAN connection (DHCP Client)
+    - `USB WiFi`: for building the dedicated AP (Static IP: 192.168.100.1)
 - **Software**:
     - **OS**: Ubuntu 22.04 LTS
     - **Middleware**: ROS2 Humble, micro-ROS Agent
-    - **Container**: Docker (推奨: micro-ROS Agent環境の分離)
+    - **Container**: Docker (recommended: isolation of the micro-ROS Agent environment)
 
-### 1.4 技術スタック (確定)
+### 1.4 Technology Stack (Finalized)
 - **Server Backend**:
     -   **Language**: Python 3.10+
-    -   **Framework**: FastAPI (非同期処理、WebSocket対応)
+    -   **Framework**: FastAPI (asynchronous processing, WebSocket support)
     -   **ROS2 Interface**: `rclpy`
 - **Server Frontend**:
     -   **Framework**: React (Vite)
@@ -68,94 +70,94 @@ graph TD
     -   **3D Graphics**: **React Three Fiber** (3D Sphere Control)
     -   **Components**: `react-knob-headless` (Custom Neon Dials)
     -   **Style**: CSS Modules / Styled Components
-    -   **Communication**: WebSocket (リアルタイム状態同期)
+    -   **Communication**: WebSocket (real-time status synchronization)
 - **Joystick Daemon**:
     -   **Language**: Python 3.10+
-    -   **Library**: `evdev` (入力制御), `rclpy` (ROS2通信)
+    -   **Library**: `evdev` (input control), `rclpy` (ROS2 communication)
 
-## 2. 機能要件
+## 2. Functional Requirements
 
-### 2.1 ネットワーク機能 (Dual WiFi)
-Serverは2つのネットワークインターフェースを管理する。
+### 2.1 Network Feature (Dual WiFi)
+The Server manages two network interfaces.
 
-#### 2.1.1 外部接続 (wlan0)
-- **役割**: ユーザーインターフェース（WebUI）へのアクセス提供。
-- **構成**: 既存の家庭内/スタジオ内ルーターに接続。
-- **サービス**: Webサーバー (Port 8000/9000), SSH。
+#### 2.1.1 External Connection (wlan0)
+- **Role**: provide access to the user interface (WebUI).
+- **Configuration**: connect to an existing home/studio router.
+- **Services**: web server (Port 8000/9000), SSH.
 
-#### 2.1.2 デバイス接続 (USB WiFi)
-- **役割**: Isolation Sphereデバイス（ESP32）との専用通信。
-- **構成**: アクセスポイント (AP) モード。
-- **設定**:
-    - **SSID**: `IsolationSphere-Direct` (config.json準拠)
+#### 2.1.2 Device Connection (USB WiFi)
+- **Role**: dedicated communication with the Isolation Sphere device (ESP32).
+- **Configuration**: access point (AP) mode.
+- **Settings**:
+    - **SSID**: `IsolationSphere-Direct` (per config.json)
     - **IP**: `192.168.100.1` (Gateway/Server)
     - **Subnet**: `192.168.100.0/24`
-    - **DHCP**: `192.168.100.100` ~ (ESP32用)
+    - **DHCP**: `192.168.100.100` ~ (for ESP32)
 
-### 2.2 通信システム (All micro-ROS)
-ESP32との通信はすべて **micro-ROS (XRCE-DDS)** で統一する。
+### 2.2 Communication System (All micro-ROS)
+All communication with ESP32 is unified on **micro-ROS (XRCE-DDS)**.
 
-#### 2.2.1 共有データ・Topic設計
-以下の情報をROS2 Topic経由で共有し、WebUIとJoystick Daemonの双方から制御可能にする。
+#### 2.2.1 Shared Data / Topic Design
+The following information is shared via ROS2 Topics, enabling control from both the WebUI and the Joystick Daemon.
 
-1.  **フレーム画像 (JPEG圧縮)**
+1.  **Frame image (JPEG compression)**
     -   **Topic**: `/isolation_sphere/image/compressed`
     -   **Type**: `sensor_msgs/CompressedImage`
     -   **Pub**: Server (Video Processor)
     -   **Sub**: ESP32
-    -   **Spec**: 320x160, 10fps, JPEG Quality調整可
+    -   **Spec**: 320x160, 10fps, JPEG Quality adjustable
 
-2.  **UI情報 (制御・状態)**
+2.  **UI information (control/status)**
     -   **Topic**: `/isolation_sphere/ui/control` (Pub: WebUI/JoyDaemon, Sub: Server/ESP32)
     -   **Topic**: `/isolation_sphere/ui/status` (Pub: Server/ESP32, Sub: WebUI/JoyDaemon)
-    -   **内容詳細**:
-        -   **動画機能**: 再生(Play), 停止(Stop), 早送り(FW), 巻き戻し(REV), シーク
-        -   **プレイリスト**: 作成, 編集, 選択, ループ設定
-        -   **System**: Config更新, 接続確認(Ping/Health), 再起動
-        -   **Sphere管理**:
-            -   IMU状態 (Quaternion)
-            -   オフセット調整 (Calibration)
-            -   色・明るさ (Color/Brightness)
-            -   パターン投影 (Test Pattern)
+    -   **Content details**:
+        -   **Video functions**: Play, Stop, fast-forward (FW), rewind (REV), seek
+        -   **Playlist**: create, edit, select, loop settings
+        -   **System**: Config update, connection check (Ping/Health), reboot
+        -   **Sphere management**:
+            -   IMU status (Quaternion)
+            -   offset adjustment (Calibration)
+            -   color/brightness (Color/Brightness)
+            -   pattern projection (Test Pattern)
 
-### 2.3 サーバー機能構成
+### 2.3 Server Feature Architecture
 
 #### 2.3.1 WebUI (FastAPI + React)
 - **Backend (FastAPI)**:
-    -   REST API: 動画管理、設定管理。
-    -   WebSocket: フロントエンドへのリアルタイム状態プッシュ（ROS2 Topicの中継）。
-    -   Static Files: Reactビルド成果物の配信。
+    -   REST API: video management, configuration management.
+    -   WebSocket: real-time status push to the frontend (relaying ROS2 Topics).
+    -   Static Files: serving React build artifacts.
 - **Frontend (React)**:
-    -   **Design Theme**: **Arwes Cyberpunk** (Sci-Fi Hologram)。
-    -   **3D Interface**: `react-three-fiber` を使用した3D球体コントローラー。
-        -   **Virtual Trackball**: スマホ画面上で球体を転がすような直感的な操作。
+    -   **Design Theme**: **Arwes Cyberpunk** (Sci-Fi Hologram).
+    -   **3D Interface**: 3D sphere controller using `react-three-fiber`.
+        -   **Virtual Trackball**: intuitive operation like rolling the sphere on the smartphone screen.
     -   **Custom UI Elements**:
-        -   **Neon Dials**: `react-knob-headless` を使用し、発光するリング状のダイヤルを実装。
-        -   **Sound Effects**: 操作時のSF効果音 (Arwes標準機能)。
-    -   **Real-time Sync**: WebSocket経由でJoystick操作やIMU状態を即座に反映。
+        -   **Neon Dials**: implemented using `react-knob-headless` as glowing ring-shaped dials.
+        -   **Sound Effects**: sci-fi sound effects on operation (Arwes standard feature).
+    -   **Real-time Sync**: immediately reflect joystick operations and IMU status via WebSocket.
 
 #### 2.3.2 Joystick Daemon (Python)
-- **役割**: 物理コントローラーによる直感的な操作の提供。
-- **構成**: 独立したデーモンプロセスとして動作。
-- **機能**:
-    -   物理ジョイスティック/ダイアル入力の監視 (`evdev`)。
-    -   入力イベントのROS2 Topic (`/isolation_sphere/ui/control`) への変換・Publish。
-    -   状態Topic (`/isolation_sphere/ui/status`) のSubscribeによるLED/Hapticフィードバック（あれば）。
+- **Role**: provide intuitive operation via a physical controller.
+- **Configuration**: runs as an independent daemon process.
+- **Features**:
+    -   Monitoring of physical joystick/dial input (`evdev`).
+    -   Conversion and Publish of input events to a ROS2 Topic (`/isolation_sphere/ui/control`).
+    -   LED/Haptic feedback (if any) via Subscribe to the status Topic (`/isolation_sphere/ui/status`).
 
-#### 2.3.3 動画処理・配信
-- **機能**: 動画ファイルのデコード、リサイズ(320x160)、JPEG圧縮、ROS2 Publish。
-- **性能**: 10fps安定配信。帯域適応型の品質調整。
+#### 2.3.3 Video Processing/Distribution
+- **Features**: decoding of video files, resize (320x160), JPEG compression, ROS2 Publish.
+- **Performance**: stable distribution at 10fps. Bandwidth-adaptive quality adjustment.
 
-## 3. 非機能要件
-- **安定性**: 24時間連続稼働。micro-ROS Agentの自動再接続機能。
-- **遅延**: 制御コマンド < 50ms。画像ストリーム < 100ms。
-- **並行性**: WebUIとJoystickからの同時操作の競合解決（Last-Winまたは排他制御）。
+## 3. Non-Functional Requirements
+- **Stability**: 24-hour continuous operation. Automatic reconnection feature of the micro-ROS Agent.
+- **Latency**: control commands < 50ms. Image stream < 100ms.
+- **Concurrency**: conflict resolution for simultaneous operations from WebUI and Joystick (Last-Win or exclusive control).
 
-## 4. 開発ロードマップ
-1.  **Server構築**: Ubuntu設定、Dual WiFi化 (`hostapd`, `netplan`).
-2.  **micro-ROS環境**: DockerでのAgent立ち上げ、ESP32とのPing疎通。
-3.  **基本通信**: IMUデータのROS2 Topic化。
-4.  **画像転送実装**: `sensor_msgs/CompressedImage` を用いたJPEG配信の実装とパフォーマンステスト。
-5.  **Joystick Daemon実装**: 入力デバイスの読み取りとROS2連携。
-6.  **WebUI統合**: FastAPIとROS2ノードの連携、Reactフロントエンド実装 (Arwes + R3F + Dials)。
- (Arwes + R3F)。
+## 4. Development Roadmap
+1.  **Server setup**: Ubuntu configuration, Dual WiFi setup (`hostapd`, `netplan`).
+2.  **micro-ROS environment**: bringing up the Agent with Docker, Ping connectivity with ESP32.
+3.  **Basic communication**: converting IMU data to a ROS2 Topic.
+4.  **Image transfer implementation**: implementation of JPEG distribution using `sensor_msgs/CompressedImage` and performance testing.
+5.  **Joystick Daemon implementation**: reading input devices and ROS2 integration.
+6.  **WebUI integration**: integration of FastAPI and ROS2 node, React frontend implementation (Arwes + R3F + Dials).
+ (Arwes + R3F).

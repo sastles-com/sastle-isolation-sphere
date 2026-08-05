@@ -1,31 +1,31 @@
-> **English** · [日本語](implementation_spec.ja.md)
+> [English](implementation_spec.md) · **日本語**
 
-# Implementation Specification
+# 実装仕様書 (Implementation Specification)
 
-Last updated: 2025-12-02
+最終更新: 2025-12-02
 
-## 1. System Overview
+## 1. システム概要
 
-Isolation Sphere is a real-time orientation visualization system consisting of a spherical LED display controlled by an ESP32, a Python backend, and a web frontend.
+Isolation Sphereは、ESP32で制御される球体LEDディスプレイと、Pythonバックエンド、Webフロントエンドで構成されるリアルタイム姿勢可視化システムです。
 
-### Key Features
-1. Orientation detection using an IMU sensor (BNO055)
-2. Real-time data transmission over MQTT
-3. 3D sphere visualization in a web browser
-4. Bidirectional communication over WebSocket
-5. Configuration and control via a REST API
+### 主要機能
+1. IMUセンサー（BNO055）による姿勢検知
+2. MQTT経由でのリアルタイムデータ送信
+3. Webブラウザ上での3D球体可視化
+4. WebSocketによる双方向通信
+5. REST APIによる設定・制御
 
-## 2. ESP32 Implementation Details
+## 2. ESP32 実装詳細
 
-### 2.1 Hardware
+### 2.1 ハードウェア
 - **MCU**: ESP32-S3 (M5Atom S3R)
 - **RAM**: 8MB PSRAM
-- **Flash**: LittleFS (configuration and image storage)
-- **IMU**: BNO055 (I2C connection)
-- **LED**: WS2812B x 800 units (4 strips)
+- **Flash**: LittleFS (設定・画像保存)
+- **IMU**: BNO055 (I2C接続)
+- **LED**: WS2812B x 800個 (4ストリップ)
 - **Display**: 128x128 LCD
 
-### 2.2 Main Components
+### 2.2 主要コンポーネント
 
 #### ConfigManager
 ```cpp
@@ -44,10 +44,10 @@ private:
 };
 ```
 
-**Implementation notes:**
-- JSON parsing with ArduinoJson
-- Loading config.json from LittleFS
-- Fallback to default values
+**実装ポイント:**
+- ArduinoJsonでJSON解析
+- LittleFSからconfig.json読み込み
+- デフォルト値のフォールバック
 
 #### IMUManager
 ```cpp
@@ -62,10 +62,10 @@ private:
 };
 ```
 
-**Implementation notes:**
-- Acquire a Quaternion from the BNO055 in absolute orientation mode
-- Check the calibration state
-- Error handling
+**実装ポイント:**
+- BNO055から絶対方位モードでQuaternion取得
+- キャリブレーション状態の確認
+- エラーハンドリング
 
 #### NetworkManager (MQTT)
 ```cpp
@@ -84,12 +84,12 @@ void loop() {
 }
 ```
 
-**Transmission format:**
+**送信フォーマット:**
 ```json
 {"w":0.9999,"x":0.0001,"y":0.0002,"z":-0.0003}
 ```
 
-### 2.3 Configuration File (config.json)
+### 2.3 設定ファイル (config.json)
 
 ```json
 {
@@ -115,14 +115,14 @@ void loop() {
 }
 ```
 
-## 3. Python Server Implementation Details
+## 3. Python Server 実装詳細
 
 ### 3.1 MQTTService
 
 ```python
 class MQTTService:
     def _load_broker_config(self):
-        """Load the broker address from config.json"""
+        """config.jsonからブローカーアドレスを読み込み"""
         config_paths = [
             "../core/data/config.json",
             "data/config.json",
@@ -137,16 +137,16 @@ class MQTTService:
         return "localhost"
     
     def _handle_imu_data(self, payload):
-        """Handle IMU data (supports the ESP32 format)"""
+        """IMUデータ処理（ESP32フォーマット対応）"""
         if "w" in payload and "x" in payload:
-            # ESP32 format: {"w":...,"x":...}
+            # ESP32フォーマット: {"w":...,"x":...}
             quat = payload
         elif "quaternion" in payload:
-            # Alternative format: {"quaternion":{...}}
+            # 代替フォーマット: {"quaternion":{...}}
             quat = payload["quaternion"]
         
-        # Since the MQTT callback runs on a separate thread,
-        # process synchronously with asyncio.new_event_loop()
+        # MQTTコールバックは別スレッドで実行されるため
+        # asyncio.new_event_loop()で同期的に処理
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
             self.state_manager.update_state("imu", {
@@ -159,13 +159,13 @@ class MQTTService:
         loop.close()
 ```
 
-**Implementation challenges and solutions:**
+**実装の課題と解決策:**
 
-**Challenge 1**: The MQTT callback runs on a separate thread  
-**Solution**: Create a new event loop with `asyncio.new_event_loop()`
+**課題1**: MQTTコールバックは別スレッドで実行される  
+**解決**: `asyncio.new_event_loop()`で新しいイベントループを作成
 
-**Challenge 2**: The ESP32 sends `{w,x,y,z}` directly  
-**Solution**: Support both formats
+**課題2**: ESP32は直接`{w,x,y,z}`を送信  
+**解決**: 両方のフォーマットに対応
 
 ### 3.2 StateManager
 
@@ -198,7 +198,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     state_manager.add_observer(websocket)
     
-    # Send the initial state
+    # 初期状態を送信
     await websocket.send_json({
         "type": "STATE_UPDATE",
         "payload": state_manager.get_state()
@@ -207,12 +207,12 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            # Handle commands from the client
+            # クライアントからのコマンド処理
     except WebSocketDisconnect:
         state_manager.remove_observer(websocket)
 ```
 
-### 3.4 API Router Structure
+### 3.4 API Router構成
 
 ```python
 # main.py
@@ -224,9 +224,9 @@ api_router.include_router(config.router, prefix="/config")    # /api/config
 api_router.include_router(playlist.router, prefix="/playlist") # /api/playlist
 ```
 
-**Important**: The WebSocket is at `/ws` with no prefix, while the REST API uses the `/api` prefix
+**重要**: WebSocketは `/ws` でプレフィックスなし、REST APIは `/api` プレフィックス付き
 
-## 4. Web Frontend Implementation Details
+## 4. Web Frontend 実装詳細
 
 ### 4.1 WebSocketContext
 
@@ -248,10 +248,10 @@ const WebSocketProvider = ({ children }) => {
 };
 ```
 
-**Implementation notes:**
-- Obtain the port dynamically with `window.location.port`
-- Automatic reconnection (after 3 seconds)
-- State is held in `lastMessage`
+**実装ポイント:**
+- `window.location.port`で動的にポート取得
+- 自動再接続（3秒後）
+- 状態管理は`lastMessage`で保持
 
 ### 4.2 HoloSphere (Three.js)
 
@@ -264,7 +264,7 @@ const IMUControlledSphere = () => {
     useEffect(() => {
         if (lastMessage?.type === 'STATE_UPDATE' && lastMessage.payload?.imu) {
             const { w, x, y, z } = lastMessage.payload.imu;
-            // Three.js uses x,y,z,w order
+            // Three.jsはx,y,z,w順
             quaternionRef.current.set(x, y, z, w);
         }
     }, [lastMessage]);
@@ -288,15 +288,15 @@ const IMUControlledSphere = () => {
 };
 ```
 
-**Implementation notes:**
-- Receive the IMU state from the WebSocket
-- Apply it to the sphere every frame with `useFrame`
-- Three.js Quaternion order: `(x, y, z, w)` (the ESP32 uses `(w, x, y, z)`)
+**実装ポイント:**
+- WebSocketからIMU状態を受信
+- `useFrame`で毎フレーム球体に適用
+- Three.js Quaternion順序: `(x, y, z, w)` ※ESP32は`(w, x, y, z)`
 
-### 4.3 API Calls
+### 4.3 API呼び出し
 
 ```javascript
-// Use a relative path (dynamically adapts to host and port)
+// 相対パス使用（動的にホスト・ポート対応）
 const API_URL = '/api/playlist/playlists';
 
 const fetchPlaylists = async () => {
@@ -306,9 +306,9 @@ const fetchPlaylists = async () => {
 };
 ```
 
-**Important**: Do not use hardcoded URLs (such as `http://localhost:8000`)
+**重要**: ハードコードされたURL（`http://localhost:8000`）は使用しない
 
-## 5. Data Format Specification
+## 5. データフォーマット仕様
 
 ### 5.1 MQTT Payload
 
@@ -385,14 +385,14 @@ const fetchPlaylists = async () => {
 
 **Supported actions**: `"play"`, `"pause"`, `"stop"`, `"toggle"`
 
-## 6. Build and Deploy
+## 6. ビルド・デプロイ
 
 ### 6.1 ESP32
 ```bash
 cd core
-pio run -e atoms3r_bno055          # Build
-pio run -e atoms3r_bno055 -t upload # Upload
-pio run -e atoms3r_bno055 -t uploadfs # Write LittleFS
+pio run -e atoms3r_bno055          # ビルド
+pio run -e atoms3r_bno055 -t upload # アップロード
+pio run -e atoms3r_bno055 -t uploadfs # LittleFS書き込み
 ```
 
 ### 6.2 Python Server
@@ -405,35 +405,35 @@ python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9000
 ```bash
 cd server/frontend
 npm install
-npm run build  # Output to dist/
+npm run build  # dist/ に出力
 ```
 
-## 7. Troubleshooting
+## 7. トラブルシューティング
 
-### MQTT Connection Error
-**Symptom**: `MQTT client not available`  
-**Cause**: paho-mqtt is not installed  
-**Solution**: `pip install paho-mqtt` (using system-site-packages)
+### MQTT接続エラー
+**症状**: `MQTT client not available`  
+**原因**: paho-mqtt未インストール  
+**解決**: `pip install paho-mqtt` (system-site-packages使用)
 
-### WebSocket Connection Error
-**Symptom**: Attempts to connect to port 8000  
-**Cause**: Browser cache  
-**Solution**: Full reload with Ctrl+Shift+R
+### WebSocket接続エラー
+**症状**: ポート8000に接続しようとする  
+**原因**: ブラウザキャッシュ  
+**解決**: Ctrl+Shift+R で完全リロード
 
-### The Sphere Does Not Move
-**Symptom**: IMU data is being received but the sphere stays still  
-**Cause**: asyncio event loop error  
-**Solution**: Use `asyncio.new_event_loop()` (already implemented)
+### 球体が動かない
+**症状**: IMUデータ受信しているが球体が静止  
+**原因**: asyncio event loop エラー  
+**解決**: `asyncio.new_event_loop()` 使用（実装済み）
 
-## 8. Performance
+## 8. パフォーマンス
 
-- **IMU transmission rate**: 10Hz (100ms interval)
-- **WebSocket latency**: <50ms (on a LAN)
-- **3D rendering**: 60FPS (Three.js)
-- **MQTT QoS**: 0 (prioritize the latest data)
+- **IMU送信頻度**: 10Hz (100ms間隔)
+- **WebSocket遅延**: <50ms (LAN環境)
+- **3D描画**: 60FPS (Three.js)
+- **MQTT QoS**: 0 (最新データ優先)
 
-## 9. Security Considerations
+## 9. セキュリティ考慮事項
 
-- The WiFi password is stored in plaintext in config.json (improvement planned)
-- No MQTT authentication (assumes a local network)
-- CORS: allow all in the development environment (`allow_origins=["*"]`)
+- WiFiパスワードはconfig.jsonに平文保存（改善予定）
+- MQTT認証なし（ローカルネットワーク前提）
+- CORS: 開発環境では全許可（`allow_origins=["*"]`）

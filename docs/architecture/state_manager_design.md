@@ -1,35 +1,37 @@
-# StateManager アーキテクチャ設計書
+> **English** · [日本語](state_manager_design.ja.md)
 
-最終更新: 2025-12-02
+# StateManager Architecture Design Document
 
-## 概要
+Last updated: 2025-12-02
 
-StateManagerは、Isolation Sphereシステムにおける**唯一の状態管理者**として機能します。
+## Overview
 
-**重要**: 新しいデーモンではなく、**既存のFastAPIサーバー内のシングルトンサービス**として実装されます。
+StateManager functions as the **sole state manager** in the Isolation Sphere system.
+
+**Important**: It is implemented not as a new daemon but as a **singleton service within the existing FastAPI server**.
 
 ---
 
-## システム構成
+## System Architecture
 
-### デーモン構成（変更なし）
+### Daemon Composition (Unchanged)
 
 ```
-システム全体:
-├── FastAPI Server (既存) :9000
+Entire system:
+├── FastAPI Server (existing) :9000
 │   ├── HTTP API
 │   ├── WebSocket (/ws)
-│   ├── StateManager ← ここに統合（新規デーモンなし）
+│   ├── StateManager ← integrated here (no new daemon)
 │   └── MQTTService
 ├── MQTT Broker (mosquitto) :1883
-└── Frontend (静的ファイル配信)
+└── Frontend (static file serving)
 ```
 
-### プロセス構成
+### Process Composition
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ FastAPI Server (uvicorn) - 単一プロセス                  │
+│ FastAPI Server (uvicorn) - single process               │
 │                                                         │
 │  main.py                                                │
 │    ├── StateManager (Singleton)                         │
@@ -41,52 +43,52 @@ StateManagerは、Isolation Sphereシステムにおける**唯一の状態管�
 
 ---
 
-## 責務
+## Responsibilities
 
-| コンポーネント | 責務 | プロセス |
+| Component | Responsibility | Process |
 |---------------|------|---------|
-| **FastAPI Server** | HTTP API, WebSocket, 起動管理 | uvicorn |
-| **StateManager** | 状態管理, コマンド処理, ステート配信 | FastAPI内 |
-| **MQTTService** | MQTT通信, コマンド購読 | FastAPI内 |
-| **MQTT Broker** | メッセージング | mosquitto |
+| **FastAPI Server** | HTTP API, WebSocket, startup management | uvicorn |
+| **StateManager** | State management, command processing, state distribution | Within FastAPI |
+| **MQTTService** | MQTT communication, command subscription | Within FastAPI |
+| **MQTT Broker** | Messaging | mosquitto |
 
 ---
 
-## シーケンス図
+## Sequence Diagram
 
-詳細なシーケンス図は `docs/mqtt_ui_control.md` を参照。
+See `docs/mqtt_ui_control.md` for the detailed sequence diagram.
 
-### 要約: データフロー
+### Summary: Data Flow
 
 ```
-UI → Command → MQTT → StateManager → State → MQTT/WebSocket → 全員同期
+UI → Command → MQTT → StateManager → State → MQTT/WebSocket → everyone synchronized
 ```
 
 ---
 
-## 実装チェックリスト
+## Implementation Checklist
 
-### Phase 1: StateManager統合
+### Phase 1: StateManager Integration
 
-- [ ] StateManager拡張 (`app/services/state_manager.py`)
-- [ ] MQTTService拡張 (`app/services/mqtt_service.py`)
-- [ ] main.py修正（起動時の連携）
-- [ ] WebSocketエンドポイント修正
+- [ ] Extend StateManager (`app/services/state_manager.py`)
+- [ ] Extend MQTTService (`app/services/mqtt_service.py`)
+- [ ] Modify main.py (coordination at startup)
+- [ ] Modify WebSocket endpoints
 
-### Phase 2: ESP32実装
+### Phase 2: ESP32 Implementation
 
-- [ ] sphere/all/state 購読
-- [ ] LED状態反映
+- [ ] Subscribe to sphere/all/state
+- [ ] Reflect LED state
 
-### Phase 3: Web UI実装
+### Phase 3: Web UI Implementation
 
-- [ ] State購読・UI更新
-- [ ] コマンド送信
+- [ ] Subscribe to state and update UI
+- [ ] Send commands
 
 ---
 
-## まとめ
+## Summary
 
-- **新しいデーモンは不要** ✅
-- **既存のFastAPIサーバー内で完結** ✅
-- **インフラ変更なし** ✅
+- **No new daemon needed** ✅
+- **Self-contained within the existing FastAPI server** ✅
+- **No infrastructure changes** ✅

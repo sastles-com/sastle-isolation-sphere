@@ -101,7 +101,7 @@ sastle-isolation-sphere/
 ### 3.1 サーバー (Python)
 
 ```bash
-cd ~/work/.../server          # 本番では /home/yakatano/work/m5atoms3r/repo/server
+cd ~/work/.../server          # 本番では ~/work/m5atoms3r/repo/server
 uv sync                        # pyproject.toml から .venv を構築
 # 依存: fastapi, uvicorn[standard], websockets, paho-mqtt>=2.0, pydantic v2, evdev(Linux)
 ```

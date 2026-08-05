@@ -1,10 +1,10 @@
-> **English** · [日本語](playlist_architecture.ja.md)
+> [English](playlist_architecture.md) · **日本語**
 
-# Playlist System - Architecture Details
+# プレイリストシステム - アーキテクチャ詳細
 
-Last updated: 2025-12-02
+最終更新: 2025-12-02
 
-## 1. Overall Data Flow
+## 1. データフロー全体像
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -69,15 +69,15 @@ Last updated: 2025-12-02
                               └───────────────────────────┘
 ```
 
-## 2. Component Details
+## 2. コンポーネント詳細
 
 ### 2.1 VideoService
 
-**Responsibility**: Video upload, conversion, metadata management
+**責務**: 動画アップロード、変換、メタデータ管理
 
 ```python
 class VideoService:
-    """Video management service"""
+    """動画管理サービス"""
     
     def __init__(self, db: Database, config: Config):
         self.db = db
@@ -91,7 +91,7 @@ class VideoService:
         title: Optional[str] = None
     ) -> Video:
         """
-        Video upload & conversion
+        動画アップロード & 変換
         
         Steps:
         1. Validation (format, size, codec)
@@ -103,17 +103,17 @@ class VideoService:
         7. Clean up temp files
         
         Returns:
-            Video: The created video object
+            Video: 作成された動画オブジェクト
         
         Raises:
-            VideoValidationError: Invalid video format
-            VideoConversionError: Conversion failed
+            VideoValidationError: 無効な動画形式
+            VideoConversionError: 変換失敗
         """
         # Implementation
         pass
     
     async def _validate_video(self, file: UploadFile) -> bool:
-        """Validate video file"""
+        """動画ファイル検証"""
         # MIME type check
         if file.content_type not in ALLOWED_VIDEO_TYPES:
             raise VideoValidationError(f"Unsupported format: {file.content_type}")
@@ -125,7 +125,7 @@ class VideoService:
         return True
     
     async def _extract_metadata(self, video_path: Path) -> Dict[str, Any]:
-        """Extract metadata with FFprobe"""
+        """FFprobeでメタデータ抽出"""
         probe = ffmpeg.probe(str(video_path))
         
         video_stream = next(
@@ -149,7 +149,7 @@ class VideoService:
         fps: int = 30
     ) -> Path:
         """
-        Convert video with FFmpeg
+        FFmpegで動画変換
         
         Output format: RGB565 raw frames
         Each frame: width * height * 2 bytes
@@ -179,7 +179,7 @@ class VideoService:
         output_path: Path,
         timestamp: float = 0.0
     ) -> Path:
-        """Generate thumbnail (frame at the specified time)"""
+        """サムネイル生成 (指定時刻のフレーム)"""
         stream = ffmpeg.input(str(video_path), ss=timestamp)
         stream = ffmpeg.filter(stream, 'scale', 160, 90)
         stream = ffmpeg.output(stream, str(output_path), vframes=1)
@@ -188,7 +188,7 @@ class VideoService:
         return output_path
     
     async def delete_video(self, video_id: int):
-        """Delete video (files + DB)"""
+        """動画削除 (ファイル + DB)"""
         video = self.db.get_video(video_id)
         
         # Delete files
@@ -204,17 +204,17 @@ class VideoService:
         offset: int = 0,
         search: Optional[str] = None
     ) -> List[Video]:
-        """Get video list (with pagination support)"""
+        """動画一覧取得 (ページネーション対応)"""
         return self.db.get_videos(limit, offset, search)
 ```
 
 ### 2.2 PlaylistService
 
-**Responsibility**: Playlist CRUD, order management
+**責務**: プレイリストCRUD、順序管理
 
 ```python
 class PlaylistService:
-    """Playlist management service"""
+    """プレイリスト管理サービス"""
     
     def __init__(self, db: Database):
         self.db = db
@@ -227,7 +227,7 @@ class PlaylistService:
         loop: bool = False,
         shuffle: bool = False
     ) -> Playlist:
-        """Create playlist"""
+        """プレイリスト作成"""
         playlist = self.db.create_playlist(
             name=name,
             description=description,
@@ -246,16 +246,16 @@ class PlaylistService:
         return self._enrich_playlist(playlist)
     
     def get_playlists(self) -> List[Playlist]:
-        """Playlist list (with metadata attached)"""
+        """プレイリスト一覧 (メタデータ付加)"""
         playlists = self.db.get_playlists()
         return [self._enrich_playlist(p) for p in playlists]
     
     def _enrich_playlist(self, playlist: Playlist) -> Playlist:
         """
-        Add metadata to playlist
+        プレイリストにメタデータ追加
         - video_count
         - total_duration_ms
-        - videos (details)
+        - videos (詳細)
         """
         items = self.db.get_playlist_items(playlist.id)
         videos = [self.db.get_video(item.video_id) for item in items]
@@ -271,7 +271,7 @@ class PlaylistService:
         playlist_id: int,
         video_ids: List[int]
     ):
-        """Update playlist order (drag & drop support)"""
+        """プレイリスト順序更新 (ドラッグ&ドロップ対応)"""
         # Delete all items
         self.db.delete_playlist_items(playlist_id)
         
@@ -280,14 +280,14 @@ class PlaylistService:
             self.db.add_playlist_item(playlist_id, video_id, position)
     
     def toggle_loop(self, playlist_id: int) -> bool:
-        """Toggle loop ON/OFF"""
+        """ループON/OFF切り替え"""
         playlist = self.db.get_playlist(playlist_id)
         new_loop = not playlist.loop
         self.db.update_playlist(playlist_id, loop=new_loop)
         return new_loop
     
     def toggle_shuffle(self, playlist_id: int) -> bool:
-        """Toggle shuffle ON/OFF"""
+        """シャッフルON/OFF切り替え"""
         playlist = self.db.get_playlist(playlist_id)
         new_shuffle = not playlist.shuffle
         self.db.update_playlist(playlist_id, shuffle=new_shuffle)
@@ -296,11 +296,11 @@ class PlaylistService:
 
 ### 2.3 VideoDaemon
 
-**Responsibility**: Playlist playback, frame streaming
+**責務**: プレイリスト再生、フレームストリーミング
 
 ```python
 class VideoDaemon:
-    """Video playback daemon"""
+    """動画再生デーモン"""
     
     def __init__(self):
         self.db = Database("data/sphere.db")
@@ -315,10 +315,10 @@ class VideoDaemon:
         self.playback_thread = None
     
     async def start(self):
-        """Start the daemon"""
+        """デーモン起動"""
         logger.info("VideoDaemon starting...")
         
-        # MQTT connection
+        # MQTT接続
         await self.mqtt.connect("192.168.49.1", 1883)
         self.mqtt.subscribe("sphere/all/command/playback", self._on_command)
         
@@ -328,7 +328,7 @@ class VideoDaemon:
         logger.info("VideoDaemon started")
     
     async def _playback_loop(self):
-        """Main playback loop (30fps)"""
+        """メインプレイバックループ (30fps)"""
         while self.running:
             if self.playback_state.status == "playing":
                 try:
@@ -340,7 +340,7 @@ class VideoDaemon:
             await asyncio.sleep(1/30)
     
     async def _send_next_frame(self):
-        """Send the next frame via UDP"""
+        """次のフレームをUDP送信"""
         state = self.playback_state
         
         # Read frame
@@ -369,7 +369,7 @@ class VideoDaemon:
         await self._publish_state()
     
     async def _on_video_end(self):
-        """Handling when a video ends"""
+        """動画終了時の処理"""
         state = self.playback_state
         playlist = self.db.get_playlist(state.current_playlist_id)
         
@@ -388,7 +388,7 @@ class VideoDaemon:
             await self._publish_state()
     
     def _get_next_video(self, playlist: Playlist, current_video_id: int):
-        """Get the next video (shuffle support)"""
+        """次の動画取得 (シャッフル対応)"""
         items = self.db.get_playlist_items(playlist.id)
         
         if playlist.shuffle:
@@ -402,7 +402,7 @@ class VideoDaemon:
             return next_item.video_id if next_item else None
     
     async def _on_command(self, topic: str, payload: dict):
-        """Handle MQTT command"""
+        """MQTTコマンド処理"""
         action = payload.get("action")
         
         if action == "select_playlist":
@@ -428,7 +428,7 @@ class VideoDaemon:
         await self._publish_state()
     
     async def _load_playlist(self, playlist_id: int):
-        """Load playlist & play the first video"""
+        """プレイリスト読み込み & 最初の動画再生"""
         playlist = self.db.get_playlist(playlist_id)
         first_video = self._get_first_video(playlist)
         
@@ -437,7 +437,7 @@ class VideoDaemon:
             await self._play_video(first_video)
     
     async def _play_video(self, video_id: int):
-        """Start video playback"""
+        """動画再生開始"""
         video = self.db.get_video(video_id)
         
         self.playback_state.current_video_id = video_id
@@ -448,7 +448,7 @@ class VideoDaemon:
         await self._publish_state()
     
     async def _publish_state(self):
-        """Distribute playback state over MQTT"""
+        """再生状態をMQTT配信"""
         state = self.playback_state
         
         await self.mqtt.publish(
@@ -466,11 +466,11 @@ class VideoDaemon:
 
 ### 2.4 FrameReader
 
-**Responsibility**: RGB565 frame reading
+**責務**: RGB565フレーム読み込み
 
 ```python
 class FrameReader:
-    """RGB565 frame reading"""
+    """RGB565フレーム読み込み"""
     
     FRAME_WIDTH = 320
     FRAME_HEIGHT = 160
@@ -481,7 +481,7 @@ class FrameReader:
         self.cache = {}  # video_path -> mmap object
     
     def read_frame(self, video_path: str, frame_index: int) -> Optional[bytes]:
-        """Read the specified frame"""
+        """指定フレーム読み込み"""
         # Memory-mapped file for efficient random access
         if video_path not in self.cache:
             self.cache[video_path] = self._open_mmap(video_path)
@@ -502,14 +502,14 @@ class FrameReader:
         return frame_data
     
     def _open_mmap(self, video_path: str):
-        """Open memory-mapped file"""
+        """Memory-mapped fileオープン"""
         import mmap
         
         f = open(video_path, 'rb')
         return mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
     
     def close_all(self):
-        """Close all caches"""
+        """全キャッシュクローズ"""
         for mmap_file in self.cache.values():
             mmap_file.close()
         self.cache.clear()
@@ -517,11 +517,11 @@ class FrameReader:
 
 ### 2.5 UDPStreamer
 
-**Responsibility**: UDP frame transmission
+**責務**: UDPフレーム送信
 
 ```python
 class UDPStreamer:
-    """UDP frame streaming"""
+    """UDPフレームストリーミング"""
     
     MAGIC = 0xDEADBEEF
     MTU = 1400  # Safe UDP payload size
@@ -537,7 +537,7 @@ class UDPStreamer:
         target: Tuple[str, int]
     ):
         """
-        Send frame (with fragmented packet support)
+        フレーム送信 (分割パケット対応)
         
         Packet format:
         ┌────────┬────────┬────────┬────────┬─────────┐
@@ -562,7 +562,7 @@ class UDPStreamer:
             await asyncio.sleep(0.001)  # 1ms
     
     def _split_frame(self, frame_data: bytes) -> List[bytes]:
-        """Split frame (into MTU-sized chunks)"""
+        """フレームを分割 (MTUサイズ)"""
         data_per_packet = self.MTU - 12  # Header size
         chunks = []
         
@@ -578,7 +578,7 @@ class UDPStreamer:
         total_packets: int,
         data: bytes
     ) -> bytes:
-        """Build packet"""
+        """パケット構築"""
         import struct
         
         header = struct.pack(
@@ -592,7 +592,7 @@ class UDPStreamer:
         return header + data
 ```
 
-## 3. Database Detailed Design
+## 3. データベース詳細設計
 
 ### ERD (Entity Relationship Diagram)
 
@@ -650,59 +650,59 @@ class UDPStreamer:
 └─────────────────────┘
 ```
 
-### Index Strategy
+### インデックス戦略
 
 ```sql
--- Speed up UUID lookups
+-- UUID検索の高速化
 CREATE INDEX idx_videos_uuid ON videos(uuid);
 CREATE INDEX idx_playlists_uuid ON playlists(uuid);
 
--- Order sorting of playlist items
+-- プレイリストアイテムの順序ソート
 CREATE INDEX idx_playlist_items_position ON playlist_items(playlist_id, position);
 
--- Sort by creation timestamp
+-- 作成日時でのソート
 CREATE INDEX idx_videos_uploaded_at ON videos(uploaded_at DESC);
 CREATE INDEX idx_playlists_created_at ON playlists(created_at DESC);
 
--- Title search (for LIKE searches)
+-- タイトル検索 (LIKE検索用)
 CREATE INDEX idx_videos_title ON videos(title);
 ```
 
-## 4. Error Handling
+## 4. エラーハンドリング
 
-### Exception Class Hierarchy
+### 例外クラス階層
 
 ```python
 class PlaylistError(Exception):
-    """Base exception for the playlist system"""
+    """プレイリストシステム基底例外"""
     pass
 
 class VideoError(PlaylistError):
-    """Video-related error"""
+    """動画関連エラー"""
     pass
 
 class VideoValidationError(VideoError):
-    """Video validation error (invalid format, size exceeded)"""
+    """動画検証エラー (無効な形式、サイズ超過)"""
     pass
 
 class VideoConversionError(VideoError):
-    """Video conversion error (FFmpeg failure)"""
+    """動画変換エラー (FFmpeg失敗)"""
     pass
 
 class VideoNotFoundError(VideoError):
-    """Video not found"""
+    """動画が見つからない"""
     pass
 
 class PlaylistNotFoundError(PlaylistError):
-    """Playlist not found"""
+    """プレイリストが見つからない"""
     pass
 
 class PlaybackError(PlaylistError):
-    """Playback error"""
+    """再生エラー"""
     pass
 ```
 
-### Error Response
+### エラーレスポンス
 
 ```json
 {
@@ -717,12 +717,12 @@ class PlaybackError(PlaylistError):
 }
 ```
 
-## 5. Performance Optimization
+## 5. パフォーマンス最適化
 
-### 5.1 Parallelizing Video Conversion
+### 5.1 動画変換の並列化
 
 ```python
-# TaskQueue (Celery-style)
+# TaskQueue (Celery風)
 from concurrent.futures import ThreadPoolExecutor
 
 class ConversionQueue:
@@ -731,7 +731,7 @@ class ConversionQueue:
         self.tasks = {}  # task_id -> Future
     
     def submit(self, video_id: int, input_path: str) -> str:
-        """Submit a conversion task"""
+        """変換タスク投入"""
         task_id = f"task_{uuid.uuid4().hex[:8]}"
         
         future = self.executor.submit(
@@ -744,46 +744,46 @@ class ConversionQueue:
         return task_id
     
     def _convert_worker(self, video_id, input_path):
-        """Conversion worker (separate thread)"""
-        # Run FFmpeg
-        # Notify progress via WebSocket
+        """変換ワーカー (別スレッド)"""
+        # FFmpeg実行
+        # 進捗をWebSocket経由で通知
         pass
 ```
 
-### 5.2 Frame Read Cache
+### 5.2 フレーム読み込みキャッシュ
 
 ```python
 # LRU Cache for recently read frames
 from functools import lru_cache
 
 class CachedFrameReader(FrameReader):
-    @lru_cache(maxsize=90)  # 3 seconds worth (30fps)
+    @lru_cache(maxsize=90)  # 3秒分 (30fps)
     def read_frame(self, video_path: str, frame_index: int):
         return super().read_frame(video_path, frame_index)
 ```
 
-### 5.3 UDP Send Buffering
+### 5.3 UDP送信バッファリング
 
 ```python
 # Burst send with pacing
 async def send_frame_buffered(self, frames: List[bytes]):
-    """Send multiple frames with buffering"""
+    """複数フレームをバッファリング送信"""
     for i, frame in enumerate(frames):
         await self.send_frame(frame, i, self.target)
         
         # Adaptive pacing
         if i % 10 == 0:
-            await asyncio.sleep(0.01)  # 10ms pause every 10 frames
+            await asyncio.sleep(0.01)  # 10フレームごとに10ms休止
 ```
 
-## 6. Summary
+## 6. まとめ
 
-This architecture provides:
+このアーキテクチャにより：
 
-✅ **Scalability**: Separation of database and file storage
-✅ **Maintainability**: Clear separation of responsibilities (Service layer, Daemon layer)
-✅ **Extensibility**: Easy to add new video formats and playlist features
-✅ **Performance**: Asynchronous processing, caching, optimized transmission
-✅ **Testability**: Unit testing of each component is possible
+✅ **スケーラビリティ**: データベース、ファイルストレージの分離
+✅ **保守性**: 責務の明確な分離 (Service層、Daemon層)
+✅ **拡張性**: 新しい動画形式、プレイリスト機能の追加が容易
+✅ **パフォーマンス**: 非同期処理、キャッシング、最適化された送信
+✅ **テスタビリティ**: 各コンポーネントの単体テストが可能
 
-Next step: Begin implementation of Phase 1 (database foundation)
+次のステップ: Phase 1 (データベース基盤) の実装開始

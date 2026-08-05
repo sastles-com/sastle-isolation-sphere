@@ -1,43 +1,45 @@
-# Isolation Sphere ドキュメント
+> **English** · [日本語](README.ja.md)
 
-最終更新: 2025-12-02
+# Isolation Sphere Documentation
 
-このディレクトリには、Isolation Sphereプロジェクトの技術ドキュメントが含まれています。
+Last updated: 2025-12-02
 
-## ドキュメント一覧
+This directory contains the technical documentation for the Isolation Sphere project.
 
-### システム設計
+## Document List
 
-| ドキュメント | 説明 |
+### System Design
+
+| Document | Description |
 |-------------|------|
-| [system_architecture.md](./system_architecture.md) | システム全体のアーキテクチャ、データフロー、技術スタック |
-| [class_diagram.md](./class_diagram.md) | クラス図、コンポーネント構成、Mermaid図 |
-| [implementation_spec.md](./implementation_spec.md) | 実装仕様書、コード例、トラブルシューティング |
+| [system_architecture.md](./system_architecture.md) | Overall system architecture, data flow, technology stack |
+| [class_diagram.md](./class_diagram.md) | Class diagrams, component structure, Mermaid diagrams |
+| [implementation_spec.md](./implementation_spec.md) | Implementation specification, code examples, troubleshooting |
 
-### プロジェクト固有
+### Project-Specific
 
-- **ESP32仕様**: `../core/spec.md` - ファームウェア仕様
-- **サーバー設計**: `../server/docs/` - 個別サーバードキュメント
+- **ESP32 specification**: `../core/spec.md` - firmware specification
+- **Server design**: `../server/docs/` - individual server documents
 
-## クイックリンク
+## Quick Links
 
-### 新規開発者向け
+### For New Developers
 
-1. [システム全体像を理解する](./system_architecture.md#概要)
-2. [データフローを確認する](./class_diagram.md#データフロー)
-3. [開発環境をセットアップする](./implementation_spec.md#6-ビルド・デプロイ)
+1. [Understand the overall system](./system_architecture.md#overview)
+2. [Review the data flow](./class_diagram.md#data-flow)
+3. [Set up the development environment](./implementation_spec.md#6-build-and-deploy)
 
-### 実装者向け
+### For Implementers
 
-- [MQTTデータフォーマット](./implementation_spec.md#51-mqtt-payload)
-- [WebSocketメッセージ仕様](./implementation_spec.md#52-websocket-messages)
+- [MQTT data format](./implementation_spec.md#51-mqtt-payload)
+- [WebSocket message specification](./implementation_spec.md#52-websocket-messages)
 - [API Endpoints](./system_architecture.md#rest-api-endpoints)
 
-### トラブルシューティング
+### Troubleshooting
 
-- [よくある問題と解決策](./implementation_spec.md#7-トラブルシューティング)
+- [Common problems and solutions](./implementation_spec.md#7-troubleshooting)
 
-## システム概要図
+## System Overview Diagram
 
 ```
 ESP32 (IMU) --[MQTT]--> Python Server --[WebSocket]--> Web Browser
@@ -45,73 +47,73 @@ ESP32 (IMU) --[MQTT]--> Python Server --[WebSocket]--> Web Browser
                      State Manager
 ```
 
-### 主要コンポーネント
+### Main Components
 
 1. **ESP32 Device**
-   - IMU姿勢検知（BNO055）
-   - MQTTでデータ送信
-   - LED制御（800個）
+   - IMU orientation detection (BNO055)
+   - Data transmission via MQTT
+   - LED control (800 LEDs)
 
 2. **Python Server**
-   - MQTT受信
-   - WebSocket配信
-   - REST API提供
+   - MQTT reception
+   - WebSocket distribution
+   - REST API provision
 
 3. **Web Frontend**
-   - Three.js 3D可視化
-   - リアルタイム姿勢同期
+   - Three.js 3D visualization
+   - Real-time orientation synchronization
    - React UI
 
-## 実装状況
+## Implementation Status
 
-### 完了機能 ✅
+### Completed Features ✅
 
-- ESP32 IMUデータ取得と送信
-- MQTT通信
-- WebSocketリアルタイム配信
-- 3D球体姿勢可視化
-- ダッシュボードUI
-- config.json設定管理
+- ESP32 IMU data acquisition and transmission
+- MQTT communication
+- WebSocket real-time distribution
+- 3D sphere orientation visualization
+- Dashboard UI
+- config.json configuration management
 
-### 未実装 ⏳
+### Not Yet Implemented ⏳
 
-- LED映像ストリーミング（UDP）
-- プレイリスト再生
-- 設定画面からのMQTT設定変更
+- LED video streaming (UDP)
+- Playlist playback
+- Changing MQTT settings from the configuration screen
 
-## 技術スタック
+## Technology Stack
 
 - **ESP32**: Arduino, PubSubClient, BNO055, FastLED
 - **Server**: Python, FastAPI, paho-mqtt, uvicorn
 - **Frontend**: React, Three.js, Material-UI, Vite
 
-## 開発ガイドライン
+## Development Guidelines
 
-### ブランチ戦略
-- `main`: 安定版
-- feature branches: 機能開発
+### Branch Strategy
+- `main`: stable version
+- feature branches: feature development
 
-### コミットメッセージ
+### Commit Messages
 ```
-feat: 新機能追加
-fix: バグ修正
-docs: ドキュメント更新
-refactor: リファクタリング
+feat: add new feature
+fix: bug fix
+docs: documentation update
+refactor: refactoring
 ```
 
-### テスト
-- ESP32: PlatformIO Native環境でユニットテスト
-- Server: pytestでAPIテスト
-- Frontend: Vitestでコンポーネントテスト
+### Testing
+- ESP32: unit tests in the PlatformIO Native environment
+- Server: API tests with pytest
+- Frontend: component tests with Vitest
 
-## 連絡先・リソース
+## Contacts & Resources
 
 - **GitHub**: https://github.com/sastles-com/sastle-isolation-sphere
-- **プロジェクトルート**: `/home/yakatano/work/m5atoms3r/repo`
+- **Project root**: `<repo-root>/sastle-isolation-sphere`
 
-## 更新履歴
+## Change History
 
-| 日付 | 内容 |
+| Date | Contents |
 |------|------|
-| 2025-12-02 | ドキュメント初版作成、IMU統合完了 |
-| 2025-12-01 | プロジェクト構造確立 |
+| 2025-12-02 | First edition of documentation created, IMU integration completed |
+| 2025-12-01 | Project structure established |

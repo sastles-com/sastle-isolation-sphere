@@ -1,37 +1,37 @@
-> **English** · [日本語](ros2_removal_plan.ja.md)
+> [English](ros2_removal_plan.md) · **日本語**
 
-# ROS2 Removal Plan
+# ROS2削除計画
 
-Created: 2025-12-02
+作成日: 2025-12-02
 
-## Background
+## 背景
 
-The design originally used micro-ROS/ROS2, but removal was decided for the following reasons:
+当初、micro-ROS/ROS2を使用する設計だったが、以下の理由により削除を決定：
 
-1. **Over-engineering**: The complexity of ROS2 is unnecessary for inter-process communication
-2. **MQTT + WebSocket is sufficient**: The existing protocols satisfy the requirements
-3. **Joystick use case**: Only simple input → MQTT publishing; no state monitoring needed
-4. **Maintainability**: A simpler architecture is easier to understand and maintain
+1. **過剰設計**: プロセス間通信にROS2の複雑さは不要
+2. **MQTT+WebSocketで十分**: 既存プロトコルで要件を満たせる
+3. **Joystickの用途**: 単純な入力→MQTT送信のみ、状態監視不要
+4. **保守性**: シンプルなアーキテクチャの方が理解・保守が容易
 
 ---
 
-## Files to Remove
+## 削除対象ファイル
 
 ### 1. `server/app/core/ros_manager.py`
-- **Current state**: ROS2 initialization and mock implementation
-- **Action**: **Full removal**
+- **現状**: ROS2初期化とモック実装
+- **対応**: **完全削除**
 
 ### 2. `server/app/services/ros_bridge.py`
-- **Current state**: Bridge between ROS2 topics and WebSocket/MQTT
-- **Action**: **Full removal**
+- **現状**: ROS2トピックとWebSocket/MQTTのブリッジ
+- **対応**: **完全削除**
 
 ### 3. `server/joystick/daemon.py`
-- **Current state**: Publishes joystick input to ROS2 topics
-- **Action**: **Simplify** - rewrite as an MQTT-direct-publish version
+- **現状**: ROS2トピックにジョイスティック入力をパブリッシュ
+- **対応**: **シンプル化** - MQTT直接パブリッシュ版に書き換え
 
 ---
 
-## Files to Modify
+## 修正対象ファイル
 
 ### 1. `server/app/main.py`
 
@@ -121,7 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     state_manager.add_observer(websocket)
     
-    # Send initial state
+    # 初期状態送信
     await websocket.send_json({
         "type": "STATE_UPDATE", 
         "payload": state_manager.get_state()
@@ -132,7 +132,7 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_json()
             print(f"[WebSocket] Received: {data}")
             
-            # Delegate processing to StateManager
+            # StateManagerに処理を委譲
             await state_manager.handle_websocket_message(data)
             
     except WebSocketDisconnect:
@@ -143,13 +143,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
 ### 3. `server/app/services/state_manager.py`
 
-#### Method to Add
+#### 追加メソッド
 
 ```python
 async def handle_websocket_message(self, data: dict):
     """
-    Process a WebSocket message and publish it over MQTT
-
+    WebSocketメッセージを処理してMQTT送信
+    
     Args:
         data: {"type": "SET_PARAMS", "payload": {...}}
     """
@@ -173,7 +173,7 @@ async def handle_websocket_message(self, data: dict):
 
 ### 4. `server/joystick/daemon.py`
 
-#### Before (using ROS2)
+#### Before（ROS2使用）
 ```python
 import rclpy
 from rclpy.node import Node
@@ -191,7 +191,7 @@ class JoystickDaemon:
         self.pub.publish(ros_msg)
 ```
 
-#### After (MQTT direct publish)
+#### After（MQTT直接パブリッシュ）
 ```python
 import paho.mqtt.client as mqtt
 import evdev
@@ -206,9 +206,9 @@ class JoystickDaemon:
         self.device = None
     
     def run(self):
-        # Search for joystick device
+        # ジョイスティックデバイス検索
         devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
-        # Look for a PS4 controller
+        # PS4コントローラーを検索
         for device in devices:
             if "Sony" in device.name or "Wireless Controller" in device.name:
                 self.device = device
@@ -220,19 +220,19 @@ class JoystickDaemon:
         
         print(f"Connected to: {self.device.name}")
         
-        # Event loop
+        # イベントループ
         for event in self.device.read_loop():
             self.handle_event(event)
     
     def handle_event(self, event):
         if event.type == evdev.ecodes.EV_KEY:
-            # Button press
+            # ボタン押下
             if event.code == evdev.ecodes.BTN_A and event.value == 1:
-                # Toggle playback
+                # 再生トグル
                 self.publish_command("playback", {"action": "toggle"})
             
             elif event.code == evdev.ecodes.BTN_X and event.value == 1:
-                # Next track
+                # 次のトラック
                 self.publish_command("playback", {"action": "next"})
     
     def publish_command(self, command_type, payload):
@@ -248,94 +248,94 @@ if __name__ == "__main__":
 
 ---
 
-## Removal Steps
+## 削除手順
 
-### Step 1: Delete files
+### Step 1: ファイル削除
 ```bash
 cd <repo-root>/server
 
-# Delete ROS2-related files
+# ROS2関連ファイル削除
 rm app/core/ros_manager.py
 rm app/services/ros_bridge.py
 ```
 
-### Step 2: Remove imports
+### Step 2: インポート削除
 ```bash
-# Remove ROSManager from main.py
-# Remove ROSBridge from websocket.py
+# main.pyからROSManager削除
+# websocket.pyからROSBridge削除
 ```
 
-### Step 3: Rewrite the Joystick Daemon
+### Step 3: Joystick Daemon書き換え
 ```bash
-# Rewrite joystick/daemon.py to the MQTT version above
+# joystick/daemon.py を上記のMQTT版に書き換え
 ```
 
-### Step 4: Update requirements
+### Step 4: requirements更新
 ```bash
-# Remove rclpy from pyproject.toml or requirements.txt
+# pyproject.toml または requirements.txt から rclpy 削除
 ```
 
-### Step 5: Verify operation
+### Step 5: 動作確認
 ```bash
-# Start the server
+# サーバー起動
 uvicorn app.main:app --reload --host 0.0.0.0 --port 9000
 
-# WebSocket test
-# Open the UI in a browser and verify operation
+# WebSocketテスト
+# ブラウザでUIを開いて動作確認
 ```
 
 ---
 
-## Impact Scope Checklist
+## 影響範囲チェックリスト
 
-- [ ] `app/main.py` - Remove ROSManager startup
-- [ ] `app/api/endpoints/websocket.py` - Remove ROSBridge
-- [ ] `app/services/state_manager.py` - Add `handle_websocket_message`
-- [ ] `joystick/daemon.py` - Rewrite to the MQTT-direct-publish version
-- [ ] `app/core/ros_manager.py` - Delete file
-- [ ] `app/services/ros_bridge.py` - Delete file
-- [ ] `pyproject.toml` - Remove rclpy dependency
-- [ ] `README.md` - Remove ROS2-related descriptions
-- [ ] `server/requirements_specification.md` - Remove micro-ROS descriptions
-
----
-
-## Test Items
-
-### 1. WebSocket Communication Test
-- [ ] Confirm WebUI connection
-- [ ] Parameter changes (brightness, etc.) are reflected
-- [ ] IMU data from ESP32 is displayed in real time
-
-### 2. MQTT Communication Test
-- [ ] `sphere/all/command/*` reaches the ESP32
-- [ ] `sphere/{id}/imu` reaches the Server
-- [ ] `sphere/{id}/state` is retained
-
-### 3. Joystick Communication Test (after implementation)
-- [ ] MQTT commands are sent on button press
-- [ ] Commands are reflected on the ESP32
-- [ ] State changes are shown in the WebUI
+- [ ] `app/main.py` - ROSManager起動削除
+- [ ] `app/api/endpoints/websocket.py` - ROSBridge削除
+- [ ] `app/services/state_manager.py` - `handle_websocket_message`追加
+- [ ] `joystick/daemon.py` - MQTT直接パブリッシュ版に書き換え
+- [ ] `app/core/ros_manager.py` - ファイル削除
+- [ ] `app/services/ros_bridge.py` - ファイル削除
+- [ ] `pyproject.toml` - rclpy依存削除
+- [ ] `README.md` - ROS2関連記述削除
+- [ ] `server/requirements_specification.md` - micro-ROS記述削除
 
 ---
 
-## Rollback Procedure
+## テスト項目
 
-In case a problem occurs:
+### 1. WebSocket通信テスト
+- [ ] WebUI接続確認
+- [ ] パラメータ変更（brightness等）が反映される
+- [ ] ESP32からのIMUデータがリアルタイム表示される
+
+### 2. MQTT通信テスト
+- [ ] `sphere/all/command/*` がESP32に届く
+- [ ] `sphere/{id}/imu` がServerに届く
+- [ ] `sphere/{id}/state` がretainedで保持される
+
+### 3. Joystick通信テスト（実装後）
+- [ ] ボタン押下でMQTTコマンドが送信される
+- [ ] コマンドがESP32に反映される
+- [ ] WebUIに状態変更が表示される
+
+---
+
+## ロールバック手順
+
+万が一問題が発生した場合：
 
 ```bash
-# Return to a previous commit with git
+# gitで以前のコミットに戻る
 git log --oneline
 git revert <commit-hash>
 ```
 
 ---
 
-## Completion Criteria
+## 完了条件
 
-- [ ] ROS2-related code is fully removed
-- [ ] The server starts without ROS2
-- [ ] WebSocket communication works correctly
-- [ ] MQTT communication works correctly
-- [ ] Documentation is updated
-</content>
+- [ ] ROS2関連コードが完全に削除されている
+- [ ] サーバーがROS2なしで起動する
+- [ ] WebSocket通信が正常に動作する
+- [ ] MQTT通信が正常に動作する
+- [ ] ドキュメントが更新されている
+

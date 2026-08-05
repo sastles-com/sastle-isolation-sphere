@@ -1,79 +1,82 @@
-# Isolation Sphere ESP32 ファームウェア仕様書
+> **English** · [日本語](spec.ja.md)
 
-## 1. 概要
-ESP32-S3 (M5Atom S3R) をベースとした球体ディスプレイ制御システムのファームウェア仕様です。
-MFT2025プロジェクトをベースに、通信アーキテクチャを最適化しています。
-主な機能は、FastLEDによるLED制御、IMUによる姿勢検知、および外部システムとの通信です。
+# Isolation Sphere ESP32 Firmware Specification
 
-## 2. ハードウェア構成
-- **コントローラ**: M5Atom S3R (ESP32-S3)
-- **LED**: WS2812 LEDストリップ x 4 (GPIO 5, 6, 7, 8)
-  - 構成: [180, 220, 180, 220] (合計 800 LED)
-- **IMU**: 内蔵または外部 (BNO055) I2C接続
-- **スピーカー**: M5Atom S3R 内蔵 / 外部 I2S
+## 1. Overview
+This is the firmware specification for a spherical display control system based on the ESP32-S3 (M5Atom S3R).
+It builds on the MFT2025 project and optimizes the communication architecture.
+The main features are LED control via FastLED, attitude detection via IMU, and communication with external systems.
 
-## 3. 通信アーキテクチャ (UDP + MQTT ハイブリッド)
-リアルタイム性と信頼性を考慮し、以下のように役割を分担します。
+## 2. Hardware Configuration
+- **Controller**: M5Atom S3R (ESP32-S3)
+- **LED**: WS2812 LED strips x 4 (GPIO 5, 6, 7, 8)
+  - Configuration: [180, 220, 180, 220] (800 LEDs total)
+- **IMU**: internal or external (BNO055) over I2C
+- **Speaker**: M5Atom S3R built-in / external I2S
 
-### 3.1 UDP (高速・低遅延)
-- **用途**: **映像データ (LED)**
+## 3. Communication Architecture (UDP + MQTT hybrid)
+Considering real-time performance and reliability, roles are divided as follows.
+
+### 3.1 UDP (fast, low-latency)
+- **Purpose**: **video data (LED)**
 - **PC -> ESP32**:
-  - **1フレーム分のJPEG画像データ** をストリーミング配信。
-  - ESP32側でJPEGデコードし、LED座標にマッピングして表示。
-  - パケットロスは許容（最新フレームを優先）。
+  - Streams **one frame of JPEG image data** at a time.
+  - The ESP32 decodes the JPEG, maps it to LED coordinates, and displays it.
+  - Packet loss is tolerated (latest frame takes priority).
 
-### 3.2 MQTT (高信頼・制御)
-- **用途**: **IMUデータ**、UI情報、システム制御
-- **ブローカー**: Raspberry Pi (Agent)
-- **トピック**:
-  - `sphere/status`: デバイスのハートビート、エラー情報
-  - `sphere/imu`: **IMUクォータニオンデータ (w, x, y, z)**
-  - `sphere/ui`: UIコマンド、状態共有
-  - `sphere/command`: システムコマンド（再起動、OTA、モード変更など）
-  - `sphere/config`: 設定パラメータの更新
+### 3.2 MQTT (high-reliability, control)
+- **Purpose**: **IMU data**, UI information, system control
+- **Broker**: Raspberry Pi (Agent)
+- **Topics**:
+  - `sphere/status`: device heartbeat, error information
+  - `sphere/imu`: **IMU quaternion data (w, x, y, z)**
+  - `sphere/ui`: UI commands, state sharing
+  - `sphere/command`: system commands (reboot, OTA, mode change, etc.)
+  - `sphere/config`: configuration parameter updates
 
-### 3.3 ROS2連携 (PC側ブリッジ)
+### 3.3 ROS2 Integration (PC-side bridge)
 - **Bridge**: UDP/MQTT <-> ROS2
   - MQTT `sphere/imu` -> ROS2 `/isolation_sphere/imu` (`sensor_msgs/Imu`)
-  - ROS2 `/isolation_sphere/led` -> UDPパケット (ESP32へ送信)
+  - ROS2 `/isolation_sphere/led` -> UDP packet (sent to ESP32)
 
-## 4. データ構造
+## 4. Data Structures
 ### Config (`config.json`)
 - **Network**: SSID, Password
 - **Agent**: IP Address, Port (MQTT Broker / UDP Target)
-- **Node Name**: デバイス識別子
+- **Node Name**: device identifier
 - **Debug**:
-  - `lcd_enable`: LCD表示のON/OFF (デバッグ用、デフォルト: false)
+  - `lcd_enable`: turn LCD display ON/OFF (for debugging, default: false)
 
 ### LED Layout (`led_layout.csv`)
-- フォーマット: `faceID, stripID, stripIndex, x, y, z`
-- 各LEDの3次元座標を定義し、テクスチャマッピングに使用。
+- Format: `faceID, stripID, stripIndex, x, y, z`
+- Defines the 3D coordinates of each LED, used for texture mapping.
 
-## 5. 機能要件リスト
-- [x] **ファイルシステム**: LittleFS (Config, Layout保存用)
-- [x] **ネットワーク**: Wi-Fi接続管理
-- [x] **通信機能**:
-    - [x] MQTTクライアント (AsyncMqttClient)
-    - [ ] UDP通信 (映像受信/IMU送信) - **新規実装**
-        - [ ] **ダブルバッファリング**: 受信バッファと描画バッファを分離し、非同期で更新。
-- [x] **IMU**: クォータニオン取得と送信
-- [x] **LED制御**:
-    - [x] FastLED初期化 (4ストリップ)
-    - [x] 座標マッピング (Spherical -> UV)
-    - [ ] **I2S DMA転送**: 800個のLEDを30fpsで駆動するため、I2S DMA方式を採用 (MFT2025準拠)。
-    - [ ] **オンデバイスレンダリング**: 受信したテクスチャ(画像)に対し、最新のIMU値を用いて座標変換を行い、LED色を決定する。
-- [ ] **オーディオ**:
-    - [ ] 起動音
-    - [ ] システムイベント音
-- [ ] **その他**:
-    - [ ] LCDデバッグ表示 (ConfigでON/OFF切替)
+## 5. Functional Requirements List
+- [x] **File system**: LittleFS (for storing Config, Layout)
+- [x] **Network**: Wi-Fi connection management
+- [x] **Communication**:
+    - [x] MQTT client (AsyncMqttClient)
+    - [ ] UDP communication (video receive / IMU send) - **new implementation**
+        - [ ] **Double buffering**: separate the receive buffer from the render buffer and update them asynchronously.
+- [x] **IMU**: quaternion acquisition and transmission
+- [x] **LED control**:
+    - [x] FastLED initialization (4 strips)
+    - [x] Coordinate mapping (Spherical -> UV)
+    - [ ] **I2S DMA transfer**: to drive 800 LEDs at 30fps, adopt the I2S DMA method (per MFT2025).
+    - [ ] **On-device rendering**: apply coordinate transformation to the received texture (image) using the latest IMU values to determine LED colors.
+- [ ] **Audio**:
+    - [ ] Startup sound
+    - [ ] System event sounds
+- [ ] **Other**:
+    - [ ] LCD debug display (ON/OFF toggle via Config)
 
-## 6. 検討事項 (Questions & Concerns)
-1.  **LEDドライバの最適化**:
-    - 現在はRMT方式ですが、800個のLEDを30fpsで駆動するにはI2S DMA方式 (MFT2025採用) への移行が推奨されます。 -> **I2S DMA採用決定**
-2.  **メディア機能**:
-    - **決定**: ヘッドレス運用が基本だが、デバッグ用にLCDのON/OFFを`config.json`で切り替えられるようにする。
-3.  **IMU座標変換**:
-    - 現在はESP32内でUV変換を行っていますが、PC側で処理してLED色データのみを送る方式（UDPストリーミング）にすれば、ESP32の負荷を下げられます。 -> **オンデバイスレンダリング採用決定 (スタンドアロンデモ対応のため)**
-4.  **ジョイスティック入力**:
-    - ESP32で直接受け取ることも検討しましたが、リソース不足の懸念があるため、現時点では **TBD (将来検討)** とします。
+## 6. Questions & Concerns
+1.  **LED driver optimization**:
+    - Currently the RMT method is used, but migrating to the I2S DMA method (adopted in MFT2025) is recommended to drive 800 LEDs at 30fps. -> **Decided to adopt I2S DMA**
+2.  **Media features**:
+    - **Decision**: headless operation is the default, but the LCD ON/OFF should be switchable via `config.json` for debugging.
+3.  **IMU coordinate transformation**:
+    - Currently UV transformation is performed inside the ESP32, but processing it on the PC side and sending only LED color data (UDP streaming) would reduce the ESP32's load. -> **Decided to adopt on-device rendering (to support standalone demos)**
+4.  **Joystick input**:
+    - Receiving it directly on the ESP32 was considered, but due to concerns over insufficient resources, this is **TBD (future consideration)** for now.
+</content>

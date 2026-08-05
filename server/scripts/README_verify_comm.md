@@ -1,57 +1,60 @@
-# サーバー⇔デバイス通信検証
+> **English** · [日本語](README_verify_comm.ja.md)
 
-実機 ESP32 が手元になくても、サーバーの MQTT 通信契約を検証できる。
-Python のデバイスシミュレータが ESP32 ファーム (core/) の MQTT 挙動を再現し、
-ローカルの MQTT ブローカー + FastAPI サーバーと双方向通信して合否を判定する。
+# Server ⇔ Device Communication Verification
 
-## 実行
+You can verify the server's MQTT communication contract even without a physical ESP32 on hand.
+A Python device simulator reproduces the MQTT behavior of the ESP32 firmware (core/), and it
+communicates bidirectionally with a local MQTT broker + FastAPI server to determine pass/fail.
+
+## Running
 
 ```bash
 bash server/scripts/verify_server_comm.sh
 ```
 
-mosquitto と FastAPI サーバーを自動で起動・検証・停止する。前提:
+It automatically starts, verifies, and stops mosquitto and the FastAPI server. Prerequisites:
 
 - `brew install mosquitto`
-- `server/.venv` に `paho-mqtt`, `websockets`, `fastapi`, `uvicorn`
+- `paho-mqtt`, `websockets`, `fastapi`, `uvicorn` in `server/.venv`
 
-## 検証する MQTT 契約
+## MQTT Contract Being Verified
 
-`core/src/MqttTopics.h` ⇔ `server/app/core/config.py` の対応を確認する。
+Confirms the correspondence between `core/src/MqttTopics.h` and `server/app/core/config.py`.
 
-| 方向 | トピック | ペイロード |
+| Direction | Topic | Payload |
 |---|---|---|
-| デバイス→サーバー | `sphere/sphere001/imu` | `{"w","x","y","z"}` クォータニオン |
-| デバイス→サーバー | `sphere/sphere001/status` | `"online"`/`"offline"` (retained) |
-| サーバー→デバイス | `sphere/all/command/params` | `{"brightness":..}` 等 |
-| サーバー→デバイス | `sphere/all/state` | 全状態 (retained, 状態ブロードキャスト) |
+| Device → Server | `sphere/sphere001/imu` | `{"w","x","y","z"}` quaternion |
+| Device → Server | `sphere/sphere001/status` | `"online"`/`"offline"` (retained) |
+| Server → Device | `sphere/all/command/params` | `{"brightness":..}` etc. |
+| Server → Device | `sphere/all/state` | full state (retained, state broadcast) |
 
-## 検証ケース (4件)
+## Verification Cases (4)
 
-1. **Server→Device コマンド伝搬**: UI クライアントが `command/params {"brightness":73}`
-   を publish → デバイスsim が受信 (ファームのコマンド受信路)。
-2. **Server 状態再配信**: 上記コマンドをサーバーが処理し `sphere/all/state` を
-   retained 再配信、`params.brightness=73` の反映を確認。
-3. **Device→Server IMU 取り込み**: デバイスsim が `imu` を publish → サーバーが
-   StateManager に取り込み、WebSocket `/ws` の `STATE_UPDATE` に反映されることを確認。
-4. **status online**: デバイスsim が retained `online` を publish。
+1. **Server→Device command propagation**: a UI client publishes `command/params {"brightness":73}`
+   → the device sim receives it (the firmware's command reception path).
+2. **Server state re-distribution**: the server processes the above command and re-distributes
+   `sphere/all/state` as retained, confirming that `params.brightness=73` is reflected.
+3. **Device→Server IMU ingestion**: the device sim publishes `imu` → the server ingests it into
+   the StateManager, confirming that it is reflected in the `STATE_UPDATE` of WebSocket `/ws`.
+4. **status online**: the device sim publishes a retained `online`.
 
-## ブローカーの差し替え
+## Overriding the Broker
 
-サーバーは環境変数 `SPHERE_MQTT_BROKER` でブローカーを上書きできる
-(`config.json` を編集せずローカル検証や別環境にデプロイ可能)。
-未指定時は `config.json` の `wifi.broker` → `localhost` の順で解決する。
+The server can override the broker via the environment variable `SPHERE_MQTT_BROKER`
+(allowing local verification or deployment to another environment without editing `config.json`).
+When unspecified, it is resolved in the order `config.json`'s `wifi.broker` → `localhost`.
 
 ```bash
 SPHERE_MQTT_BROKER=localhost .venv/bin/python -m uvicorn app.main:app
 ```
 
-## 実機 ESP32 での検証 (次段階)
+## Verification on a Physical ESP32 (Next Stage)
 
-本ハーネスはサーバー側契約の検証用。実機との結合確認は:
+This harness is for verifying the server-side contract. To confirm integration with a physical device:
 
-1. `core/data/config.json` の `wifi.broker` を実ブローカー IP に設定
-2. ファームを書き込み、AtomS3R を WiFi 接続
-3. 本ハーネスのデバイスsim を止め、実機の `sphere/sphere001/imu` 配信や
-   `sphere/all/command/#` 受信をブローカー越しに観測
-   (`mosquitto_sub -t 'sphere/#' -v` で全トピックを傍受可能)
+1. Set `wifi.broker` in `core/data/config.json` to the real broker IP
+2. Flash the firmware and connect the AtomS3R to WiFi
+3. Stop this harness's device sim and observe the physical device's `sphere/sphere001/imu`
+   distribution and `sphere/all/command/#` reception across the broker
+   (`mosquitto_sub -t 'sphere/#' -v` can intercept all topics)
+```

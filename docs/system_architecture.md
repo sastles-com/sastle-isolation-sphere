@@ -1,12 +1,14 @@
-# Isolation Sphere システムアーキテクチャ
+> **English** · [日本語](system_architecture.ja.md)
 
-最終更新: 2025-12-02
+# Isolation Sphere System Architecture
 
-## 概要
+Last updated: 2025-12-02
 
-Isolation Sphereは、ESP32ベースの球体ディスプレイとPythonバックエンドサーバーで構成される、リアルタイムIMU姿勢可視化システムです。
+## Overview
 
-## システム構成
+Isolation Sphere is a real-time IMU orientation visualization system composed of an ESP32-based spherical display and a Python backend server.
+
+## System Architecture
 
 ```
 ┌─────────────────┐      MQTT        ┌──────────────────┐
@@ -14,7 +16,7 @@ Isolation Sphereは、ESP32ベースの球体ディスプレイとPythonバッ�
 │   (M5Atom S3R)  │  (192.168.49.1)  │  (mosquitto)     │
 │                 │                   └──────────────────┘
 │  - IMU (BNO055) │                            │
-│  - LED (800個)  │                            │
+│  - LED (800)    │                            │
 │  - LCD Display  │                            │
 └─────────────────┘                            │
                                                │ MQTT Subscribe
@@ -39,64 +41,64 @@ Isolation Sphereは、ESP32ベースの球体ディスプレイとPythonバッ�
                                     └──────────────────────┘
 ```
 
-## データフロー
+## Data Flow
 
-### IMU姿勢データの流れ
+### Flow of IMU Orientation Data
 
-1. **ESP32 (送信側)**
-   - IMUセンサー（BNO055）から姿勢データ取得
-   - Quaternion形式に変換: `{w, x, y, z}`
-   - MQTTトピック `sphere/sphere001/imu` に送信
-   - 送信頻度: 約10Hz（継続的）
+1. **ESP32 (sender side)**
+   - Acquires orientation data from the IMU sensor (BNO055)
+   - Converts to quaternion format: `{w, x, y, z}`
+   - Publishes to MQTT topic `sphere/sphere001/imu`
+   - Publish rate: approx. 10 Hz (continuous)
 
 2. **MQTT Broker**
-   - ブローカーアドレス: `192.168.49.1:1883`
-   - トピック: `sphere/sphere001/imu`
-   - QoS: 0 (最新データ優先)
+   - Broker address: `192.168.49.1:1883`
+   - Topic: `sphere/sphere001/imu`
+   - QoS: 0 (latest data prioritized)
 
-3. **Python Server (中継処理)**
-   - **MQTTService**: ブローカーからサブスクライブ
-   - **データフォーマット**: `{"w":0.707,"x":0.707,"y":0.0,"z":0.0}`
-   - **StateManager**: 状態を保存
-   - **WebSocket**: 接続中のクライアントに配信
+3. **Python Server (relay processing)**
+   - **MQTTService**: subscribes from the broker
+   - **Data format**: `{"w":0.707,"x":0.707,"y":0.0,"z":0.0}`
+   - **StateManager**: stores the state
+   - **WebSocket**: distributes to connected clients
 
-4. **Web Frontend (表示)**
-   - **WebSocketContext**: リアルタイム受信
-   - **HoloSphere Component**: Quaternionを適用
-   - **Three.js**: 3D球体をリアルタイム回転
+4. **Web Frontend (display)**
+   - **WebSocketContext**: real-time reception
+   - **HoloSphere Component**: applies the quaternion
+   - **Three.js**: rotates the 3D sphere in real time
 
-## 通信プロトコル
+## Communication Protocols
 
 ### MQTT Topics
 
 | Topic | Direction | Format | Description |
 |-------|-----------|--------|-------------|
-| `sphere/{id}/imu` | ESP32 → Server | `{"w":float,"x":float,"y":float,"z":float}` | IMU姿勢データ |
-| `sphere/{id}/status` | ESP32 → Server | `{"status":string,"timestamp":string}` | デバイス状態 |
+| `sphere/{id}/imu` | ESP32 → Server | `{"w":float,"x":float,"y":float,"z":float}` | IMU orientation data |
+| `sphere/{id}/status` | ESP32 → Server | `{"status":string,"timestamp":string}` | Device state |
 
 ### WebSocket Messages
 
 | Type | Direction | Payload | Description |
 |------|-----------|---------|-------------|
-| `STATE_UPDATE` | Server → Client | `{"imu":{...},"playback":{...},"params":{...}}` | 状態更新 |
-| `SET_PLAYBACK` | Client → Server | `{"isPlaying":bool}` | 再生制御 |
-| `SET_PARAMS` | Client → Server | `{"brightness":int,"speed":int,"hue":int}` | パラメータ設定 |
+| `STATE_UPDATE` | Server → Client | `{"imu":{...},"playback":{...},"params":{...}}` | State update |
+| `SET_PLAYBACK` | Client → Server | `{"isPlaying":bool}` | Playback control |
+| `SET_PARAMS` | Client → Server | `{"brightness":int,"speed":int,"hue":int}` | Parameter configuration |
 
 ### REST API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/config` | GET | システム設定取得 |
-| `/api/playlist/playlists` | GET | プレイリスト一覧 |
-| `/api/playlist/playlists` | POST | プレイリスト作成 |
-| `/ws` | WebSocket | リアルタイム通信 |
-| `/health` | GET | ヘルスチェック |
+| `/api/config` | GET | Get system configuration |
+| `/api/playlist/playlists` | GET | List playlists |
+| `/api/playlist/playlists` | POST | Create playlist |
+| `/ws` | WebSocket | Real-time communication |
+| `/health` | GET | Health check |
 
-## 設定ファイル
+## Configuration Files
 
-### config.json (共有設定)
+### config.json (shared configuration)
 
-場所: `core/data/config.json` (ESP32とServer共通)
+Location: `core/data/config.json` (shared by ESP32 and Server)
 
 ```json
 {
@@ -117,7 +119,7 @@ Isolation Sphereは、ESP32ベースの球体ディスプレイとPythonバッ�
 }
 ```
 
-## 技術スタック
+## Technology Stack
 
 ### ESP32 Firmware
 - **Platform**: ESP32-S3 (M5Atom S3R)
@@ -125,83 +127,85 @@ Isolation Sphereは、ESP32ベースの球体ディスプレイとPythonバッ�
 - **Libraries**:
   - PubSubClient (MQTT)
   - Adafruit BNO055 (IMU)
-  - FastLED (LED制御)
+  - FastLED (LED control)
   - M5Unified (Display)
-  - ArduinoJson (設定管理)
+  - ArduinoJson (configuration management)
 
 ### Python Server
 - **Framework**: FastAPI 
 - **Libraries**:
   - paho-mqtt (MQTT client)
   - uvicorn (ASGI server)
-- **特徴**:
-  - 非同期処理
-  - WebSocket サポート
-  - 自動リロード (開発時)
+- **Characteristics**:
+  - Asynchronous processing
+  - WebSocket support
+  - Auto-reload (during development)
 
 ### Web Frontend
 - **Framework**: React
 - **Libraries**:
-  - Three.js + @react-three/fiber (3D描画)
-  - Material-UI (UIコンポーネント)
-  - react-swipeable (ジェスチャー)
-- **ビルド**: Vite
+  - Three.js + @react-three/fiber (3D rendering)
+  - Material-UI (UI components)
+  - react-swipeable (gestures)
+- **Build**: Vite
 
-## デプロイ
+## Deployment
 
-### サーバー起動
+### Starting the Server
 ```bash
 cd server
 python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9000
 ```
 
-### フロントエンドビルド
+### Building the Frontend
 ```bash
 cd server/frontend
 npm run build
 ```
 
-ビルド成果物は `server/frontend/dist/` に生成され、FastAPIが静的ファイルとして配信します。
+The build artifacts are generated in `server/frontend/dist/`, and FastAPI serves them as static files.
 
-## ネットワーク構成
+## Network Configuration
 
 - **WiFi SSID**: ESP32-P2P-Direct
-- **サーバーIP**: 192.168.49.1 (WiFiアクセスポイント)
-- **MQTTポート**: 1883
-- **HTTPポート**: 9000
-- **WebSocketポート**: 9000 (同一ポート)
+- **Server IP**: 192.168.49.1 (WiFi access point)
+- **MQTT port**: 1883
+- **HTTP port**: 9000
+- **WebSocket port**: 9000 (same port)
 
-## 実装済み機能
+## Implemented Features
 
 ### ESP32
-- ✅ IMUセンサー初期化とQuaternion取得
-- ✅ MQTT接続とデータ送信
-- ✅ LED制御 (FastLED)
-- ✅ LCD表示 (デバッグ情報)
-- ✅ 設定ファイル読み込み (config.json)
+- ✅ IMU sensor initialization and quaternion acquisition
+- ✅ MQTT connection and data transmission
+- ✅ LED control (FastLED)
+- ✅ LCD display (debug information)
+- ✅ Configuration file loading (config.json)
 
 ### Python Server
-- ✅ MQTT接続とサブスクライブ
-- ✅ WebSocket リアルタイム配信
+- ✅ MQTT connection and subscription
+- ✅ WebSocket real-time distribution
 - ✅ REST API (config, playlist)
-- ✅ StateManager (状態管理)
-- ✅ config.json からブローカーアドレス読み込み
-- ✅ ESP32フォーマット対応
-- ✅ asyncio イベントループ対応
+- ✅ StateManager (state management)
+- ✅ Reading the broker address from config.json
+- ✅ ESP32 format support
+- ✅ asyncio event loop support
 
 ### Web Frontend
-- ✅ WebSocket接続 (動的ポート)
-- ✅ 3D球体表示 (Three.js)
-- ✅ IMU Quaternion適用
-- ✅ リアルタイム姿勢同期
-- ✅ ダッシュボードUI
-- ✅ レスポンシブデザイン
-- ✅ スワイプナビゲーション
+- ✅ WebSocket connection (dynamic port)
+- ✅ 3D sphere display (Three.js)
+- ✅ IMU quaternion application
+- ✅ Real-time orientation synchronization
+- ✅ Dashboard UI
+- ✅ Responsive design
+- ✅ Swipe navigation
 
-## 今後の課題
+## Future Work
 
-- [ ] LED映像ストリーミング (UDP)
-- [ ] プレイリスト再生機能
-- [ ] 設定画面からのMQTT設定変更
-- [ ] パフォーマンス最適化
-- [ ] エラーハンドリング強化
+- [ ] LED video streaming (UDP)
+- [ ] Playlist playback feature
+- [ ] Changing MQTT settings from the configuration screen
+- [ ] Performance optimization
+- [ ] Enhanced error handling
+</content>
+</invoke>

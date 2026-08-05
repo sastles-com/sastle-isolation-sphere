@@ -1,39 +1,41 @@
-# UI v2 追補仕様 — 実機 LED レイアウトの 3D 球体マッピング
+> **English** · [日本語](ui-v2-led-mapping-spec.ja.md)
 
-親仕様: [`ui-v2-design-spec.md`](ui-v2-design-spec.md) / ブランチ: `feat/ui-v2`
-作成: 2026-07-06 / 実装者 (Opus セッション) 向け指示書。この文書単体で着手できる。
+# UI v2 supplementary spec — 3D sphere mapping of the real LED layout
+
+Parent spec: [`ui-v2-design-spec.md`](ui-v2-design-spec.md) / Branch: `feat/ui-v2`
+Created: 2026-07-06 / An instruction sheet for the implementer (Opus session). Implementation can begin from this document alone.
 
 ---
 
-## 0. 背景 — ストリーミング設計の現状整理 (前提知識)
+## 0. Background — current state of the streaming design (prerequisite knowledge)
 
-**球体へ流れるデータは「圧縮画像」であり、800 点の LED RGB ではない。**
+**The data flowing to the sphere is a "compressed image", not the RGB of 800 LEDs.**
 
 ```
 [Server] video_streamer.py                          [Device] ESP32 (AtomS3R)
- 動画を OpenCV でデコード                              ImageManager: UDP受信 → TJpg_Decoder
- → 320x160 リサイズ → JPEG 圧縮                       → RGB565 フレームバッファ
- → UDP :8889 へ分割送信 (MAGIC "JPEG")     ────▶      LEDManager: LED毎に 3D座標→UV変換して
-                                                      画像をサンプリング (円周マルチサンプル) → 800 LED
+ decode the video with OpenCV                        ImageManager: UDP receive → TJpg_Decoder
+ → resize to 320x160 → JPEG compression              → RGB565 frame buffer
+ → split-send to UDP :8889 (MAGIC "JPEG")  ────▶      LEDManager: per-LED 3D-coord → UV conversion
+                                                      to sample the image (circular multisample) → 800 LEDs
 ```
 
-- 送信フォーマット: **equirectangular (正距円筒) パノラマ画像 320×160 の JPEG**
-- **LED への色割当 (UV マッピング) はデバイス側** (`core/src/LEDManager.cpp` の `sphereToUV()`) で行う
-- 800 点の RGB を直接送る経路は、MQTT `SET_LED {mode:"pixels", pixels:[...]}` (パターン制御用・低レート) のみ。映像ストリーミングには使わない
-- **UI (ブラウザ) は映像フレームを受信していない** — UDP はデバイス宛のみ
+- Send format: **an equirectangular panorama image, 320×160 JPEG**
+- **Color assignment to LEDs (UV mapping) is done on the device side** (`sphereToUV()` in `core/src/LEDManager.cpp`)
+- The path that sends the 800 RGB values directly is only MQTT `SET_LED {mode:"pixels", pixels:[...]}` (for pattern control, low rate). It is not used for video streaming.
+- **The UI (browser) does not receive the video frames** — UDP goes only to the device
 
-この前提から、UI の LED マッピング表示は2段階に分ける:
+From this premise, the UI's LED mapping display is split into two phases:
 
-| Phase | 内容 | 状態 |
+| Phase | Content | State |
 |---|---|---|
-| **A** | LED 物理配置 800 点を球体上に描画し、hue/brightness パラメータで着色 | **実装済み** (HoloSphere.jsx の LedPointCloud) |
-| **B** | サーバーがプレビューフレームを UI にも配信し、UI 側で **IMU quaternion を使ってファームと同一の回転+UV変換** を再現、**実際の映像色**で 800 点を光らせる (デジタルツイン) | **実装対象** (§5 が本仕様) |
+| **A** | Draw the 800 physical LED positions on the sphere and color them with the hue/brightness parameters | **implemented** (LedPointCloud in HoloSphere.jsx) |
+| **B** | The server also distributes preview frames to the UI, and the UI **reproduces the same rotation + UV conversion as the firmware using the IMU quaternion**, lighting the 800 points with the **actual video colors** (digital twin) | **implementation target** (§5 is this spec) |
 
 ---
 
-## 1. データソース
+## 1. Data source
 
-`core/data/led_layouts-5strip.csv` (801 行 = ヘッダ + 800 LED):
+`core/data/led_layouts-5strip.csv` (801 rows = header + 800 LEDs):
 
 ```csv
 FaceID,strip,strip_num,x,y,z
@@ -42,21 +44,21 @@ FaceID,strip,strip_num,x,y,z
 ...
 ```
 
-- `x,y,z`: **単位球面上**の LED 位置 (|v| ≈ 1.0)。そのまま Three.js 座標に使える
-- `strip`: 0-4 (5 ストリップ)、`strip_num`: ストリップ内インデックス 0-159
-- ファームウェアと同一のファイル (実機と同じ配置が UI に出る)
+- `x,y,z`: LED positions **on the unit sphere** (|v| ≈ 1.0). Usable directly as Three.js coordinates
+- `strip`: 0-4 (5 strips), `strip_num`: index within the strip 0-159
+- The same file as the firmware (the same layout as the real device appears in the UI)
 
 ---
 
-## 2. サーバー実装 — レイアウト配信エンドポイント
+## 2. Server implementation — layout distribution endpoint
 
-`server/app/api/endpoints/config.py` に追加する (config ルーターは `/api/config` プレフィックス済み):
+Add to `server/app/api/endpoints/config.py` (the config router is already prefixed with `/api/config`):
 
 ```python
 import csv
 import os
 
-# CONFIG_SEARCH_PATHS と同じ流儀 (サーバーは server/ から起動される前提)
+# Same style as CONFIG_SEARCH_PATHS (assuming the server is started from server/)
 LED_LAYOUT_SEARCH_PATHS = [
     "../core/data/led_layouts-5strip.csv",
     "data/led_layouts-5strip.csv",
@@ -64,10 +66,10 @@ LED_LAYOUT_SEARCH_PATHS = [
 
 @router.get("/led-layout")
 async def get_led_layout():
-    """LED 物理レイアウトをフラット配列で返す。
+    """Return the LED physical layout as flat arrays.
 
-    返り値: {count, strips, positions: [x0,y0,z0, x1,y1,z1, ...], strip: [s0, s1, ...]}
-    positions はそのまま Float32Array に流し込める形式。
+    Return value: {count, strips, positions: [x0,y0,z0, x1,y1,z1, ...], strip: [s0, s1, ...]}
+    positions is in a form that can be poured straight into a Float32Array.
     """
     for path in LED_LAYOUT_SEARCH_PATHS:
         if not os.path.exists(path):
@@ -86,40 +88,40 @@ async def get_led_layout():
     raise HTTPException(status_code=404, detail="LED layout CSV not found")
 ```
 
-設計判断 (変更しないこと):
+Design decisions (do not change):
 
-- **CSV を frontend にコピーしない** — core/data が単一ソース。基板改版でレイアウトが
-  変わっても UI が自動追従する
-- フラット配列 JSON (~30KB) で十分軽い。バイナリ化・キャッシュヘッダは不要
-- レスポンスは初回 1 回だけ取得する想定 (UI 側でモジュールスコープにキャッシュ)
+- **Do not copy the CSV into the frontend** — core/data is the single source. Even if the layout
+  changes on a board revision, the UI follows automatically
+- A flat-array JSON (~30KB) is light enough. Binarization or cache headers are unnecessary
+- The response is expected to be fetched only once at first (cached in module scope on the UI side)
 
 ---
 
-## 3. フロントエンド実装 — LED ポイントクラウド
+## 3. Frontend implementation — LED point cloud
 
-対象: `server/frontend/src/components/sphere/HoloSphere.jsx` (Phase 1 で流用中のコンポーネント)
+Target: `server/frontend/src/components/sphere/HoloSphere.jsx` (the component being reused in Phase 1)
 
-### 3.1 構造変更
+### 3.1 Structural change
 
-現在は `<Sphere>`(wireframe) 単体に quaternion を適用している。これを **group 化**し、
-ワイヤーフレーム球と LED 点群の両方が IMU で一緒に回るようにする:
+Currently a quaternion is applied to a single `<Sphere>` (wireframe). Turn this into a **group** so that
+both the wireframe sphere and the LED point cloud rotate together with the IMU:
 
 ```jsx
-<group ref={groupRef} scale={2.2}>        {/* quaternion は group に適用 */}
-    <Sphere args={[1, 32, 32]}>           {/* 既存ワイヤーフレーム: opacity を 0.6 → 0.12 に下げ、
-                                              LED 点群を主役にする (骨格として薄く残す) */}
+<group ref={groupRef} scale={2.2}>        {/* the quaternion is applied to the group */}
+    <Sphere args={[1, 32, 32]}>           {/* existing wireframe: lower opacity from 0.6 → 0.12 to
+                                              make the LED point cloud the star (keep the skeleton faintly) */}
     <LedPointCloud hue={hue} brightness={brightness} />
 </group>
 ```
 
-### 3.2 `LedPointCloud` コンポーネント (新規)
+### 3.2 `LedPointCloud` component (new)
 
-- マウント時に `apiGet('/api/config/led-layout')` → `Float32Array(positions)` で
-  `BufferGeometry` の `position` 属性を構築。**モジュールスコープで1回だけ fetch しキャッシュ**
-  (シート開閉等の再マウントで再取得しない)
-- 描画は `<points>` + `PointsMaterial`。800 点 = 1 ドローコールでスマホでも無負荷
-- **丸い点**にするため、円形スプライトを `CanvasTexture` でコード生成して `map` に渡す
-  (64×64 canvas に radial gradient の白丸。外部画像ファイルは使わない):
+- On mount, `apiGet('/api/config/led-layout')` → build the `position` attribute of `BufferGeometry`
+  from `Float32Array(positions)`. **Fetch only once in module scope and cache it**
+  (do not re-fetch on remounts caused by sheet open/close, etc.)
+- Rendered with `<points>` + `PointsMaterial`. 800 points = 1 draw call, no load even on a smartphone
+- To make them **round dots**, generate a circular sprite by code with a `CanvasTexture` and pass it to `map`
+  (a white circle with a radial gradient on a 64×64 canvas. No external image files):
 
 ```jsx
 const dotTexture = (() => {
@@ -141,214 +143,215 @@ const dotTexture = (() => {
 })();
 ```
 
-- マテリアル設定:
+- Material settings:
 
 ```jsx
 <pointsMaterial
     map={dotTexture()}
-    color={sphereColor}                      /* 既存 hueToRgb(hue) を流用 */
-    size={0.05}                              /* group scale 2.2 の球に対する見え幅。実機で微調整 */
+    color={sphereColor}                      /* reuse the existing hueToRgb(hue) */
+    size={0.05}                              /* apparent width for the sphere at group scale 2.2. Fine-tune on the real device */
     sizeAttenuation
     transparent
-    depthWrite={false}                       /* 点同士の重なりで矩形が出るのを防ぐ */
-    blending={THREE.AdditiveBlending}        /* LED の発光感 */
+    depthWrite={false}                       /* prevents rectangles from appearing where points overlap */
+    blending={THREE.AdditiveBlending}        /* the emissive feel of LEDs */
     opacity={0.35 + 0.65 * (brightness / 100)}
 />
 ```
 
-- **brightness=0 でも 0.35 で薄く見える**(配置確認ができる) のは意図的仕様
+- **Being faintly visible at 0.35 even at brightness=0** (so the layout can be checked) is an intentional spec
 
-### 3.3 ストリップ識別モード (デバッグ用、必須)
+### 3.3 Strip identification mode (for debugging, required)
 
-実機ブリングアップで「どのストリップがどの縦縞か」を確認する用途があるため、
-点ごとの頂点色でストリップを塗り分けるモードを実装する:
+Because during real-device bring-up there is a use for checking "which strip is which vertical stripe",
+implement a mode that color-codes the strips using per-point vertex colors:
 
-- `LedPointCloud` に `colorMode: 'params' | 'strip'` prop
-- `'strip'` 時は `color` 属性 (頂点色) を使い、strip 0-4 を
-  `hsl(strip * 72, 85%, 60%)` で着色 (5 色が 72° ずつ離れ、確実に見分けられる)
-- 切替 UI は CONTROL DRAWER の **ORIENTATION セクションにトグル** を置く (P4 で配線。
-  P4 未実装の間は prop のデフォルト `'params'` のままでよい)
+- A `colorMode: 'params' | 'strip'` prop on `LedPointCloud`
+- In `'strip'` mode, use the `color` attribute (vertex color) and color strips 0-4 with
+  `hsl(strip * 72, 85%, 60%)` (5 colors 72° apart, reliably distinguishable)
+- Place the toggle UI as a **toggle in the ORIENTATION section** of the CONTROL DRAWER (wired in P4;
+  while P4 is unimplemented, leaving the prop at its default `'params'` is fine)
 
-### 3.4 やらないこと
+### 3.4 Non-goals
 
-- ワイヤーフレーム球の削除 (薄く残す。完全に消すかは発注者の実機確認後)
-- 点群の LOD・カリング (800 点では不要)
-- OrbitControls の追加 (球体の回転は IMU のみ、現行方針を維持)
-
----
-
-## 4. 受け入れ基準 (Phase A — 実装済み、リグレッション基準として維持)
-
-1. STAGE の球体上に **800 点**が描画され、実機と同じ縦縞 5 ストリップの配置が視認できる
-   (赤道付近に LED が無い千鳥配置、極に点が無い、が CSV 通り再現される)
-2. IMU の quaternion で**ワイヤーフレームと点群が一体で回転**する
-3. 左端エッジドラッグ (P3 実装済みなら) または `SET_PARAMS` で hue を変えると点群の色が追従する
-4. brightness で点群の輝度が変わる
-5. `colorMode='strip'` でストリップ 5 色の塗り分けが確認できる (トグル UI は P4 でよい)
-6. スマホ実機 (iPhone Safari / Android Chrome) で 60fps を維持 (dev tools の FPS メータ目視で可)
-7. `npm run build` が通り、FastAPI 配信 (`/`) で動作する
-8. レイアウト CSV が無い環境ではエンドポイントが 404 を返し、**UI は点群なしで
-   従来表示のまま動く** (fetch 失敗で UI を壊さない)
+- Removing the wireframe sphere (keep it faint. Whether to hide it completely is after the client checks the real device)
+- LOD / culling of the point cloud (unnecessary at 800 points)
+- Adding OrbitControls (the sphere's rotation is IMU-only; maintain the current policy)
 
 ---
 
-## 5. Phase B 実装仕様 — IMU を使った 800 点 RGB 算出 (デジタルツイン)
+## 4. Acceptance criteria (Phase A — implemented, maintained as a regression baseline)
 
-**目的**: 再生中の映像と IMU quaternion から、**実機の各 LED が今まさに表示している色**を
-UI 側で再計算し、800 点に反映する。実機ファームの描画パス
-(`LEDManager.cpp` renderFrame: 回転 → UV 変換 → 画像サンプリング) の忠実な JS 移植。
+1. **800 points** are drawn on the STAGE sphere, and the same 5-strip vertical-stripe layout as the real device is visible
+   (a staggered arrangement with no LEDs near the equator, no points at the poles — reproduced exactly as in the CSV)
+2. The **wireframe and the point cloud rotate as one** driven by the IMU quaternion
+3. Changing hue via left-edge drag (if P3 is implemented) or via `SET_PARAMS` makes the point cloud's color follow
+4. brightness changes the point cloud's brightness
+5. With `colorMode='strip'`, the 5-color coding of the strips can be confirmed (the toggle UI can wait for P4)
+6. On a real smartphone (iPhone Safari / Android Chrome), 60fps is maintained (checking the dev tools FPS meter by eye is fine)
+7. `npm run build` passes and it works under FastAPI distribution (`/`)
+8. In an environment without the layout CSV, the endpoint returns 404, and **the UI keeps working with the conventional
+   display without the point cloud** (a fetch failure does not break the UI)
 
-### 5.1 サーバー: FRAME_PREVIEW 配信 (WS 新メッセージ)
+---
 
-`video_streamer.py` はデコード済み 320×160 JPEG を毎フレーム持っている。これを間引いて
-WebSocket observer へ配信する:
+## 5. Phase B implementation spec — 800-point RGB computation using the IMU (digital twin)
 
-- メッセージ: `{"type": "FRAME_PREVIEW", "payload": {"jpeg_b64": "<base64>", "w": 320, "h": 160, "seq": n}}`
-- **配信レート: 5fps** (200ms スロットル、定数化しておく)。停止中は送らない
-- 実装位置: `video_streamer` の送信ループ内でスロットル判定 → `state_manager` に
-  ブロードキャスト用メソッド (例 `notify_frame(jpeg_bytes)`) を追加して呼ぶ。
-  streamer は別スレッドなので **mqtt_service と同じ `run_coroutine_threadsafe` パターン**で
-  イベントループに投入する (`_submit_coroutine` を参考)
-- `_state` には**入れない** (retained 不要、STATE_UPDATE と混ぜない — LOG_LINE と同じ流儀)
-- 帯域: ~10KB × 5fps = 50KB/s/クライアント。LAN 前提で問題なし
+**Goal**: from the playing video and the IMU quaternion, recompute on the UI side **the color that each real LED is displaying right now**
+and reflect it on the 800 points. A faithful JS port of the real firmware's rendering path
+(`LEDManager.cpp` renderFrame: rotation → UV conversion → image sampling).
 
-### 5.2 UI: ファームと同一の変換パイプライン (逐語移植)
+### 5.1 Server: FRAME_PREVIEW distribution (new WS message)
 
-新規フック `useLedLiveColors(layout)` を作り、`LedPointCloud` の `colorMode='live'` で使う。
+`video_streamer.py` holds a decoded 320×160 JPEG every frame. Thin it out and
+distribute it to WebSocket observers:
 
-**入力 (すべて既存チャネルで揃う):**
+- Message: `{"type": "FRAME_PREVIEW", "payload": {"jpeg_b64": "<base64>", "w": 320, "h": 160, "seq": n}}`
+- **Distribution rate: 5fps** (200ms throttle, keep it as a constant). Do not send while stopped
+- Implementation location: inside `video_streamer`'s send loop, do the throttle check → add a broadcast method
+  to `state_manager` (e.g. `notify_frame(jpeg_bytes)`) and call it.
+  Since the streamer is a separate thread, submit it to the event loop with **the same `run_coroutine_threadsafe` pattern
+  as mqtt_service** (refer to `_submit_coroutine`)
+- **Do not put it in `_state`** (no retention needed, do not mix it with STATE_UPDATE — same style as LOG_LINE)
+- Bandwidth: ~10KB × 5fps = 50KB/s/client. No problem on the LAN premise
 
-| データ | 供給元 | レート |
+### 5.2 UI: the same conversion pipeline as the firmware (verbatim port)
+
+Create a new hook `useLedLiveColors(layout)` and use it in `LedPointCloud`'s `colorMode='live'`.
+
+**Inputs (all available on existing channels):**
+
+| Data | Provider | Rate |
 |---|---|---|
-| LED 座標 800 点 | `/api/config/led-layout` (Phase A 実装済み) | 初回1回 |
-| IMU quaternion | WS `STATE_UPDATE` payload.imu | **10Hz** (ファーム `IMU_PUBLISH_INTERVAL`) |
-| 映像フレーム | WS `FRAME_PREVIEW` (§5.1) | 5fps |
+| 800 LED coordinates | `/api/config/led-layout` (implemented in Phase A) | once at first |
+| IMU quaternion | WS `STATE_UPDATE` payload.imu | **10Hz** (firmware `IMU_PUBLISH_INTERVAL`) |
+| Video frame | WS `FRAME_PREVIEW` (§5.1) | 5fps |
 
-**フレーム受信処理**: `jpeg_b64` → `Image` → offscreen canvas に drawImage →
-`getImageData()` で `Uint8ClampedArray` を保持 (最新1枚のみ)。
+**Frame reception processing**: `jpeg_b64` → `Image` → drawImage onto an offscreen canvas →
+hold the `Uint8ClampedArray` via `getImageData()` (only the latest one).
 
-**色計算 — 参照元はファームウェアの実装 (これが正、本仕様の文章より優先):**
+**Color computation — the reference is the firmware's implementation (this is canonical, taking precedence over this document's prose):**
 
-「320×160 画像 → 800 LED の RGB」の変換はファームウェアに完全な実装が存在する。
-**下表の関数を JS へ逐語移植する**こと。「数学的に正しい形」への修正・最適化を禁止する
-(実機と同じ絵が出ることが唯一の正解基準。コード中のコメントは一部不正確なので挙動を正とする):
+The conversion "320×160 image → 800 LED RGB" has a complete implementation in the firmware.
+**Port the functions in the table below to JS verbatim.** Correcting or optimizing them into a "mathematically correct form" is prohibited
+(the sole criterion of correctness is that the same picture as the real device appears. Some comments in the code are inaccurate, so treat the behavior as canonical):
 
-| ファームウェア参照 (core/src/) | 役割 | 移植時の注意 |
+| Firmware reference (core/src/) | Role | Notes when porting |
 |---|---|---|
-| `LEDManager.cpp` **`updateLEDBuffer()`** (~L422) | **メインループ**。全体の処理順序はこの関数に従う | 冒頭で quaternion を **共役化 (`qx=-qx; qy=-qy; qz=-qz`) してから**回転に使う。UI も同じにすること (見落としやすい) |
-| `LEDManager.cpp` `rotateByQuaternion()` (L274) | LED body座標の回転: `v' = v + 2*cross(q.xyz, cross(q.xyz,v) + q.w*v)` | そのまま移植 |
-| `LEDManager.cpp` `sphereToUV()` (L242) | 回転後座標 → (u,v) | 内部の `_sqrt`/`_atan2` は `FastMath.h` 参照。`_atan2` は**度/180 (-1..1) を返す多項式近似**。JS では `Math.atan2(y,x)/Math.PI` で等価 (誤差<0.2°、量子化後ほぼ同一) |
-| `updateLEDBuffer()` 内の量子化 (L452) | `px = trunc(u*(W-1))`, `py = trunc(v*(H-1))` | W,H は**デバイスのデコード解像度** (下記⚠️) |
-| `LEDManager.cpp` **`sampleAveraged()`** (L495) + `setMultisample()` (L476) | **中心 + 半径2.0pxの円周6点 (K=7) の平均**。オフセットは前計算。x はラップ (`sx %= w`)、y はクランプ | config `led.multisample` (既定 ON/2.0px/6点) と同じ挙動で移植する。オフセットも同式で前計算 |
-| `ImageManager.cpp` `getPixel()` (L255) | フレームバッファから RGB 取得。**RGB565 → RGB888** (`r=5bit<<3, g=6bit<<2, b=5bit<<3`) | UI は fullcolor JPEG から取るため、忠実度を上げるなら取得後に RGB565 量子化 (`r&0xF8, g&0xFC, b&0xF8`) を掛ける (任意だが推奨) |
+| `LEDManager.cpp` **`updateLEDBuffer()`** (~L422) | **The main loop.** The overall processing order follows this function | At the start, **conjugate the quaternion (`qx=-qx; qy=-qy; qz=-qz`) before** using it for rotation. Do the same in the UI (easy to miss) |
+| `LEDManager.cpp` `rotateByQuaternion()` (L274) | Rotation of LED body coordinates: `v' = v + 2*cross(q.xyz, cross(q.xyz,v) + q.w*v)` | Port as-is |
+| `LEDManager.cpp` `sphereToUV()` (L242) | Rotated coordinates → (u,v) | The internal `_sqrt`/`_atan2` refer to `FastMath.h`. `_atan2` is a **polynomial approximation returning degrees/180 (-1..1)**. In JS, `Math.atan2(y,x)/Math.PI` is equivalent (error <0.2°, virtually identical after quantization) |
+| Quantization inside `updateLEDBuffer()` (L452) | `px = trunc(u*(W-1))`, `py = trunc(v*(H-1))` | W,H are **the device's decode resolution** (see ⚠️ below) |
+| `LEDManager.cpp` **`sampleAveraged()`** (L495) + `setMultisample()` (L476) | **The average of the center + 6 points on a circle of radius 2.0px (K=7).** Offsets are precomputed. x wraps (`sx %= w`), y is clamped | Port with the same behavior as config `led.multisample` (default ON/2.0px/6 points). Precompute the offsets with the same formula too |
+| `ImageManager.cpp` `getPixel()` (L255) | Get RGB from the frame buffer. **RGB565 → RGB888** (`r=5bit<<3, g=6bit<<2, b=5bit<<3`) | Since the UI takes from a full-color JPEG, to increase fidelity apply an RGB565 quantization after fetching (`r&0xF8, g&0xFC, b&0xF8`) (optional but recommended) |
 
-処理順序 (updateLEDBuffer と同一):
-`quaternion共役化 → LED毎に[回転 → sphereToUV → px,py量子化 → sampleAveraged(K7)] → brightness乗算 → color属性へ`
+Processing order (same as updateLEDBuffer):
+`conjugate quaternion → per LED [rotate → sphereToUV → quantize px,py → sampleAveraged(K7)] → multiply by brightness → into the color attribute`
 
-> ⚠️ **デコード解像度**: デバイスは `ImageManager._jpegScale = 2` で **160×80 に縮小デコード**
-> しており、px/py の量子化もその解像度で行われる。UI で厳密一致させるなら offscreen canvas を
-> **160×80** にして同じ W,H で量子化する (推奨)。320×160 のままでも視認上の差はほぼ無いが、
-> 差異が出たらまずここを疑うこと。
+> ⚠️ **Decode resolution**: the device decodes at a reduced **160×80** with `ImageManager._jpegScale = 2`,
+> and px/py quantization is also done at that resolution. To match exactly in the UI, make the offscreen canvas
+> **160×80** and quantize with the same W,H (recommended). Leaving it at 320×160 has almost no visible difference, but
+> if a discrepancy appears, suspect this first.
 
-> ⚠️ **u の分布**: `_atan2(hd, ny)` は第1引数≥0 のため 0..180° しか返さず、
-> **u ∈ [0.5, 1.0] → px は画像幅の右半分しか使わない**。映像コンテンツ側が
-> この前提で作られているため、UI で勝手に補正しないこと。
+> ⚠️ **Distribution of u**: since `_atan2(hd, ny)`'s first argument is ≥0, it only returns 0..180°, so
+> **u ∈ [0.5, 1.0] → px uses only the right half of the image width.** Because the video content
+> is made on this premise, do not arbitrarily correct it in the UI.
 
-**回転の整合 (二重補正の整理)**: ファームは「LED body 座標を (共役) quaternion で回してから
-サンプリング」する = LED には世界固定の映像が映る。UI では点群グループ自体も quaternion で
-回転しているが、**サンプリングもファームと同一に『共役 quaternion で回転後の座標』で行う**。
-結果として UI の球体は「その姿勢の実機を外から見た絵」になる。これが正しいツイン。
-グループ回転を止めたり、無回転 UV でサンプリングしたりしないこと。
+**Rotation consistency (sorting out the double correction)**: the firmware "rotates the LED body coordinates by the (conjugate)
+quaternion, then samples" = a world-fixed video is projected onto the LEDs. In the UI, the point-cloud group itself is also
+rotated by the quaternion, but **sampling is also done exactly as in the firmware, on 'the coordinates after rotation by the conjugate quaternion'.**
+As a result, the UI's sphere becomes "the picture of the real device seen from outside in that orientation". This is the correct twin.
+Do not stop the group rotation, and do not sample with unrotated UV.
 
-**スコープ外 (移植しない)**: `overlayAxisIndicator()` (XYZ軸マーカー重畳) は Phase B では
-移植しない (実機デバッグ用オーバーレイ。必要になれば同関数を参照して追加)。
+**Out of scope (not ported)**: `overlayAxisIndicator()` (XYZ axis-marker overlay) is not ported in Phase B
+(a real-device debugging overlay. If needed, refer to the same function and add it).
 
-### 5.2b 表示ルール — 前面/裏面の描き分け (2026-07-06 仕様追加、同日2回改訂)
+### 5.2b Display rule — drawing front/back faces distinctly (spec addition 2026-07-06, revised twice the same day)
 
-live モードでは「実機を外から見ている」見え方に寄せる:
+In live mode, lean toward the "looking at the real device from outside" appearance:
 
-1. **前面の LED のみ映像 RGB を適用**する。**裏面 (法線がカメラと逆向き) は非表示**
-   (改訂: 当初の「50% グレー」は廃止)
-   - 実装: ブレンディングを **`AdditiveBlending` のまま**とし (params モードと同じ)、
-     裏面の頂点色を **黒 `(0,0,0)`** にする。加算合成では黒 = 何も描かれない = 完全不可視。
-     `depthWrite` や `NormalBlending` への変更は**不要** (グレー混濁問題自体が消えるため、
-     旧仕様の項目 4 は撤回)
-2. **ワイヤーフレーム球は live 中は非表示** (opacity 0)。定数 1 つで「薄表示 (0.05 程度)」に
-   切替できるようにしておく。params / strip モードでは従来どおり 0.12
-3. **表示座標系の変換 (Z-up → Y-up)**: レイアウト CSV は CAD 由来の **Z-up**
-   (赤道が z=0 平面、極が ±Z)。three.js の画面は Y-up のため、そのまま置くと
-   **映像の上方向が +Z (視聴者方向) を向いて見える**。
-   **quaternion 回転グループのさらに外側**に固定回転を1段かませて補正する:
+1. **Apply the video RGB only to front-facing LEDs.** **Hide the back face (whose normal points away from the camera)**
+   (revised: the original "50% gray" is abolished)
+   - Implementation: keep the blending as **`AdditiveBlending`** (same as params mode), and
+     make the back-facing vertex color **black `(0,0,0)`**. In additive blending, black = nothing drawn = completely invisible.
+     Changing to `depthWrite` or `NormalBlending` is **unnecessary** (because the gray-muddiness problem itself disappears;
+     item 4 of the old spec is withdrawn)
+2. **The wireframe sphere is hidden during live** (opacity 0). Make it switchable to "faint display (around 0.05)"
+   via a single constant. In params / strip modes, keep it at 0.12 as before
+3. **Display coordinate transform (Z-up → Y-up)**: the layout CSV is CAD-derived **Z-up**
+   (equator on the z=0 plane, poles at ±Z). Since three.js's screen is Y-up, placing it as-is makes
+   **the video's up direction appear to point toward +Z (toward the viewer)**.
+   Interpose one fixed rotation **outside the quaternion-rotation group** to correct it:
 
    ```jsx
-   <group rotation={[-Math.PI / 2, 0, 0]}>   {/* Z-up → Y-up: 映像の上=画面の上 */}
-       <group ref={groupRef} scale={2.2}> ... </group>   {/* IMU quaternion 適用側 */}
+   <group rotation={[-Math.PI / 2, 0, 0]}>   {/* Z-up → Y-up: video up = screen up */}
+       <group ref={groupRef} scale={2.2}> ... </group>   {/* the IMU-quaternion-applied side */}
    </group>
    ```
 
-   - **表示専用の変換**であり、§5.2 のサンプリング (ファーム逐語移植パス) には
-     **一切影響させない** (実機の発色は変わらないので UI 側の見た目だけ直す)
-4. **前面判定**: カメラは +Z 固定 ([0,0,6])。判定は**合成後のワールド座標の z 成分**で行う。
-   外側固定回転 Rx(-90°) は (x,y,z)→(x,z,-y) なので、
-   `z_world = -( R(q)·p ).y` (q = 表示用の**非共役** quaternion)。
-   `z_world > 0` → 前面 (映像色) / `z_world ≤ 0` → 裏面 (黒=非表示)
+   - This is a **display-only transform** and must have **no effect at all** on §5.2's sampling
+     (the firmware verbatim-port path) (the real device's colors do not change; only the UI's appearance is fixed)
+4. **Front-face judgment**: the camera is fixed at +Z ([0,0,6]). The judgment is made by **the z component of the composited world coordinates.**
+   The outer fixed rotation Rx(-90°) maps (x,y,z)→(x,z,-y), so
+   `z_world = -( R(q)·p ).y` (q = the **non-conjugate** quaternion used for display).
+   `z_world > 0` → front face (video color) / `z_world ≤ 0` → back face (black = hidden)
 
-> ⚠️ **回転の使い分けに注意**: サンプリング (§5.2) は**共役** quaternion、
-> 前面判定は**非共役** (表示と同じ) quaternion + 外側固定回転の合成。
-> サンプリング用に回した座標を流用すると判定が逆になる。
-> 800 点 × 回転 2 回でも計算量は問題ない
+> ⚠️ **Be careful which rotation you use**: sampling (§5.2) uses the **conjugate** quaternion,
+> while the front-face judgment uses the **non-conjugate** (same as display) quaternion + the outer fixed rotation composited.
+> If you reuse the coordinates rotated for sampling, the judgment is inverted.
+> Even 800 points × 2 rotations is no problem for computation
 
-### 5.3 colorMode の拡張とフォールバック
+### 5.3 colorMode extension and fallback
 
-- `colorMode: 'params' | 'strip' | 'live'` に拡張
-- `'live'`: vertexColors 使用、material color=#fff、brightness は頂点色に焼き込み済みのため
-  opacity は固定 (1.0)。ブレンディング・球メッシュ・座標系の扱いは **§5.2b の表示ルールに従う**
-  (Additive のまま、前面のみ映像色 / 裏面は黒=非表示、ワイヤーフレーム非表示、Z-up→Y-up 変換)
-- **フレームが 3 秒以上届かない場合は自動で `'params'` 表示に落とす** (再生停止・切断時)。
-  復帰したら `'live'` に戻る。ユーザー操作は不要
-- `document.hidden` 中は色計算を停止 (バックグラウンドタブで無駄な計算をしない)
+- Extend to `colorMode: 'params' | 'strip' | 'live'`
+- `'live'`: uses vertexColors, material color=#fff. Since brightness is baked into the vertex color,
+  opacity is fixed (1.0). The handling of blending, sphere mesh, and coordinate system **follows §5.2b's display rules**
+  (stay Additive, front only shows video color / back is black = hidden, wireframe hidden, Z-up→Y-up transform)
+- **If frames do not arrive for 3 seconds or more, automatically drop to the `'params'` display** (on playback stop / disconnect).
+  When it recovers, return to `'live'`. No user action needed
+- While `document.hidden`, stop the color computation (do not waste computation on a background tab)
 
-### 5.4 性能予算
+### 5.4 Performance budget
 
-- 色計算: 800 × (quat回転 + atan2×2 + 配列参照) ≈ 0.1ms/回、最大 15Hz → 無視できる
-- JPEG デコード: ブラウザネイティブ (Image) 5fps → 無視できる
-- **60fps 維持が受け入れ条件** (色計算は useFrame 内でやらない。フレーム/IMU イベント駆動)
+- Color computation: 800 × (quat rotation + atan2×2 + array lookup) ≈ 0.1ms/pass, at most 15Hz → negligible
+- JPEG decode: browser-native (Image) at 5fps → negligible
+- **Maintaining 60fps is an acceptance condition** (do not do the color computation inside useFrame. Frame/IMU event-driven)
 
-### 5.5 Phase B 受け入れ基準
+### 5.5 Phase B acceptance criteria
 
-1. テスト動画 (上半分赤/下半分青、または経度グリッド) を再生し、**UI の前面 800 点の模様が
-   実機 LED の発色と一致**する (向き・境界位置まで)
-2. 実機を手で回転させると、UI 上で点群 (球) が回る一方、**映像の模様は世界固定に見える**
-   — 実機の見た目と同じ挙動
-3. **映像の上方向が画面の上 (+Y) に見える** (Z-up→Y-up 変換の確認。
-   例: 上=空/下=地面のテスト映像で空が画面上に来る)
-4. **前面 (法線がカメラ向き) の LED だけが映像色**になり、**裏面の LED は見えない**。
-   回転すると可視/不可視の境界が球の輪郭 (シルエットエッジ) に沿って移動する
-5. live 中は**ワイヤーフレーム球が見えない** (定数変更で薄表示に切替できる)
-6. 再生停止 → 3 秒で params 着色へフォールバック、再生再開で live に自動復帰
-   (params / strip モードでは従来どおりの表示のまま)
-7. FRAME_PREVIEW 配信中も WS の STATE_UPDATE / コマンドが遅延しない
-8. スマホ実機で 60fps 維持、バックグラウンドタブで CPU を食わない
+1. Play a test video (top half red / bottom half blue, or a longitude grid) and **the pattern of the UI's front 800 points
+   matches the color emission of the real device's LEDs** (down to orientation and boundary position)
+2. When you rotate the real device by hand, the point cloud (sphere) rotates in the UI while **the video's pattern appears world-fixed**
+   — the same behavior as the real device's appearance
+3. **The video's up direction appears at the top of the screen (+Y)** (confirming the Z-up→Y-up transform.
+   e.g. with a test video of sky at top / ground at bottom, the sky comes to the top of the screen)
+4. **Only front-facing LEDs (normal toward the camera) show video color**, and **back-facing LEDs are invisible.**
+   As you rotate, the visible/invisible boundary moves along the sphere's outline (silhouette edge)
+5. During live, **the wireframe sphere is invisible** (switchable to faint display by changing a constant)
+6. Playback stop → fall back to params coloring in 3 seconds; playback resume → automatically return to live
+   (in params / strip modes, the conventional display stays as before)
+7. STATE_UPDATE / commands on the WS are not delayed even during FRAME_PREVIEW distribution
+8. On a real smartphone, 60fps is maintained; it does not consume CPU on a background tab
 
 ---
 
-## 6. 実装手順 (Opus セッション向け)
+## 6. Implementation steps (for the Opus session)
 
 ```bash
 git fetch && git switch feat/ui-v2
 ```
 
-**Phase A (実装済み)**: §2 エンドポイント + §3 LedPointCloud → HoloSphere.jsx に反映済み。
+**Phase A (implemented)**: §2 endpoint + §3 LedPointCloud → already reflected in HoloSphere.jsx.
 
-**Phase B (今回の実装対象)**:
+**Phase B (this implementation target)**:
 
-1. §5.1 サーバー側 FRAME_PREVIEW 配信 (`video_streamer.py` + `state_manager.py`)。
-   `verify_server_comm.py` の流儀で、WS を張って FRAME_PREVIEW が 5fps で届くことを
-   スクリプト確認できるとよい (動画再生は `POST /api/playlist/playback/start`)
-2. §5.2 `useLedLiveColors` フック + `LedPointCloud` の `colorMode='live'` 対応。
-   **ファーム式の逐語移植** (`rotateByQuaternion` / `sphereToUV`) がこのタスクの核心。
-   `core/src/LEDManager.cpp:242-297` と `core/src/FastMath.h` を必ず原文参照すること
-3. §5.3 フォールバック (3秒 → params) と `document.hidden` 対応
-4. §5.5 受け入れ基準を確認。1 と 2 は実機 LED との突き合わせが必要なため、
-   実機がない場合は「テスト動画 + UI 単体の模様検証」まで行い、実機照合は発注者に依頼
-5. コミット例: `feat(server+frontend): FRAME_PREVIEW配信とIMU連動デジタルツイン (LED 800点のライブ発色)`
+1. §5.1 server-side FRAME_PREVIEW distribution (`video_streamer.py` + `state_manager.py`).
+   In the style of `verify_server_comm.py`, it would be good to script-confirm that FRAME_PREVIEW arrives at 5fps by
+   opening a WS (video playback is `POST /api/playlist/playback/start`)
+2. §5.2 `useLedLiveColors` hook + `LedPointCloud` `colorMode='live'` support.
+   The **verbatim port of the firmware formulas** (`rotateByQuaternion` / `sphereToUV`) is the core of this task.
+   Always refer to the originals `core/src/LEDManager.cpp:242-297` and `core/src/FastMath.h`
+3. §5.3 fallback (3 seconds → params) and `document.hidden` support
+4. Confirm the §5.5 acceptance criteria. Since 1 and 2 require cross-checking against the real device's LEDs,
+   if there is no real device, do "test video + UI-standalone pattern verification" and ask the client for the real-device comparison
+5. Example commit: `feat(server+frontend): FRAME_PREVIEW streaming and IMU-linked digital twin (live coloring of 800 LEDs)`
+</content>

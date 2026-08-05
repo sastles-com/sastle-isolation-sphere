@@ -1,23 +1,23 @@
-> **English** · [日本語](communication_design.ja.md)
+> [English](communication_design.md) · **日本語**
 
-# Isolation Sphere Communication and Sharing Architecture (Finalized)
+# Isolation Sphere 通信・共有アーキテクチャ（確定版）
 
-Last updated: 2025-12-02
+最終更新: 2025-12-02
 
-## Overview
+## 概要
 
-This document defines the communication protocols and data sharing design for the entire Isolation Sphere system.
+このドキュメントは、Isolation Sphereシステム全体の通信プロトコルとデータ共有の設計を定義します。
 
-## Design Principles
+## 設計原則
 
-1. **Single Source of Truth**: `StateManager` is the sole holder of state
-2. **Protocol by Use Case**: Choose the optimal protocol for each use case
-3. **No Over-Engineering**: Minimal necessary technology stack
-4. **No ROS2**: micro-ROS removed, unified on MQTT+UDP+WebSocket
+1. **Single Source of Truth**: `StateManager`が唯一の状態保持者
+2. **Protocol by Use Case**: 用途に応じた最適なプロトコル選択
+3. **No Over-Engineering**: 必要最小限の技術スタック
+4. **ROS2は不使用**: micro-ROS削除、MQTT+UDP+WebSocketで統一
 
 ---
 
-## Overall System Architecture
+## システム全体構成
 
 ```
 ┌──────────────┐         ┌──────────────────┐         ┌───────────┐
@@ -29,7 +29,7 @@ This document defines the communication protocols and data sharing design for th
        │ │  FastAPI Server        │                          │
        │ │  ┌──────────────┐      │                          │
        │ └──┤StateManager  │      │                          │
-       │    │(single truth)│      │                          │
+       │    │(唯一の真実)  │      │                          │
        │    └──────┬───────┘      │                          │
        │           │               │                          │
    ┌───▼───────────▼───────────────▼────────────────────────▼───┐
@@ -42,31 +42,31 @@ This document defines the communication protocols and data sharing design for th
 
 ---
 
-## Communication Protocol Details
+## 通信プロトコル詳細
 
-### 1. MQTT - Control, State, and Sensor Data
+### 1. MQTT - 制御・状態・センサーデータ
 
-#### Purpose
-- Bidirectional communication
-- Reliability-focused (QoS 1)
-- Uses retained messages
+#### 目的
+- 双方向通信
+- 信頼性重視（QoS 1）
+- Retained message活用
 
-#### Broker Configuration
+#### ブローカー設定
 - **Host**: 192.168.49.1
 - **Port**: 1883
 - **Protocol**: MQTT v3.1.1
 - **Authentication**: Anonymous
 
-#### Topic Design
+#### トピック設計
 
-##### Command topics (Server → ESP32)
+##### コマンド系（Server → ESP32）
 
 ```yaml
 sphere/all/command/params:
   direction: Server → ESP32
   qos: 1
   retained: false
-  description: Parameter changes (brightness, speed, hue, etc.)
+  description: パラメータ変更（明るさ、速度、色相等）
   payload: |
     {
       "brightness": 80,    # 0-100
@@ -79,7 +79,7 @@ sphere/all/command/playback:
   direction: Server → ESP32
   qos: 1
   retained: false
-  description: Video playback control
+  description: 動画再生制御
   payload: |
     {
       "action": "play|pause|stop|toggle",
@@ -92,11 +92,11 @@ sphere/all/command/led:
   direction: Server → ESP32
   qos: 1
   retained: false
-  description: LED control mode change
+  description: LED制御モード変更
   payload: |
     {
       "mode": "sphere|pixels|off",
-      "pixels": [                # only when mode=pixels
+      "pixels": [                # mode=pixels時のみ
         {"index": 0, "r": 255, "g": 0, "b": 0},
         ...
       ]
@@ -106,21 +106,21 @@ sphere/all/command/system:
   direction: Server → ESP32
   qos: 1
   retained: false
-  description: System command
+  description: システムコマンド
   payload: |
     {
       "action": "restart|calibrate|config_reload"
     }
 ```
 
-##### State topics (ESP32 → Server)
+##### 状態系（ESP32 → Server）
 
 ```yaml
 sphere/{device_id}/state:
   direction: ESP32 → Server
   qos: 1
-  retained: true  # Important! Retrieves latest state on new connection
-  description: Full device state snapshot
+  retained: true  # 重要！新規接続時に最新状態取得
+  description: デバイス完全状態スナップショット
   payload: |
     {
       "params": {"brightness": 80, "speed": 50, "hue": 120, "saturation": 100},
@@ -133,10 +133,10 @@ sphere/{device_id}/state:
 
 sphere/{device_id}/imu:
   direction: ESP32 → Server
-  qos: 0  # Speed priority, only the latest data is needed
+  qos: 0  # 速度優先、最新データのみ必要
   retained: false
   frequency: 10Hz
-  description: IMU orientation data (Quaternion)
+  description: IMU姿勢データ（Quaternion）
   payload: |
     {
       "w": 0.7071,
@@ -149,7 +149,7 @@ sphere/{device_id}/status:
   direction: ESP32 → Server
   qos: 1
   retained: true
-  description: Device online status
+  description: デバイスオンライン状態
   payload: |
     {
       "status": "online|offline",
@@ -161,14 +161,14 @@ sphere/{device_id}/status:
 
 ---
 
-### 2. UDP - Video Streaming
+### 2. UDP - 映像ストリーミング
 
-#### Purpose
-- Fast, low latency
-- One-way communication (Server → ESP32)
-- Tolerates packet loss (prioritizes the latest frame)
+#### 目的
+- 高速・低遅延
+- 一方向通信（Server → ESP32）
+- パケットロス許容（最新フレーム優先）
 
-#### Specification
+#### 仕様
 
 ```yaml
 protocol: UDP
@@ -178,11 +178,11 @@ destination: ESP32 (192.168.49.101:8889)
 packet_format:
   header:
     magic: 0x4A504547  # "JPEG" (4 bytes)
-    frame_id: uint32   # frame sequence number (4 bytes)
+    frame_id: uint32   # フレーム連番 (4 bytes)
   payload:
-    jpeg_data: bytes   # JPEG-compressed image data (max 65499 bytes)
+    jpeg_data: bytes   # JPEG圧縮画像データ (max 65499 bytes)
   
-  max_packet_size: 65507 bytes (UDP max)
+  max_packet_size: 65507 bytes (UDP最大)
 
 image_spec:
   resolution: 320x160
@@ -198,38 +198,38 @@ ESP32_implementation:
   output: RGB565 → LEDManager
 ```
 
-#### Packet Structure (C)
+#### パケット構造（C言語）
 
 ```c
 struct UDPImageHeader {
     uint32_t magic;      // 0x4A504547 ("JPEG")
-    uint32_t frame_id;   // frame sequence number
+    uint32_t frame_id;   // フレーム連番
 } __attribute__((packed));
 
-// total size = sizeof(UDPImageHeader) + jpeg_data_size
+// 総サイズ = sizeof(UDPImageHeader) + jpeg_data_size
 ```
 
 ---
 
-### 3. WebSocket - UI Synchronization
+### 3. WebSocket - UI同期
 
-#### Purpose
-- Real-time bidirectional communication
-- State synchronization between Web UI and Server
-- Low latency (<50ms)
+#### 目的
+- リアルタイム双方向通信
+- WebUIとServer間の状態同期
+- 低遅延（<50ms）
 
-#### Endpoint
+#### エンドポイント
 - **URL**: `ws://[server-ip]:9000/ws`
 - **Protocol**: WebSocket
 
-#### Message Design
+#### メッセージ設計
 
-##### Server → Web UI
+##### Server → WebUI
 
 ```yaml
 STATE_UPDATE:
   type: "STATE_UPDATE"
-  description: State update notification
+  description: 状態更新通知
   payload:
     imu: {w, x, y, z}
     playback: {status, playlist, track, position, duration}
@@ -240,20 +240,20 @@ STATE_UPDATE:
     seq: 42
 ```
 
-##### Web UI → Server
+##### WebUI → Server
 
 ```yaml
 SET_PARAMS:
   type: "SET_PARAMS"
-  description: Parameter change request
+  description: パラメータ変更要求
   payload:
-    brightness: 80   # any parameter (one or more)
+    brightness: 80   # 任意のパラメータ（1つ以上）
     speed: 60
     hue: 180
 
 SET_PLAYBACK:
   type: "SET_PLAYBACK"
-  description: Playback control request
+  description: 再生制御要求
   payload:
     action: "play|pause|stop|toggle"
     playlist: "demo01"  # optional
@@ -261,7 +261,7 @@ SET_PLAYBACK:
 
 SET_LED:
   type: "SET_LED"
-  description: LED control request
+  description: LED制御要求
   payload:
     mode: "sphere|pixels|off"
     pixels: [...]  # optional
@@ -269,16 +269,16 @@ SET_LED:
 
 ---
 
-## Component Design
+## コンポーネント設計
 
 ### 1. StateManager (Python)
 
-#### Responsibilities
-- Holding and updating state
-- Processing commands from all input sources
-- Distributing state to MQTT/WebSocket
+#### 責務
+- 状態の保持・更新
+- すべての入力ソースからのコマンド処理
+- MQTT/WebSocketへの状態配信
 
-#### State Structure
+#### 状態構造
 
 ```python
 _state = {
@@ -316,39 +316,39 @@ _state = {
 }
 ```
 
-#### Key Methods
+#### 主要メソッド
 
 ```python
 async def handle_command(source: str, command: dict):
     """
-    Unified command processing interface
-
+    コマンド処理統一インターフェース
+    
     Args:
         source: "webui" | "joystick" | "mqtt"
         command: {"type": "SET_PARAMS", "payload": {...}}
     """
-    # 1. Update internal state
+    # 1. 内部状態更新
     await self._update_state(command)
     
-    # 2. MQTT distribution (apply to ESP32)
+    # 2. MQTT配信（ESP32に反映）
     await self._publish_mqtt(command)
     
-    # 3. WebSocket distribution (update UI)
+    # 3. WebSocket配信（UI更新）
     await self._broadcast_websocket()
 ```
 
 ---
 
-### 2. Video Daemon (Python) - Not Yet Implemented
+### 2. Video Daemon (Python) - 未実装
 
-#### Responsibilities
-- Playlist management
-- Video decoding (OpenCV)
-- Frame resizing (320x160)
-- JPEG compression
-- UDP transmission
+#### 責務
+- プレイリスト管理
+- 動画デコード（OpenCV）
+- フレームリサイズ（320x160）
+- JPEG圧縮
+- UDP送信
 
-#### Architecture
+#### アーキテクチャ
 
 ```python
 class VideoDaemon:
@@ -379,14 +379,14 @@ class VideoDaemon:
 
 ---
 
-### 3. ESP32 Firmware
+### 3. ESP32 ファームウェア
 
-#### Implementation Status
-- ✅ MQTTManager: Implemented
-- ✅ ImageManager: UDP reception/decoding implemented
-- ⬜ MQTT command handler: Integration needed
+#### 実装状況
+- ✅ MQTTManager: 実装済み
+- ✅ ImageManager: UDP受信・デコード実装済み
+- ⬜ MQTTコマンドハンドラ: 統合必要
 
-#### Implementation Example
+#### 実装例
 
 ```cpp
 // main.cpp
@@ -399,12 +399,12 @@ void setup() {
 }
 
 void loop() {
-    // UDP image reception/decoding
+    // UDP画像受信・デコード
     if (imageManager.update()) {
         ledManager.displayImage(imageManager);
     }
     
-    // IMU transmission (10Hz)
+    // IMU送信（10Hz）
     if (millis() - lastIMUTime > 100) {
         publishIMU();
         lastIMUTime = millis();
@@ -421,19 +421,19 @@ void onParamsCommand(const char* payload) {
         ledManager.setBrightness(doc["brightness"]);
     }
     if (doc.containsKey("speed")) {
-        // speed parameter processing
+        // 速度パラメータ処理
     }
     
-    // Publish state (confirmation)
+    // 状態をパブリッシュ（確認）
     publishState();
 }
 ```
 
 ---
 
-## Data Flow
+## データフロー
 
-### Scenario 1: Changing Brightness from the Web UI
+### シナリオ1: WebUIでBrightness変更
 
 ```
 [WebUI]
@@ -442,21 +442,21 @@ void onParamsCommand(const char* payload) {
 [StateManager]
   ├─ state["params"]["brightness"] = 80
   ├─ MQTT Pub: sphere/all/command/params → [ESP32]
-  └─ WS Broadcast: STATE_UPDATE → [other WebUIs]
+  └─ WS Broadcast: STATE_UPDATE → [他のWebUI]
   
 [ESP32]
   ↓ MQTT Sub: sphere/all/command/params
   ↓ LEDManager::setBrightness(80)
-  ↓ MQTT Pub: sphere/sphere001/state (confirmation)
+  ↓ MQTT Pub: sphere/sphere001/state (確認)
   
 [StateManager]
   ↓ MQTT Sub: sphere/sphere001/state
-  └─ WS Broadcast: STATE_UPDATE (confirmation reflected)
+  └─ WS Broadcast: STATE_UPDATE (確認反映)
 ```
 
 ---
 
-### Scenario 2: Starting Video Playback
+### シナリオ2: 動画再生開始
 
 ```
 [WebUI]
@@ -469,25 +469,25 @@ void onParamsCommand(const char* payload) {
   
 [Video Daemon]
   ↓ MQTT Sub: sphere/all/command/playback
-  ↓ Load playlist "demo01"
-  ↓ Start loop: 10fps
-      ├─ Get frame → resize (320x160) → JPEG compression
-      └─ UDP send: 192.168.49.101:8889
+  ↓ プレイリスト"demo01"をロード
+  ↓ ループ開始: 10fps
+      ├─ フレーム取得 → リサイズ(320x160) → JPEG圧縮
+      └─ UDP送信: 192.168.49.101:8889
   
 [ESP32]
-  ↓ UDP receive: ImageManager::update()
-  ↓ JPEG decode → RGB565 buffer (PSRAM)
+  ↓ UDP受信: ImageManager::update()
+  ↓ JPEGデコード → RGB565バッファ (PSRAM)
   ↓ LEDManager::displayImage()
-  └─ Update 800 LEDs
+  └─ 800個のLED更新
 ```
 
 ---
 
-### Scenario 3: Real-time IMU Display
+### シナリオ3: IMUリアルタイム表示
 
 ```
 [ESP32] (10Hz)
-  ↓ IMU read → Quaternion {w, x, y, z}
+  ↓ IMU読み取り → Quaternion {w, x, y, z}
   ↓ MQTT Pub: sphere/sphere001/imu
   
 [StateManager]
@@ -496,130 +496,131 @@ void onParamsCommand(const char* payload) {
   └─ WS Broadcast: STATE_UPDATE
   
 [WebUI]
-  ↓ Apply Three.js Quaternion
-  └─ 3D sphere rotation display
+  ↓ Three.js Quaternion適用
+  └─ 3D球体回転表示
 ```
 
 ---
 
-## Directory Structure
+## ディレクトリ構成
 
 ```
 repo/
-├── core/                    # ESP32 firmware
+├── core/                    # ESP32ファームウェア
 │   ├── src/
-│   │   ├── MQTTManager.*    # ✅ Implemented
-│   │   ├── ImageManager.*   # ✅ UDP reception/decoding implemented
-│   │   ├── LEDManager.*     # ✅ Implemented
-│   │   └── main.cpp         # ⬜ Command processing integration needed
+│   │   ├── MQTTManager.*    # ✅ 実装済み
+│   │   ├── ImageManager.*   # ✅ UDP受信・デコード実装済み
+│   │   ├── LEDManager.*     # ✅ 実装済み
+│   │   └── main.cpp         # ⬜ コマンド処理統合必要
 │   └── data/
-│       └── config.json      # WiFi/MQTT configuration
+│       └── config.json      # WiFi/MQTT設定
 │
 ├── server/
 │   ├── app/
 │   │   ├── main.py          # FastAPI + Lifespan
 │   │   ├── services/
-│   │   │   ├── state_manager.py      # ✅ Basic implementation done
-│   │   │   └── mqtt_service.py       # ✅ Implemented
+│   │   │   ├── state_manager.py      # ✅ 基本実装済み
+│   │   │   └── mqtt_service.py       # ✅ 実装済み
 │   │   └── api/
 │   │       └── endpoints/
-│   │           └── websocket.py      # ✅ Implemented
+│   │           └── websocket.py      # ✅ 実装済み
 │   │
-│   ├── video/               # ⬜ Needs to be newly created
-│   │   ├── daemon.py        # Video Daemon core
-│   │   ├── playlist.py      # Playlist management
-│   │   └── encoder.py       # JPEG compression
+│   ├── video/               # ⬜ 新規作成必要
+│   │   ├── daemon.py        # Video Daemon本体
+│   │   ├── playlist.py      # プレイリスト管理
+│   │   └── encoder.py       # JPEG圧縮
 │   │
-│   ├── joystick/            # ⬜ Pending (Phase 2 onward)
-│   │   └── daemon.py        # PS4 controller support
+│   ├── joystick/            # ⬜ Pending（Phase 2以降）
+│   │   └── daemon.py        # PS4コントローラー対応
 │   │
-│   └── frontend/            # ✅ React implemented
+│   └── frontend/            # ✅ React実装済み
 │
 └── docs/
     └── architecture/
-        └── communication_design.md  # This document
+        └── communication_design.md  # このドキュメント
 ```
 
 ---
 
-## Implementation Roadmap
+## 実装ロードマップ
 
-### Phase 1: Foundation (This Week)
-- [ ] Completely remove ROS2 code
+### Phase 1: 基盤整備（今週）
+- [ ] ROS2コード完全削除
   - `app/core/ros_manager.py`
   - `app/services/ros_bridge.py`
-  - ROS2 parts of `joystick/daemon.py`
-- [ ] Integrate WebSocket message handler into `state_manager.py`
-- [ ] Simplify `websocket.py`
-- [ ] Implement MQTT command handler on the ESP32 side
-- [ ] Update documentation (README.md, etc.)
+  - `joystick/daemon.py` ROS2部分
+- [ ] `state_manager.py` WebSocketメッセージハンドラ統合
+- [ ] `websocket.py` シンプル化
+- [ ] ESP32側MQTTコマンドハンドラ実装
+- [ ] ドキュメント更新（README.md等）
 
-### Phase 2: Video Streaming (Next Week)
-- [ ] Implement `video/daemon.py`
-- [ ] Playlist management API
-- [ ] OpenCV video decoding
-- [ ] Implement UDP transmission
-- [ ] Verify display on the ESP32 side
+### Phase 2: 映像ストリーミング（来週）
+- [ ] `video/daemon.py` 実装
+- [ ] プレイリスト管理API
+- [ ] OpenCV映像デコード
+- [ ] UDP送信実装
+- [ ] ESP32側表示確認
 
-### Phase 3: Joystick Support (Later)
-- [ ] Acquire PS4 controller input (evdev)
-- [ ] Publish directly to MQTT
-- [ ] Button mapping configuration
-
----
-
-## Removal Targets (ROS2-related)
-
-The following code will be removed or simplified:
-
-1. **`server/app/core/ros_manager.py`** - Complete removal
-2. **`server/app/services/ros_bridge.py`** - Complete removal
-3. **`server/joystick/daemon.py`** - Remove ROS2 parts, rewrite to a version that publishes directly to MQTT
-4. **`server/app/main.py`** - Remove the ROSManager startup part
-5. **`server/app/api/endpoints/websocket.py`** - Remove ros_bridge references
+### Phase 3: Joystick対応（その後）
+- [ ] PS4コントローラー入力取得（evdev）
+- [ ] MQTT直接パブリッシュ
+- [ ] ボタンマッピング設定
 
 ---
 
-## Technical Decisions
+## 削除対象（ROS2関連）
 
-### Why Not Use ROS2?
+以下のコードは削除またはシンプル化する：
 
-1. **Over-engineering**: This system does not need ROS2's complexity for inter-process communication
-2. **MQTT+WebSocket is sufficient**: Existing protocols meet the requirements
-3. **Joystick use case**: A simple input device, no state monitoring needed
-4. **Maintainability**: A simpler architecture is easier to understand and maintain
-
-### Leveraging MQTT Retained Messages
-
-- `sphere/all/state`: Holds the ESP32's full state as retained
-- Benefits:
-  - Automatically retrieves the latest state when the Server restarts
-  - Restores state when the ESP32 restarts
-  - Synchronizes initial state when a new Web UI client connects
+1. **`server/app/core/ros_manager.py`** - 完全削除
+2. **`server/app/services/ros_bridge.py`** - 完全削除
+3. **`server/joystick/daemon.py`** - ROS2部分削除、MQTT直接パブリッシュ版に書き換え
+4. **`server/app/main.py`** - ROSManager起動部分削除
+5. **`server/app/api/endpoints/websocket.py`** - ros_bridge参照削除
 
 ---
 
-## Non-functional Requirements
+## 技術的決定事項
 
-- **Latency**: 
-  - Control commands: < 50ms
-  - Image stream: < 100ms
-  - IMU data: 10Hz (100ms cycle)
+### なぜROS2を使わないのか？
+
+1. **過剰設計**: 本システムはプロセス間通信にROS2の複雑さは不要
+2. **MQTT+WebSocketで十分**: 既存プロトコルで要件を満たせる
+3. **Joystickの用途**: 単純な入力デバイス、状態監視不要
+4. **保守性**: シンプルなアーキテクチャの方が理解・保守が容易
+
+### MQTTのRetained Message活用
+
+- `sphere/all/state`: ESP32の完全状態をretainedで保持
+- 利点：
+  - Server再起動時に最新状態を自動取得
+  - ESP32再起動時の状態復元
+  - 新規WebUIクライアント接続時の初期状態同期
+
+---
+
+## 非機能要件
+
+- **遅延**: 
+  - 制御コマンド: < 50ms
+  - 画像ストリーム: < 100ms
+  - IMUデータ: 10Hz (100ms周期)
   
-- **Stability**: 
-  - 24-hour continuous operation
-  - MQTT automatic reconnection
-  - UDP packet loss tolerance
+- **安定性**: 
+  - 24時間連続稼働
+  - MQTT自動再接続
+  - UDP パケットロス許容
 
-- **Scalability**:
-  - Support for multiple ESP32 devices (separated by device_id)
-  - Extensible playlists
+- **拡張性**:
+  - 複数ESP32デバイス対応（device_id分離）
+  - プレイリスト拡張可能
 
 ---
 
-## References
+## 参考資料
 
 - [MQTT v3.1.1 Specification](http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/mqtt-v3.1.1.html)
-- [ESP32 ImageManager implementation](../../core/src/ImageManager.h)
-- [ESP32 MQTTManager implementation](../../core/src/MQTTManager.h)
-- [Server StateManager implementation](../../server/app/services/state_manager.py)
+- [ESP32 ImageManager実装](../../core/src/ImageManager.h)
+- [ESP32 MQTTManager実装](../../core/src/MQTTManager.h)
+- [Server StateManager実装](../../server/app/services/state_manager.py)
+

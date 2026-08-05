@@ -1,80 +1,80 @@
-> **English** · [日本語](raspi_system_specification.ja.md)
+> [English](raspi_system_specification.md) · **日本語**
 
-# Isolation Sphere - Raspberry Pi Control System Specification
+# Isolation Sphere - Raspberry Pi Control System 仕様書
 
-## Document Information
-| Item | Content |
+## 文書情報
+| 項目 | 内容 |
 |------|------|
-| Document name | Raspberry Pi Control System Specification |
-| Version | 1.0.0 |
-| Created | 2025-08-22 |
-| Last updated | 2025-08-22 |
-| Author | Claude Code |
+| 文書名 | Raspberry Pi Control System 仕様書 |
+| バージョン | 1.0.0 |
+| 作成日 | 2025-08-22 |
+| 最終更新 | 2025-08-22 |
+| 作成者 | Claude Code |
 
-## Change History
-| Version | Date | Change description | Approver |
+## 変更履歴
+| バージョン | 日付 | 変更内容 | 承認者 |
 |-----------|------|----------|--------|
-| 1.0.0 | 2025-08-22 | Initial version - overall system specification | - |
+| 1.0.0 | 2025-08-22 | 初版作成 - システム全体仕様 | - |
 
-## Table of Contents
-1. [Project Overview](#1-project-overview)
-2. [System Architecture](#2-system-architecture)
-3. [Functional Requirements](#3-functional-requirements)
-4. [Non-Functional Requirements](#4-non-functional-requirements)
-5. [Architecture Design](#5-architecture-design)
-6. [Technical Specification](#6-technical-specification)
-7. [ESP32 Integration Specification](#7-esp32-integration-specification)
-8. [Security Requirements](#8-security-requirements)
-9. [Operational Requirements](#9-operational-requirements)
+## 目次
+1. [プロジェクト概要](#1-プロジェクト概要)
+2. [システム構成](#2-システム構成)
+3. [機能要件](#3-機能要件)
+4. [非機能要件](#4-非機能要件)
+5. [アーキテクチャ設計](#5-アーキテクチャ設計)
+6. [技術仕様](#6-技術仕様)
+7. [ESP32連携仕様](#7-esp32連携仕様)
+8. [セキュリティ要件](#8-セキュリティ要件)
+9. [運用要件](#9-運用要件)
 
-## 1. Project Overview
+## 1. プロジェクト概要
 
-### 1.1 Purpose
-Build a central control system on a Raspberry Pi (Ubuntu 22.04) that controls a 110mm-diameter spherical display (800 LEDs). Through integration with ESP32, it realizes real-time video streaming, attitude correction based on IMU information, and unified control via a WebUI.
+### 1.1 目的
+直径110mmの球体ディスプレイ（800個のLED）を制御する中央制御システムを、Raspberry Pi（Ubuntu 22.04）上に構築する。ESP32との連携により、リアルタイム映像ストリーミング、IMU情報に基づく姿勢補正、WebUIによる統合制御を実現する。
 
-### 1.2 System Positioning
-This system serves as the control hub of the Isolation Sphere project, carrying the following roles:
+### 1.2 システム位置づけ
+本システムはIsolation Sphereプロジェクトの制御ハブとして、以下の役割を担う：
 
-- **Video content management**: upload, conversion, distribution, and playlist management
-- **Device communication control**: real-time data exchange via high-speed P2P communication with ESP32
-- **User interface**: multi-device operation environment via WebUI
-- **System management**: configuration, status monitoring, log management, and auto-start
+- **動画コンテンツ管理**: アップロード・変換・配信・プレイリスト管理
+- **デバイス通信制御**: ESP32との高速P2P通信によるリアルタイムデータ交換
+- **ユーザーインターフェース**: WebUIによるマルチデバイス操作環境
+- **システム管理**: 設定・状態監視・ログ管理・自動起動
 
-### 1.3 Key Features
-- ✅ **Implemented features**:
-  - FastAPI web application (port 9000)
-  - mDNS-enabled multi-device access (smartphone/PC/Mac support)
-  - QR code generation feature (for easy access)
-  - Video upload and conversion feature (320x160, 10fps automatic conversion)
-  - Video management via SQLite database
-  - UDP communication system (udp_communication.py)
-  - P2P access point creation (using hostapd)
-  - Automatic IP assignment via DHCP server (dnsmasq)
-  - WebSocket real-time communication
+### 1.3 主要機能
+- ✅ **実装済み機能**:
+  - FastAPI Webアプリケーション（ポート9000）
+  - mDNS対応マルチデバイスアクセス（スマホ・PC・Mac対応）
+  - QRコード生成機能（簡単アクセス用）
+  - 動画アップロード・変換機能（320x160, 10fps自動変換）
+  - SQLiteデータベースによる動画管理
+  - UDP通信システム（udp_communication.py）
+  - P2Pアクセスポイント作成（hostapd使用）
+  - DHCP サーバー（dnsmasq）による自動IP割当
+  - WebSocket リアルタイム通信
 
-- 🔄 **Planned enhancements**:
-  - ESP32 gamepad integration (via Bluetooth)
-  - Advanced playlist control
-  - Performance monitoring dashboard
+- 🔄 **拡張予定機能**:
+  - ESP32ゲームパッド連携（Bluetooth経由）
+  - 高度なプレイリスト制御
+  - パフォーマンス監視ダッシュボード
 
-## 2. System Architecture
+## 2. システム構成
 
-### 2.1 Hardware Configuration
+### 2.1 ハードウェア構成
 ```
 ┌─────────────────────────────────────────────────┐
 │ Raspberry Pi (Ubuntu 22.04)                    │
 ├─────────────────────────────────────────────────┤
-│ ■ CPU and memory: ARM64 4GB+ recommended         │
-│ ■ Storage: microSD 32GB+ (Class 10)            │
-│ ■ Network:                                     │
-│   - wlp1s0: wireless LAN router connection (WebUI) │
-│   - wlx90de8068da46: USB wireless LAN adapter    │
-│     (ESP32 P2P dedicated 192.168.49.1)         │
-│ ■ USB: gamepad connection support               │
+│ ■ CPUとメモリ: ARM64 4GB+ 推奨                   │
+│ ■ ストレージ: microSD 32GB+ (Class 10)         │
+│ ■ ネットワーク:                                │
+│   - wlp1s0: 無線LANルータ接続 (WebUI用)        │
+│   - wlx90de8068da46: USB無線LANアダプター       │
+│     (ESP32 P2P専用 192.168.49.1)              │
+│ ■ USB: ゲームパッド接続対応                    │
 └─────────────────────────────────────────────────┘
 ```
 
-### 2.2 Network Architecture
+### 2.2 ネットワーク構成
 ```
 ┌──────────────────┐    ┌─────────────────────┐
 │   WiFi Router    │    │   P2P Network       │
@@ -92,7 +92,7 @@ This system serves as the control hub of the Isolation Sphere project, carrying 
                         └─────────────────────┘
 ```
 
-### 2.3 Software Architecture
+### 2.3 ソフトウェア構成
 ```
 ┌─────────────────────────────────────────────┐
 │             Application Layer               │
@@ -111,26 +111,26 @@ This system serves as the control hub of the Isolation Sphere project, carrying 
 └─────────────────────────────────────────────┘
 ```
 
-## 3. Functional Requirements
+## 3. 機能要件
 
-### 3.1 Video Management Feature (VideoProcessor)
+### 3.1 動画管理機能 (VideoProcessor)
 
-#### 3.1.1 Video Upload and Conversion
-- **Supported formats**: common video formats such as mp4, avi, mov, mkv
-- **Automatic conversion**:
-  - Resolution: 320x160 pixels (fixed)
-  - Frame rate: 10fps (fixed)
-  - Codec: H.264/AVC
-  - Audio: removed (video only)
-- **Conversion quality settings**:
-  - CRF value: default 28, configurable range: 18-35
-  - Preset: veryfast (prioritizes real-time conversion)
-- **Thumbnail generation**:
-  - Still image from the 1-second mark
-  - Resolution: 320x160, format: JPEG, quality: 80%
+#### 3.1.1 動画アップロード・変換
+- **対応形式**: mp4, avi, mov, mkv等の一般的な動画形式
+- **自動変換**:
+  - 解像度: 320x160ピクセル（固定）
+  - フレームレート: 10fps（固定）
+  - コーデック: H.264/AVC
+  - 音声: 削除（映像のみ）
+- **変換品質設定**:
+  - CRF値: デフォルト28、設定可能範囲: 18-35
+  - プリセット: veryfast（リアルタイム変換優先）
+- **サムネイル生成**:
+  - 1秒時点からの静止画
+  - 解像度: 320x160、フォーマット: JPEG、品質: 80%
 
-#### 3.1.2 Video Database Management
-SQLite table design:
+#### 3.1.2 動画データベース管理
+SQLiteテーブル設計:
 ```sql
 CREATE TABLE videos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,13 +140,13 @@ CREATE TABLE videos (
   file_size INTEGER,
   duration REAL,
   uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  metadata TEXT -- Store metadata in JSON format
+  metadata TEXT -- JSON形式でメタデータ保存
 );
 ```
 
-### 3.2 Playlist Management Feature (PlaylistManager)
+### 3.2 プレイリスト管理機能 (PlaylistManager)
 
-#### 3.2.1 Playlist Operations
+#### 3.2.1 プレイリスト操作
 ```sql
 CREATE TABLE playlists (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,40 +165,40 @@ CREATE TABLE playlist_items (
 );
 ```
 
-#### 3.2.2 Playback Control
-- **Playback modes**: sequential, shuffle, random
-- **Repeat modes**: none, single, all
-- **Advanced control**: pause, fast-forward, rewind
+#### 3.2.2 再生制御
+- **再生モード**: sequential（順次）, shuffle（シャッフル）, random（ランダム）
+- **リピートモード**: none（なし）, single（単一）, all（全体）
+- **高度な制御**: 一時停止、早送り、巻き戻し
 
-### 3.3 ESP32 Communication Feature (UDPCommunication)
+### 3.3 ESP32通信機能 (UDPCommunication)
 
-#### 3.3.1 Communication Protocol
-- **Image transmission**: send JPEG images to ESP32 on port 5000
-- **IMU reception**: receive quaternion data from ESP32 on port 5001
-- **Control transmission**: send UI operation commands on port 5002
-- **Communication format**: UDP + JSON
-- **Buffer size**: 65536 bytes
-- **Retry count**: 3 times
+#### 3.3.1 通信プロトコル
+- **画像送信**: ポート5000でJPEG画像をESP32に送信
+- **IMU受信**: ポート5001でESP32からquaternionデータを受信
+- **制御送信**: ポート5002でUI操作コマンドを送信
+- **通信形式**: UDP + JSON
+- **バッファサイズ**: 65536バイト
+- **リトライ回数**: 3回
 
-### 3.4 Device Management Feature (ESP32DeviceManager)
+### 3.4 デバイス管理機能 (ESP32DeviceManager)
 
-#### 3.4.1 Device Discovery and Management
-- **Auto-discovery**: automatic detection of ESP32 devices within the P2P network
-- **Known device management**: management of MAC address, IP, and device information
-- **Connection status monitoring**: real-time connection status updates
-- **Maximum connections**: 5 devices
+#### 3.4.1 デバイス発見・管理
+- **自動発見**: P2Pネットワーク内のESP32デバイス自動検出
+- **既知デバイス管理**: MACアドレス・IP・デバイス情報の管理
+- **接続状態監視**: リアルタイム接続ステータス更新
+- **最大接続数**: 5台
 
-### 3.5 P2P Network Management (P2PManager)
+### 3.5 P2Pネットワーク管理 (P2PManager)
 
-#### 3.5.1 Network Control
-- **Access point**: using hostapd, SSID "ESP32-P2P-Direct"
-- **DHCP configuration**: using dnsmasq, IP range 192.168.49.10-50
-- **Channel**: 6 (configurable)
-- **Security**: WPA2-PSK
+#### 3.5.1 ネットワーク制御
+- **アクセスポイント**: hostapd使用、SSID「ESP32-P2P-Direct」
+- **DHCP設定**: dnsmasq使用、IP範囲192.168.49.10-50
+- **チャンネル**: 6（設定可能）
+- **セキュリティ**: WPA2-PSK
 
-### 3.6 Configuration Management Feature (ConfigManager)
+### 3.6 設定管理機能 (ConfigManager)
 
-#### 3.6.1 Configuration Items
+#### 3.6.1 設定項目
 ```json
 {
   "system": {
@@ -228,28 +228,28 @@ CREATE TABLE playlist_items (
 }
 ```
 
-## 4. Non-Functional Requirements
+## 4. 非機能要件
 
-### 4.1 Performance Requirements
-- **WebUI response time**: within 1 second
-- **Video conversion time**: within 30 seconds after upload completion
-- **UDP communication latency**: within 50ms
-- **Concurrent connections**: 20 WebUI connections, 5 ESP32 devices
-- **Availability rate**: 99.5% or higher
+### 4.1 性能要件
+- **WebUI応答時間**: 1秒以内
+- **動画変換時間**: アップロード完了から30秒以内
+- **UDP通信遅延**: 50ms以内
+- **同時接続数**: WebUI 20接続、ESP32 5台
+- **稼働率**: 99.5%以上
 
-### 4.2 Availability Requirements
-- **Auto-start**: automatic service start on system reboot
-- **Error recovery**: automatic retry/reconnection on communication errors
-- **Log management**: 30-day log retention with rotation
+### 4.2 可用性要件
+- **自動起動**: システム再起動時の自動サービス開始
+- **エラー復旧**: 通信エラー時の自動リトライ・再接続
+- **ログ管理**: 30日間のログ保持・ローテーション
 
-### 4.3 Security Requirements
-- **Network**: WPA2-PSK encryption
-- **File access**: upload permission control
-- **Configuration changes**: WebUI authentication (to be implemented)
+### 4.3 セキュリティ要件
+- **ネットワーク**: WPA2-PSK暗号化
+- **ファイルアクセス**: アップロード権限制御
+- **設定変更**: WebUI認証（今後実装予定）
 
-## 5. Architecture Design
+## 5. アーキテクチャ設計
 
-### 5.1 System Architecture
+### 5.1 システムアーキテクチャ
 ```
 ┌──────────────────────────────────────────────┐
 │                Web Layer                     │
@@ -289,7 +289,7 @@ CREATE TABLE playlist_items (
 └──────────────────────────────────────────────┘
 ```
 
-### 5.2 Data Flow
+### 5.2 データフロー
 ```
 ┌─────────────┐    ┌──────────────┐    ┌─────────────┐
 │   Web UI    │◄──►│  FastAPI     │◄──►│   ESP32     │
@@ -314,17 +314,17 @@ CREATE TABLE playlist_items (
 └─────────────┘    └──────────────┘
 ```
 
-## 6. Technical Specification
+## 6. 技術仕様
 
-### 6.1 Development Environment
+### 6.1 開発環境
 - **OS**: Ubuntu 22.04 LTS
 - **Python**: 3.10+
-- **Package management**: uv (Python package manager)
-- **Web framework**: FastAPI 0.100+
-- **Database**: SQLite3
-- **Asynchronous processing**: asyncio
+- **パッケージ管理**: uv (Python package manager)
+- **Webフレームワーク**: FastAPI 0.100+
+- **データベース**: SQLite3
+- **非同期処理**: asyncio
 
-### 6.2 Dependency Libraries
+### 6.2 依存ライブラリ
 ```python
 # Web Framework
 fastapi>=0.100.0
@@ -346,13 +346,13 @@ qrcode>=7.4.0
 psutil>=5.9.0
 ```
 
-### 6.3 Directory Structure
+### 6.3 ディレクトリ構成
 ```
 ~/isolation-sphere/raspi/project/
-├── main.py                    # FastAPI main application
-├── config.json               # System configuration
-├── requirements.txt          # Python dependencies
-├── components/               # Component modules
+├── main.py                    # FastAPIメインアプリケーション
+├── config.json               # システム設定
+├── requirements.txt          # Python依存関係
+├── components/               # コンポーネントモジュール
 │   ├── __init__.py
 │   ├── config_manager.py
 │   ├── udp_communication.py
@@ -360,25 +360,25 @@ psutil>=5.9.0
 │   ├── playlist_manager.py
 │   ├── video_processor.py
 │   └── p2p_manager.py
-├── templates/                # Jinja2 templates
+├── templates/                # Jinja2テンプレート
 │   └── index.html
-├── static/                   # Static files
+├── static/                   # 静的ファイル
 │   ├── css/
 │   ├── js/
 │   └── images/
-├── video_storage/            # Video file storage
-├── logs/                     # Log files
-├── backups/                  # Configuration backups
-└── scripts/                  # Operational scripts
+├── video_storage/            # 動画ファイル保存
+├── logs/                     # ログファイル
+├── backups/                  # 設定バックアップ
+└── scripts/                  # 運用スクリプト
     ├── enable_autostart.sh
     └── setup_p2p_pre.sh
 ```
 
-## 7. ESP32 Integration Specification
+## 7. ESP32連携仕様
 
-### 7.1 Communication Protocol Details
+### 7.1 通信プロトコル詳細
 
-#### 7.1.1 Image Transmission Protocol (port 5000)
+#### 7.1.1 画像送信プロトコル (ポート5000)
 ```json
 {
   "type": "image_frame",
@@ -392,7 +392,7 @@ psutil>=5.9.0
 }
 ```
 
-#### 7.1.2 IMU Reception Protocol (port 5001)
+#### 7.1.2 IMU受信プロトコル (ポート5001)
 ```json
 {
   "type": "imu_data",
@@ -417,7 +417,7 @@ psutil>=5.9.0
 }
 ```
 
-#### 7.1.3 Control Transmission Protocol (port 5002)
+#### 7.1.3 制御送信プロトコル (ポート5002)
 ```json
 {
   "type": "control_command",
@@ -427,60 +427,60 @@ psutil>=5.9.0
 }
 ```
 
-### 7.2 Communication Error Handling
-- **Timeout**: 1 second
-- **Retry**: 3 times
-- **Fallback**: continue displaying the previous frame
+### 7.2 通信エラー処理
+- **タイムアウト**: 1秒
+- **リトライ**: 3回
+- **フォールバック**: 前回フレームの継続表示
 
-## 8. Security Requirements
+## 8. セキュリティ要件
 
-### 8.1 Network Security
-- **P2P encryption**: WPA2-PSK
-- **Password**: "isolation-sphere-p2p"
-- **Isolation**: the P2P network is isolated from other networks
+### 8.1 ネットワークセキュリティ
+- **P2P暗号化**: WPA2-PSK
+- **パスワード**: "isolation-sphere-p2p"
+- **隔離**: P2Pネットワークは他ネットワークから隔離
 
-### 8.2 File Security
-- **Upload limit**: maximum 500MB
-- **Format restriction**: video files only
-- **Storage location**: isolated in a dedicated directory
+### 8.2 ファイルセキュリティ
+- **アップロード制限**: 最大500MB
+- **形式制限**: 動画ファイルのみ
+- **保存場所**: 専用ディレクトリに隔離
 
-## 9. Operational Requirements
+## 9. 運用要件
 
-### 9.1 Start/Stop
+### 9.1 起動・停止
 ```bash
-# Start service
+# サービス起動
 sudo systemctl start isolation-sphere
 
-# Stop service  
+# サービス停止  
 sudo systemctl stop isolation-sphere
 
-# Check service status
+# サービス状態確認
 sudo systemctl status isolation-sphere
 ```
 
-### 9.2 Log Management
-- **Log file**: `/path/to/logs/app.log`
-- **Rotation**: daily, 30-day retention
-- **Level**: INFO (configurable)
+### 9.2 ログ管理
+- **ログファイル**: `/path/to/logs/app.log`
+- **ローテーション**: 日次、30日保持
+- **レベル**: INFO（設定可能）
 
-### 9.3 Monitoring Items
-- **Health check**: `/health` endpoint
-- **P2P connection status**: device count and connection quality
-- **Resource usage**: CPU, memory, and disk usage rates
-- **Communication statistics**: UDP send/receive rate and error rate
-
----
-
-## Appendix
-
-### A. Configuration File Example
-For a complete configuration example, refer to `config.json`
-
-### B. API List
-For detailed API specifications, refer to `api_specification.md`
-
-### C. Troubleshooting
-For resolving operational issues, refer to `deployment_guide.md`
+### 9.3 監視項目
+- **ヘルスチェック**: `/health` エンドポイント
+- **P2P接続状況**: デバイス数・接続品質
+- **リソース使用量**: CPU・メモリ・ディスク使用率
+- **通信統計**: UDP送受信レート・エラー率
 
 ---
-*This document defines the specification of the Raspberry Pi Control System of the Isolation Sphere project.*
+
+## 付録
+
+### A. 設定ファイル例
+完全な設定例は `config.json` を参照
+
+### B. API一覧
+詳細なAPI仕様は `api_specification.md` を参照
+
+### C. トラブルシューティング
+運用時の問題解決は `deployment_guide.md` を参照
+
+---
+*本文書は Isolation Sphere プロジェクトの Raspberry Pi Control System の仕様を定義しています。*

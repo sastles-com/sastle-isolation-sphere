@@ -52,7 +52,7 @@ isolatio-sphereは，球体ディスプレイ（ガジェット）で以下の�
 - 直径110mmの球体ディスプレイ
 - 球体表面に800個のLED（WS2812C-2020）が配置されている
 - LEDは４つのLEDストリップに分割され，描画信号を送信する（800をシリアルに送信すると送信コストがかかり更新レートが下がるため）
-- **LED配置データ**: `/home/yakatano/work/isolation-sphere/data/full-all.csv`
+- **LED配置データ**: `~/work/isolation-sphere/data/full-all.csv`
   - 各LEDの3D座標情報（FaceID 0-799）
   - 列構成: FaceID, CentroidX, CentroidY, CentroidZ
   - 球体表面の各面（LED）の中心座標が記録されている
@@ -119,8 +119,8 @@ isolatio-sphereは，球体ディスプレイ（ガジェット）で以下の�
 以下の分散マイコンシステムによって実行される（基本2デバイス＋拡張2デバイス）。
 
 1. raspi: raspberry PIによるコントローラー機能
-  - **📋 詳細仕様書**: `/home/yakatano/work/isolation-sphere/raspi.md` 参照
-  - **実装ディレクトリ**: `/home/yakatano/work/isolation-sphere/raspi/`
+  - **📋 詳細仕様書**: `~/work/isolation-sphere/raspi.md` 参照
+  - **実装ディレクトリ**: `~/work/isolation-sphere/raspi/`
   - **現在実装**: project02/ (Phase 5.1対応)
   - **主要機能**: FastAPI WebUI・動画管理・UDP通信・MQTT統合
 
@@ -291,7 +291,7 @@ isolation-sphereシステムの技術的価値とユーザー体験を理解す�
 ### コンポーネント別仕様書
 - **raspi統合仕様書**: 実装完了（Phase 5.1対応WebUI・MQTT統合・UDP通信）
   - デュアル無線LAN構成・MQTT統合・WebUI・実装要件
-- **ESP32統合仕様書**: `/home/yakatano/work/isolation-sphere/esp32/esp32.md`
+- **ESP32統合仕様書**: `~/work/isolation-sphere/esp32/esp32.md`
   - 物理制御・センサー統合・LED/IMU制御・MQTT Client・田中さんペルソナ価値
   - 実装完了（BNO055・WS2812 DMA・UDP受信・Phase別ユニットテスト体系）
 - **Atom-JoyStick統合仕様書**: 実装完了（分散制御ハブ・MQTTブローカー）
@@ -372,7 +372,7 @@ ESP-IDFでコンパイル，フラッシュする．
 
 ### 実装済みファイル構造
 ```
-/home/yakatano/work/isolation-sphere/
+~/work/isolation-sphere/
 ├── esp32/
 │   └── test_hello_world/
 │       └── main/
@@ -450,12 +450,12 @@ ESP-IDFでコンパイル，フラッシュする．
    - 簡単なGC9107初期化シーケンス
    
    **📁 成功実装ファイル:**
-   - `/home/yakatano/work/isolation-sphere/esp32/spiffs_opening_movie/main/m5atoms3r_lcd.c`
-   - `/home/yakatano/work/isolation-sphere/esp32/spiffs_opening_movie/main/m5atoms3r_lcd.h`
-   - `/home/yakatano/work/isolation-sphere/esp32/spiffs_opening_movie/main/test_lcd_main.c`
+   - `~/work/isolation-sphere/esp32/spiffs_opening_movie/main/m5atoms3r_lcd.c`
+   - `~/work/isolation-sphere/esp32/spiffs_opening_movie/main/m5atoms3r_lcd.h`
+   - `~/work/isolation-sphere/esp32/spiffs_opening_movie/main/test_lcd_main.c`
 
 3. **ESP32 IMU UDP通信システム実装記録**
-   - ファイル: `/home/yakatano/work/isolation-sphere/esp32/test_hello_world/main/imu_udp_continuous_test.c`
+   - ファイル: `~/work/isolation-sphere/esp32/test_hello_world/main/imu_udp_continuous_test.c`
    - Atom-JoyStick WiFi接続（SSID: IsolationSphere-Direct）
    - config.json準拠IPアドレス取得（192.168.100.100）
    - JSON形式Mock IMUデータ30Hz送信
@@ -1184,7 +1184,7 @@ isolation-sphere/discover/announce          // 新デバイス発見
 
 ### 📁 実装ファイル構造
 ```
-/home/yakatano/work/isolation-sphere/esp32/
+~/work/isolation-sphere/esp32/
 ├── components/
 │   ├── ws2812_dma/                     # WS2812 DMA制御システム
 │   │   ├── ws2812_dma.c               # メインAPI実装

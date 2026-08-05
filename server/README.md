@@ -1,12 +1,14 @@
+> **English** · [日本語](README.ja.md)
+
 # Isolation Sphere Server
 
-Ubuntu MiniPC/Raspberry Pi上で動作するIsolation Sphereプロジェクトの制御サーバー
+The control server for the Isolation Sphere project, running on an Ubuntu MiniPC / Raspberry Pi
 
-## 概要
+## Overview
 
-このサーバーは、Isolation Sphere（800個のLEDを搭載した直径110mmの球体LEDディスプレイ）の集中制御を提供します。ESP32デバイスとの通信管理、WebUIによる制御、物理ジョイスティック入力のサポートを行います。
+This server provides centralized control of the Isolation Sphere (a 110mm-diameter spherical LED display fitted with 800 LEDs). It manages communication with the ESP32 device, control via the WebUI, and support for physical joystick input.
 
-## システムアーキテクチャ
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -24,68 +26,68 @@ Ubuntu MiniPC/Raspberry Pi上で動作するIsolation Sphereプロジェクト�
 │  │         ROS2 Humble Message Bus               │ │
 │  └───────────────────────────────────────────────┘ │
 │                                                     │
-│  ネットワークインターフェース:                        │
-│  • wlan0: 外部ルーター (WebUIアクセス)              │
-│  • USB WiFi: APモード 192.168.100.1 (ESP32)       │
+│  Network interfaces:                                │
+│  • wlan0: external router (WebUI access)            │
+│  • USB WiFi: AP mode 192.168.100.1 (ESP32)         │
 └─────────────────────────────────────────────────────┘
          │                              │
-    WebUIアクセス                   ESP32デバイス
-  (スマホ/PC)                  (micro-ROS via UDP)
+    WebUI access                   ESP32 device
+  (smartphone/PC)              (micro-ROS via UDP)
 ```
 
-## 機能
+## Features
 
-### コアサービス
-- **FastAPI Webアプリケーション** (ポート 9000)
-  - システム制御用RESTful APIエンドポイント
-  - リアルタイム通信用WebSocketサポート
-  - ROS2/MQTTブリッジ機能
-  - Reactフロントエンドの提供
+### Core Services
+- **FastAPI web application** (port 9000)
+  - RESTful API endpoints for system control
+  - WebSocket support for real-time communication
+  - ROS2/MQTT bridge functionality
+  - Serving the React frontend
 
-- **React フロントエンド** (Viteベース)
-  - Material-UIコンポーネントを使用したモダンUI
-  - React Three Fiberを使用した3D可視化（IMUクォータニオン制御）
-  - WebSocketによるリアルタイム制御
-  - モバイル/タブレット/デスクトップ対応のレスポンシブデザイン
-  - スワイプジェスチャーによる直感的なタブナビゲーション
-  - モバイル最適化（URLバー自動非表示、viewport対応）
-  - 上下移動ボタンと縦フリックによる垂直タブ切り替え
+- **React frontend** (Vite-based)
+  - Modern UI using Material-UI components
+  - 3D visualization using React Three Fiber (IMU quaternion control)
+  - Real-time control via WebSocket
+  - Responsive design for mobile/tablet/desktop
+  - Intuitive tab navigation via swipe gestures
+  - Mobile optimization (automatic URL-bar hiding, viewport support)
+  - Vertical tab switching via up/down buttons and vertical flicks
 
-- **ジョイスティックデーモン**
-  - `evdev`経由での物理USBジョイスティックサポート
-  - ROS2トピックへのジョイスティック状態パブリッシュ
-  - クロスプラットフォーム入力マッピング
+- **Joystick daemon**
+  - Physical USB joystick support via `evdev`
+  - Publishing joystick state to ROS2 topics
+  - Cross-platform input mapping
 
-- **ビデオストリーミングデーモン**
-  - UDP経由でESP32へビデオコンテンツをストリーミング
-  - ROS2制御による再生
-  - 複数のビデオフォーマットサポート
+- **Video streaming daemon**
+  - Streaming video content to the ESP32 over UDP
+  - Playback controlled via ROS2
+  - Support for multiple video formats
 
-### ネットワーク構成
-- **デュアルWiFi設定**:
-  - `wlan0`: WebUIアクセス用外部ネットワーク
-  - `USB WiFiアダプター`: ESP32専用AP (192.168.100.1/24)
-- **mDNSサポート**: ホスト名による簡単アクセス
-- **DHCPサーバー**: ESP32デバイスへの自動IP割り当て
+### Network Configuration
+- **Dual-WiFi configuration**:
+  - `wlan0`: external network for WebUI access
+  - `USB WiFi adapter`: ESP32-dedicated AP (192.168.100.1/24)
+- **mDNS support**: easy access by hostname
+- **DHCP server**: automatic IP assignment to ESP32 devices
 
-### 通信プロトコル
-- **micro-ROS (XRCE-DDS)**: ESP32との主要通信
-- **MQTT**: ステータス/コマンドメッセージング、IMUクォータニオンデータ受信
-- **WebSocket**: WebUIのリアルタイム更新、IMUデータのブリッジ
-- **UDP**: 高スループットビデオストリーミング
+### Communication Protocols
+- **micro-ROS (XRCE-DDS)**: primary communication with the ESP32
+- **MQTT**: status/command messaging, receiving IMU quaternion data
+- **WebSocket**: real-time WebUI updates, bridging IMU data
+- **UDP**: high-throughput video streaming
 
-## 前提条件
+## Prerequisites
 
-- Ubuntu 22.04 LTS (MiniPC または Ubuntu搭載Raspberry Pi)
+- Ubuntu 22.04 LTS (MiniPC or Raspberry Pi running Ubuntu)
 - Python 3.10+
-- Node.js 18+ および npm
+- Node.js 18+ and npm
 - ROS2 Humble
-- Docker (micro-ROS agent用)
-- USB WiFiアダプター (ESP32専用AP用)
+- Docker (for the micro-ROS agent)
+- USB WiFi adapter (for the ESP32-dedicated AP)
 
-## インストール
+## Installation
 
-### 1. システム依存関係のインストール
+### 1. Install system dependencies
 
 ```bash
 # ROS2 Humble
@@ -103,17 +105,17 @@ curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt install nodejs
 ```
 
-### 2. Python依存関係のインストール
+### 2. Install Python dependencies
 
 ```bash
 cd server
 pip install -e .
-# または uv を使用 (推奨):
+# Or use uv (recommended):
 # pip install uv
 # uv pip install -e .
 ```
 
-### 3. フロントエンドのビルド
+### 3. Build the frontend
 
 ```bash
 cd server/frontend
@@ -121,156 +123,156 @@ npm install
 npm run build
 ```
 
-### 4. ネットワークのセットアップ (APモード)
+### 4. Set up the network (AP mode)
 
 ```bash
 cd server/scripts
 sudo ./setup_network.sh
 ```
 
-これにより、USB WiFiアダプターがESP32デバイス用のアクセスポイントとして設定されます。
+This configures the USB WiFi adapter as an access point for the ESP32 device.
 
-### 5. サービスのセットアップ (オプション)
+### 5. Set up services (optional)
 
 ```bash
 cd server/scripts
 sudo ./setup_services.sh
 ```
 
-これにより、起動時の自動起動用systemdサービスが設定されます。
+This configures systemd services for automatic startup at boot.
 
-## サーバーの実行
+## Running the Server
 
-### 開発モード
+### Development mode
 
 ```bash
-# ターミナル 1: micro-ROS agentの起動
+# Terminal 1: Start the micro-ROS agent
 cd server/docker
 docker-compose up
 
-# ターミナル 2: FastAPIサーバーの起動
+# Terminal 2: Start the FastAPI server
 cd server
 uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload
 
-# ターミナル 3: フロントエンド開発サーバーの起動 (オプション)
+# Terminal 3: Start the frontend development server (optional)
 cd server/frontend
 npm run dev
 
-# ターミナル 4: ジョイスティックデーモンの起動 (ジョイスティック接続時)
+# Terminal 4: Start the joystick daemon (when a joystick is connected)
 cd server
 python -m joystick.daemon
 ```
 
-### 本番モード
+### Production mode
 
 ```bash
-# すべてのサービスを起動
+# Start all services
 sudo systemctl start isolation-sphere-server
 sudo systemctl start isolation-sphere-joystick
 sudo systemctl start micro-ros-agent
 ```
 
-## プロジェクト構造
+## Project Structure
 
 ```
 server/
-├── app/                    # FastAPIアプリケーション
-│   ├── main.py            # アプリケーションエントリポイント
-│   ├── api/               # APIルート
-│   ├── core/              # コア機能
-│   └── services/          # ビジネスロジックサービス
-├── frontend/              # Reactフロントエンド
+├── app/                    # FastAPI application
+│   ├── main.py            # Application entry point
+│   ├── api/               # API routes
+│   ├── core/              # Core functionality
+│   └── services/          # Business logic services
+├── frontend/              # React frontend
 │   ├── src/
-│   │   ├── components/    # Reactコンポーネント
-│   │   ├── contexts/      # Reactコンテキスト
-│   │   └── pages/         # ページコンポーネント
-│   └── public/            # 静的アセット
-├── joystick/              # ジョイスティックデーモン
-│   ├── daemon.py          # メインデーモン
-│   ├── device_manager.py  # デバイス管理
-│   └── mapper.py          # 入力マッピング
-├── scripts/               # セットアップおよびユーティリティスクリプト
-├── docs/                  # ドキュメント
-│   ├── architecture.md    # システムアーキテクチャ
-│   ├── mqtt_spec.md       # MQTTプロトコル仕様
+│   │   ├── components/    # React components
+│   │   ├── contexts/      # React contexts
+│   │   └── pages/         # Page components
+│   └── public/            # Static assets
+├── joystick/              # Joystick daemon
+│   ├── daemon.py          # Main daemon
+│   ├── device_manager.py  # Device management
+│   └── mapper.py          # Input mapping
+├── scripts/               # Setup and utility scripts
+├── docs/                  # Documentation
+│   ├── architecture.md    # System architecture
+│   ├── mqtt_spec.md       # MQTT protocol specification
 │   └── ...
-├── docker/                # Docker設定
+├── docker/                # Docker configuration
 │   └── docker-compose.yml # micro-ROS agent
-├── pyproject.toml         # Pythonプロジェクト設定
-└── README.md              # このファイル
+├── pyproject.toml         # Python project configuration
+└── README.md              # This file
 ```
 
-## APIエンドポイント
+## API Endpoints
 
-- `GET /health` - ヘルスチェック
-- `GET /api/config` - システム設定の取得
-- `POST /api/config` - 設定の更新
-- `GET /api/playlist` - プレイリストの取得
-- `POST /api/playlist` - プレイリストの更新
-- `WebSocket /api/ws` - リアルタイム通信
+- `GET /health` - health check
+- `GET /api/config` - get system configuration
+- `POST /api/config` - update configuration
+- `GET /api/playlist` - get the playlist
+- `POST /api/playlist` - update the playlist
+- `WebSocket /api/ws` - real-time communication
 
-## 設定
+## Configuration
 
-設定は以下を通じて管理されます:
-- `app/core/config.py` - アプリケーション設定
-- 環境変数
-- `core/data/config.json` - ESP32共有設定
+Configuration is managed through:
+- `app/core/config.py` - application configuration
+- Environment variables
+- `core/data/config.json` - ESP32 shared configuration
 
-## ドキュメント
+## Documentation
 
-- [システムアーキテクチャ](docs/architecture.md)
-- [MQTTプロトコル仕様](docs/mqtt_spec.md)
-- [ステート図](docs/state_diagram.md)
-- [シーケンス図](docs/sequence_diagram.md)
-- [要求仕様書](requirements_specification.md)
-- [Raspberry Piシステム仕様](raspi_system_specification.md)
+- [System architecture](docs/architecture.md)
+- [MQTT protocol specification](docs/mqtt_spec.md)
+- [State diagram](docs/state_diagram.md)
+- [Sequence diagram](docs/sequence_diagram.md)
+- [Requirements specification](requirements_specification.md)
+- [Raspberry Pi system specification](raspi_system_specification.md)
 
-## 開発
+## Development
 
-### テストの実行
+### Running tests
 
 ```bash
-# Pythonテスト
+# Python tests
 pytest
 
-# フロントエンドテスト
+# Frontend tests
 cd frontend
 npm test
 ```
 
-### コードスタイル
+### Code Style
 
 ```bash
 # Python
 black .
 flake8 .
 
-# フロントエンド
+# Frontend
 cd frontend
 npm run lint
 ```
 
-## トラブルシューティング
+## Troubleshooting
 
-### micro-ROS agentが接続しない
-- Dockerコンテナが実行中か確認: `docker ps`
-- ファイアウォールを確認: `sudo ufw allow 8888/udp`
-- ESP32のネットワーク接続を確認
+### The micro-ROS agent does not connect
+- Check that the Docker container is running: `docker ps`
+- Check the firewall: `sudo ufw allow 8888/udp`
+- Check the ESP32's network connection
 
-### WebUIにアクセスできない
-- FastAPIがポート9000で実行中か確認
-- ファイアウォールがポート9000を許可しているか確認
-- mDNSサービスが実行中か確認
+### Cannot access the WebUI
+- Check that FastAPI is running on port 9000
+- Check that the firewall allows port 9000
+- Check that the mDNS service is running
 
-### ジョイスティックが検出されない
-- デバイスのパーミッションを確認: `ls -l /dev/input/`
-- ユーザーをinputグループに追加: `sudo usermod -a -G input $USER`
-- デーモンログを確認
+### The joystick is not detected
+- Check the device permissions: `ls -l /dev/input/`
+- Add the user to the input group: `sudo usermod -a -G input $USER`
+- Check the daemon logs
 
-## ライセンス
+## License
 
-ライセンス情報はプロジェクトルートを参照してください。
+For license information, see the project root.
 
-## 貢献者
+## Contributors
 
-貢献者情報はプロジェクトルートを参照してください。
+For contributor information, see the project root.
