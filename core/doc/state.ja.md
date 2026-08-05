@@ -1,8 +1,8 @@
-> **English** · [日本語](state.ja.md)
+> [English](state.md) · **日本語**
 
-# State Diagrams
+# ステート図
 
-## Overall System State Transitions
+## システム全体状態遷移
 
 ```mermaid
 stateDiagram-v2
@@ -38,7 +38,7 @@ stateDiagram-v2
     end note
 ```
 
-## WiFi Connection State
+## WiFi接続状態
 
 ```mermaid
 stateDiagram-v2
@@ -71,7 +71,7 @@ stateDiagram-v2
     end note
 ```
 
-## MQTT Connection State
+## MQTT接続状態
 
 ```mermaid
 stateDiagram-v2
@@ -109,7 +109,7 @@ stateDiagram-v2
     end note
 ```
 
-## IMU State Transitions
+## IMU状態遷移
 
 ```mermaid
 stateDiagram-v2
@@ -154,7 +154,7 @@ stateDiagram-v2
     end note
 ```
 
-## Gesture Detection State (planned)
+## ジェスチャー検出状態 (実装予定)
 
 ```mermaid
 stateDiagram-v2
@@ -226,7 +226,7 @@ stateDiagram-v2
     end note
 ```
 
-## UDP Reception State
+## UDP受信状態
 
 ```mermaid
 stateDiagram-v2
@@ -258,7 +258,7 @@ stateDiagram-v2
     end note
 ```
 
-## File System State
+## ファイルシステム状態
 
 ```mermaid
 stateDiagram-v2
@@ -295,7 +295,7 @@ stateDiagram-v2
     end note
 ```
 
-## Command Processing State
+## コマンド処理状態
 
 ```mermaid
 stateDiagram-v2
@@ -347,7 +347,7 @@ stateDiagram-v2
     end note
 ```
 
-## Overall Mode State (Integrated View)
+## 全体モード状態 (統合ビュー)
 
 ```mermaid
 stateDiagram-v2

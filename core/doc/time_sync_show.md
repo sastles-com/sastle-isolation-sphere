@@ -1,179 +1,168 @@
-# 時刻同期・スケジュール表示 (ショーモード) 設計
+> **English** · [日本語](time_sync_show.ja.md)
 
-## 概要
+# Time Synchronization and Scheduled Display (Show Mode) Design
 
-複数コア (球体) を **共通の時間軸** で協調させ、音楽や演出に合わせて
-画像・パターンを一斉に、あるいは球ごとに役割分担して表示するための設計。
+## Overview
 
-目的は「現実の壁掛け時計」を得ることではなく、**全コアが合意した単調増加の
-共通タイムベース**を持つこと。これにより
+A design for coordinating multiple cores (spheres) on a **shared time axis**, so that images and patterns can be displayed all at once, or with roles divided among spheres, in time with music and performances.
 
-1. 複数コアのパターンを音楽に同期させる／組み合わせる
-2. ある時刻に表示するコンテンツを **事前に用意** しておき、時刻同期して一斉提示する
-3. (副次的) ログのタイムスタンプ・イベント相関など汎用の時刻としても使える
+The goal is not to obtain a "real-world wall clock," but rather to have a **shared, monotonically increasing time base that all cores agree on**. This enables:
 
-を実現する。
+1. Synchronizing / combining the patterns of multiple cores with music
+2. **Preparing content in advance** that is to be displayed at a given time, and presenting it all at once via time synchronization
+3. (As a side benefit) use as a general-purpose clock for log timestamps, event correlation, and so on
 
-### 設計上の核心
+### The Core of the Design
 
-> コンテンツを事前に用意しておくと、「リアルタイム配信の同期問題」が
-> 「スケジュール提示問題」に変わる。ネットワークのジッタは *事前に届いていればいい*
-> だけになり、**表示の瞬間には効かなくなる**。表示時刻にやる仕事は
-> 「用意済みバッファを差し替える」だけ (数µs) なので、同期精度はほぼクロック精度に収束する。
+> When content is prepared in advance, the "synchronization problem of real-time streaming" turns into a "scheduled presentation problem." Network jitter only needs *to have delivered the content beforehand*, and **no longer matters at the moment of display**. The only work done at display time is "swapping in an already-prepared buffer" (a few µs), so the synchronization accuracy converges to essentially the clock accuracy.
 
-### 同期精度の要件
+### Synchronization Accuracy Requirements
 
-- 目標: **10ms 程度** (ヒトが「同期している」と感じる範囲内)
-- この設計ではクロック精度が律速となり、10ms 目標は十分に達成可能。
+- Target: **around 10ms** (within the range where a human perceives it as "synchronized")
+- In this design, clock accuracy is the limiting factor, and the 10ms target is readily achievable.
 
 ---
 
-## 1. 共通クロック (TimeSync)
+## 1. Shared Clock (TimeSync)
 
-### 方式
+### Method
 
-サーバーを時刻の権威とし、**1秒周期で MQTT ブロードキャスト**する時刻ビーコンを
-各コアが受信、間はローカルクロック (`millis()`) で補間する。
+The server is the authority on time, and **broadcasts a time beacon over MQTT with a 1-second period**. Each core receives it, and interpolates in between using its local clock (`millis()`).
 
 ```
-sphere/all/clock (1秒周期, QoS0, retain=false)
+sphere/all/clock (1-second period, QoS0, retain=false)
   { "epoch_ms": 1751940000123, "seq": 42 }
 ```
 
-各コアは受信時に offset を求め、以降は補間する:
+Each core computes an offset on reception, then interpolates thereafter:
 
 ```
-offset      = epoch_ms - millis()            // 受信時に算出
-syncedNow() = millis() + offset_filtered     // 全コア共通のエポック ms
+offset      = epoch_ms - millis()            // computed on reception
+syncedNow() = millis() + offset_filtered     // epoch ms shared across all cores
 ```
 
-### 設計の勘所
+### Design Considerations
 
-| # | 論点 | 方針 |
+| # | Point | Approach |
 |---|------|------|
-| 1 | ビーコンの役割 | ESP32 水晶ドリフトは 40ppm ≒ **40µs/秒**。1秒間隔なら溜まるズレは数十µsで無視できる。ビーコンの本質は**ドリフト補正**であって、ジッタとの戦いではない。1秒は十分に保守的。 |
-| 2 | offset を毎回スナップしない | 素直に毎ビーコンで `offset` を上書きすると **WiFi ジッタがそのままクロックに注入され表示がカクつく**。→ **EMA (指数移動平均) でローパス** し、明らかな外れ値ビーコンは棄却。補正はスルー (緩やかに寄せる) して表示ジャンプを防ぐ。 |
-| 3 | WiFi モデムスリープ無効化 | ESP32 はデフォルトで省電力スリープに入り、受信が数十msスパイクする。同期用途では致命的なので起動時に `WiFi.setSleep(false)` (`WIFI_PS_NONE`)。 |
-| 4 | QoS / retain | clock は **QoS0・非retain**。再送遅延で古い時刻が届くのを避ける (古さは payload の epoch_ms で自明)。 |
-| 5 | 相対スキュー | 問題になるのはコア間の相対ズレ。全コアが同一フィルタで平滑化すれば相対スキューは小さく収まる。 |
+| 1 | Role of the beacon | ESP32 crystal drift is 40ppm ≒ **40µs/second**. At a 1-second interval, the accumulated deviation is a few tens of µs and can be ignored. The essence of the beacon is **drift correction**, not a fight against jitter. 1 second is sufficiently conservative. |
+| 2 | Do not snap the offset every time | Naively overwriting `offset` on every beacon means **WiFi jitter is injected directly into the clock, making the display stutter**. → **Low-pass it with an EMA (exponential moving average)** and reject clearly outlying beacons. Apply corrections gradually (easing toward the value) to prevent display jumps. |
+| 3 | Disable WiFi modem sleep | By default the ESP32 enters power-saving sleep, causing reception latency to spike by tens of ms. This is fatal for synchronization purposes, so call `WiFi.setSleep(false)` (`WIFI_PS_NONE`) at startup. |
+| 4 | QoS / retain | clock is **QoS0 and non-retain**. This avoids stale times arriving due to retransmission delay (staleness is self-evident from the payload's epoch_ms). |
+| 5 | Relative skew | What matters is the relative deviation between cores. If all cores smooth with the same filter, the relative skew stays small. |
 
-### 精度の律速
+### The Limiting Factor for Accuracy
 
-- クロックそのものは `millis()` (ms 分解能) で保持。
-- 実効精度の律速は **MQTT/WiFi の片道遅延ジッタ** (通常数ms、たまにスパイク)。
-  上記の EMA + 外れ値棄却で吸収し、10ms 目標に収める。
+- The clock itself is held with `millis()` (ms resolution).
+- The limiting factor for effective accuracy is the **one-way latency jitter of MQTT/WiFi** (usually a few ms, with occasional spikes).
+  This is absorbed by the EMA + outlier rejection above, keeping it within the 10ms target.
 
 ---
 
-## 2. スケジュール表示 (キューリスト + 先読みプリフェッチ)
+## 2. Scheduled Display (Cue List + Look-Ahead Prefetch)
 
-### パイプライン
+### Pipeline
 
-既存の三重バッファ (`FrameBufferPool`: display / ready / decode) をそのまま活用する。
-ライブ配信ではなく「スケジュール提示」に使うだけ。
+The existing triple buffer (`FrameBufferPool`: display / ready / decode) is used as-is, simply repurposed for "scheduled presentation" rather than live streaming.
 
 ```
-[準備フェーズ]  present_at より前に decode バッファへ用意する
-                 ・保存画像なら LittleFS (/images/) から読み → JPEG デコード
-                 ・パターンなら f(syncedNow(), role, params) で生成
-                 完了したら ready に積む (= この時点までに間に合わせる)
+[Preparation phase]  Prepare into the decode buffer before present_at
+                     - For a stored image, read from LittleFS (/images/) → JPEG decode
+                     - For a pattern, generate via f(syncedNow(), role, params)
+                     When done, push onto ready (= must be ready by this point)
 
-[提示フェーズ]  表示ループで syncedNow() を監視
-                 syncedNow() >= cue.present_at になった瞬間に ready → display フリップ
-                 (テアリングなし・ほぼ0コスト)
+[Presentation phase]  The display loop monitors syncedNow()
+                     The instant syncedNow() >= cue.present_at, flip ready → display
+                     (no tearing, near-zero cost)
 ```
 
-先読みのリードタイムは **最悪デコード時間より長く**取る。
-`ImageManager` は既に `decode_time_us` を計測しているので、実測値から決定する
-(例: 最悪 30ms なら 100ms 前に準備開始)。
+The look-ahead lead time is set **longer than the worst-case decode time**.
+Since `ImageManager` already measures `decode_time_us`, decide it from the measured values
+(e.g., if the worst case is 30ms, start preparing 100ms ahead).
 
-### 端の処理
+### Edge Handling
 
-| 状況 | 挙動 |
+| Situation | Behavior |
 |------|------|
-| `syncedNow()` が present_at を少し超過 (< 10ms) | 即提示 (遅延最小) |
-| 大きく超過 (遅延参加・クロック飛び) | 過去キューはスキップし、現在時刻のキューへ追従 |
-| まだ present_at 前 | **絶対に先出ししない** (必ず時刻まで待つ) |
+| `syncedNow()` slightly exceeds present_at (< 10ms) | Present immediately (minimize latency) |
+| Greatly exceeded (late join, clock jump) | Skip past cues and follow the cue for the current time |
+| Still before present_at | **Never present early** (always wait until the scheduled time) |
 
-### メモリ
+### Memory
 
-ESP32-S3 + PSRAM (`BOARD_HAS_PSRAM`)。128×128×16bit ≒ 32KB/枚なので、
-数枚先まで準備済みリングにしても余裕がある。
+ESP32-S3 + PSRAM (`BOARD_HAS_PSRAM`). At 128×128×16bit ≒ 32KB/frame, there is ample room even for a ring prepared several frames ahead.
 
 ---
 
-## 3. コンテンツモデル / プロトコル
+## 3. Content Model / Protocol
 
-キューは絶対時刻を持つので、クロックさえ同期していれば全コアが自律的に揃う。
+Since cues carry absolute times, all cores align autonomously as long as the clock is synchronized.
 
 ```
-sphere/all/cues (QoS1, 事前配布)
+sphere/all/cues (QoS1, distributed in advance)
   [ { "present_at_epoch_ms": 1751940003000, "type": "image",   "id": "img_042" },
     { "present_at_epoch_ms": 1751940003500, "type": "pattern", "gen": "pulse",
       "role": "A", "params": { ... } },
     ... ]
 ```
 
-| type | 意味 | 準備処理 |
+| type | Meaning | Preparation |
 |------|------|----------|
-| `image` | `/images/` の保存画像を id 参照 | 事前読み込み + JPEG デコード |
-| `pattern` | 生成パターン | `f(syncedNow(), role, params)` で生成 |
+| `image` | References a stored image in `/images/` by id | Preload + JPEG decode |
+| `pattern` | Generated pattern | Generate via `f(syncedNow(), role, params)` |
 
-- **パターンは同期時刻の純粋関数** `LED出力 = f(syncedNow(), role, params)` とする。
-  これにより全コアが構造的にフレームロックする (offset 合わせだけでは揃わない点に注意)。
-- **「組み合わせ」** は `f` に coreId / 役割 (role) を渡すことで実現。
-  球ごとに違う担当パートを同一時間軸で演じられる。
+- **A pattern is a pure function of the synchronized time**: `LED output = f(syncedNow(), role, params)`.
+  This makes all cores structurally frame-locked (note that offset alignment alone does not align them).
+- **"Combination"** is achieved by passing coreId / role to `f`.
+  Each sphere can play a different assigned part on the same time axis.
 
-ショー全体の振り付けはキューリストとして事前配布する。必要なら BPM・開始時刻を持つ
-上位の「ショー定義」を別トピックで配ってもよい:
+The choreography of the whole show is distributed in advance as a cue list. If needed, a higher-level "show definition" carrying BPM and a start time can be distributed on a separate topic:
 
 ```
-sphere/all/show (ショー切替時, QoS1)
+sphere/all/show (on show change, QoS1)
   { "show": "pulse", "start_epoch_ms": ..., "bpm": 120, "roles": { ... } }
 ```
 
 ---
 
-## 4. ライブモードとの共存
+## 4. Coexistence with Live Mode
 
-既存の UDP ストリーム (`FrameReassembler`, frame_id ベース, PTS なし) は
-**ライブミラー**としてそのまま残す。本設計の「ショー (スケジュール) モード」は
-**別の再生モード**として追加する (フロントに既にある "live デジタルツイン" と対になる)。
+The existing UDP stream (`FrameReassembler`, frame_id-based, no PTS) remains as-is as a **live mirror**. The "show (scheduled) mode" of this design is added as a **separate playback mode** (paired with the "live digital twin" that already exists in the frontend).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Live
-    Live --> Show: ショー開始
-    Show --> Live: ショー終了
+    Live --> Show: show starts
+    Show --> Live: show ends
     note right of Live
-      UDP ストリーム受信
-      frame_id 順に即表示
+      Receive UDP stream
+      Display immediately in frame_id order
     end note
     note right of Show
-      キューを先読み準備
-      syncedNow() で提示
+      Prepare cues via look-ahead
+      Present at syncedNow()
     end note
 ```
 
 ---
 
-## 5. 追加コンポーネント
+## 5. Additional Components
 
-| 層 | 追加するもの |
+| Layer | What to add |
 |----|-------------|
-| server | `sphere/all/clock` を1秒周期で publish するループ。`sphere/all/cues` の配布。既存 `datetime.utcnow()` を epoch ms (整数) で送る。 |
-| core `TimeSync` (新規) | clock 購読 → offset を EMA 平滑化・`syncedNow()` 提供・定期再同期 |
-| core `CommandHandler` | `sphere/all/clock` の分岐追加 / `CommandHandler.cpp:301` の `timestamp` TODO を `syncedNow()` で解消 |
-| core `CueScheduler` (新規) | ソート済みキュー保持・「次に準備すべきもの」「提示時刻か」を判定 |
-| core プリフェッチ処理 | present_at 前に decode / 生成して ready に積む |
-| core 表示ループ | `syncedNow() >= present_at` で ready → display フリップ |
-| core 起動時 | `WiFi.setSleep(false)` |
+| server | A loop that publishes `sphere/all/clock` with a 1-second period. Distribution of `sphere/all/cues`. Sends the existing `datetime.utcnow()` as epoch ms (integer). |
+| core `TimeSync` (new) | Subscribe to clock → EMA-smooth the offset, provide `syncedNow()`, periodic resynchronization |
+| core `CommandHandler` | Add a branch for `sphere/all/clock` / resolve the `timestamp` TODO at `CommandHandler.cpp:301` using `syncedNow()` |
+| core `CueScheduler` (new) | Hold a sorted queue of cues, decide "what to prepare next" and "whether it is presentation time" |
+| core prefetch processing | Decode / generate before present_at and push onto ready |
+| core display loop | Flip ready → display when `syncedNow() >= present_at` |
+| core startup | `WiFi.setSleep(false)` |
 
 ---
 
-## 未確定 / 今後の論点
+## Open Questions / Future Points
 
-- キューの配布単位 (1曲まるごと事前配布か、時間窓でストリーミング配布か)
-- パターン生成関数 `f` の設計 (どんな生成器を用意するか)
-- 役割 (role) の割り当て方法 (config.json の sphere.id からの静的割当 / サーバー動的割当)
-- サーバー側時刻配布の実装場所 (`mqtt_service.py` にループを足すか、専用サービスにするか)
+- Distribution unit for cues (distribute a whole song in advance, or stream-distribute in time windows)
+- Design of the pattern generation function `f` (what generators to provide)
+- Method for assigning roles (static assignment from sphere.id in config.json / dynamic assignment by the server)
+- Where to implement server-side time distribution (add a loop to `mqtt_service.py`, or a dedicated service)

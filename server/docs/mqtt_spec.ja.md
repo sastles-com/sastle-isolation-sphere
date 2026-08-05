@@ -1,4 +1,4 @@
-> **English** · [日本語](mqtt_spec.ja.md)
+> [English](mqtt_spec.md) · **日本語**
 
 # MQTT Message Specification
 

@@ -1,4 +1,4 @@
-> **English** · [日本語](class_diagram.ja.md)
+> [English](class_diagram.md) · **日本語**
 
 # Class Diagram (Server)
 

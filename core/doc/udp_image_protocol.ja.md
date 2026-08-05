@@ -1,17 +1,17 @@
-> **English** · [日本語](udp_image_protocol.ja.md)
+> [English](udp_image_protocol.md) · **日本語**
 
 # UDP Image Protocol Specification
 
-## Overview
-UDP protocol specification for transferring JPEG images in real time from a PC/ROS2 to the ESP32 in the Isolation Sphere project.
+## 概要
+Isolation SphereプロジェクトでPC/ROS2からESP32へJPEG画像をリアルタイム転送するためのUDPプロトコル仕様。
 
-## Protocol Version
+## プロトコルバージョン
 - Version: 1.0
 - Date: 2025-12-01
 
-## Packet Format
+## パケットフォーマット
 
-### Single-packet scheme (v1.0)
+### シングルパケット方式 (v1.0)
 
 ```
 ┌─────────────────────────────────────────┐
@@ -26,40 +26,40 @@ UDP protocol specification for transferring JPEG images in real time from a PC/R
 └─────────────────────────────────────────┘
 ```
 
-### Field Definitions
+### フィールド定義
 
 #### Header (8 bytes)
 
 | Field | Offset | Size | Type | Value | Description |
 |-------|--------|------|------|-------|-------------|
-| Magic Number | 0 | 4 | uint32_t | 0x4A504547 | Magic number "JPEG" (little-endian) |
-| Frame ID | 4 | 4 | uint32_t | 0 ~ 0xFFFFFFFF | Frame sequence number (managed on the sender side) |
+| Magic Number | 0 | 4 | uint32_t | 0x4A504547 | マジックナンバー "JPEG" (リトルエンディアン) |
+| Frame ID | 4 | 4 | uint32_t | 0 ~ 0xFFFFFFFF | フレーム連番 (送信側で管理) |
 
 #### JPEG Data
 
 | Field | Offset | Size | Description |
 |-------|--------|------|-------------|
-| JPEG Binary | 8 | Variable | Binary data in standard JPEG format |
+| JPEG Binary | 8 | Variable | 標準JPEG形式のバイナリデータ |
 
-### Packet Size Limits
+### パケットサイズ制限
 
-- **Minimum size**: 8 bytes (header only, no data)
-- **Recommended maximum size**: 65,507 bytes (UDP theoretical limit)
-- **Practical size**: 10,000 ~ 30,000 bytes (320x160 JPEG at quality 70-90)
+- **最小サイズ**: 8 bytes (ヘッダーのみ、データなし)
+- **推奨最大サイズ**: 65,507 bytes (UDP理論上限)
+- **実用サイズ**: 10,000 ~ 30,000 bytes (320x160 JPEG at quality 70-90)
 
-## Image Specification
+## 画像仕様
 
-### Recommended parameters
+### 推奨パラメータ
 
 | Parameter | Value | Note |
 |-----------|-------|------|
-| Width | 320 pixels | Configurable in config.json |
-| Height | 160 pixels | Configurable in config.json |
+| Width | 320 pixels | config.jsonで設定可能 |
+| Height | 160 pixels | config.jsonで設定可能 |
 | Format | JPEG | Baseline JPEG |
-| Color Space | RGB / YCbCr | Standard JPEG |
-| Quality | 70-90 | Balance between quality and transfer size |
+| Color Space | RGB / YCbCr | 標準JPEG |
+| Quality | 70-90 | 品質と転送量のバランス |
 
-### JPEG compression ratio guideline
+### JPEG圧縮率の目安
 
 | Quality | File Size | FPS @ 1Gbps | FPS @ 100Mbps |
 |---------|-----------|-------------|---------------|
@@ -68,11 +68,11 @@ UDP protocol specification for transferring JPEG images in real time from a PC/R
 | 90 | ~30 KB | 4,166 | 416 |
 | 95 | ~50 KB | 2,500 | 250 |
 
-**Recommendation for WiFi environments**: Quality 70-80, 30fps achievable
+**WiFi環境での推奨**: Quality 70-80, 30fps可能
 
-## Communication Parameters
+## 通信パラメータ
 
-### ESP32-side settings
+### ESP32側設定
 
 ```json
 {
@@ -90,14 +90,14 @@ UDP protocol specification for transferring JPEG images in real time from a PC/R
 }
 ```
 
-### PC-side settings
+### PC側設定
 
 ```python
 ESP32_IP = "192.168.49.101"
 ESP32_PORT = 8889
 ```
 
-## Data Flow
+## データフロー
 
 ```
 ┌──────────┐                 ┌──────────┐                 ┌──────────┐
@@ -127,36 +127,36 @@ ESP32_PORT = 8889
                                                           └──────────┘
 ```
 
-## Error Handling
+## エラーハンドリング
 
-### Packet validation
+### パケット検証
 
-The following validations are performed on the ESP32 side:
+ESP32側で以下の検証を実施:
 
-1. **Packet size check**
-   - At least the minimum size (8 bytes)
-   - At most the maximum size (65,507 bytes)
+1. **パケットサイズチェック**
+   - 最小サイズ (8 bytes) 以上
+   - 最大サイズ (65,507 bytes) 以下
 
-2. **Magic number validation**
-   - Must be `0x4A504547` ("JPEG")
+2. **マジックナンバー検証**
+   - `0x4A504547` ("JPEG") であること
 
-3. **JPEG integrity check**
-   - Obtain the image size with TJpg_Decoder
-   - Verify that it matches the configured width and height
+3. **JPEG整合性チェック**
+   - TJpg_Decoderで画像サイズを取得
+   - 設定された幅・高さと一致することを確認
 
-### Behavior on error
+### エラー時の動作
 
-- **Packet drop**: Skip the frame and wait for the next frame
-- **Decode error**: Increment the error counter and do not update the buffer
-- **Statistics**: Recorded in `frames_dropped` and `decode_errors`
+- **パケットドロップ**: フレームをスキップし、次のフレームを待つ
+- **デコードエラー**: エラーカウンタを増やし、バッファを更新しない
+- **統計情報**: `frames_dropped`, `decode_errors` で記録
 
-### Packet loss countermeasures
+### パケットロス対策
 
-- **Latest frame priority**: Old frames are discarded without buffering
-- **No recovery needed**: Automatically recovers on the next frame
-- **Statistics monitoring**: Monitor FPS and drop rate
+- **最新フレーム優先**: 古いフレームはバッファリングせず破棄
+- **リカバリー不要**: 次のフレームで自動復帰
+- **統計モニタリング**: FPS、ドロップ率を監視
 
-## Sender Implementation Examples
+## 送信側実装例
 
 ### Python (OpenCV)
 
@@ -176,7 +176,7 @@ def send_frame(jpeg_data, frame_id):
     sock.sendto(packet, (ESP32_IP, ESP32_PORT))
     sock.close()
 
-# Camera capture
+# カメラキャプチャ
 cap = cv2.VideoCapture(0)
 frame_id = 0
 
@@ -230,11 +230,11 @@ void send_jpeg_udp(const std::vector<uint8_t>& jpeg_data,
 }
 ```
 
-## Future Extensions (v2.0 and later)
+## 将来の拡張 (v2.0以降)
 
-### Multi-packet scheme
+### マルチパケット方式
 
-Split large images (> 64KB) into multiple packets:
+大きな画像 (> 64KB) を複数パケットに分割:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -247,18 +247,18 @@ Split large images (> 64KB) into multiple packets:
 │ Chunk Size      : uint16_t              │
 │ Reserved        : uint16_t              │
 ├─────────────────────────────────────────┤
-│ JPEG Chunk Data (max 1400 bytes)        │
+│ JPEG Chunk Data (最大1400 bytes)        │
 └─────────────────────────────────────────┘
 ```
 
-### Candidate additional features
+### 追加機能候補
 
-- **Frame skip control**: Adjust frame rate from the PC side
-- **Dynamic image quality adjustment**: Change JPEG quality according to network conditions
-- **ACK/NACK**: Retransmission control for important frames
-- **Compression format extension**: H.264, WebP support
+- **フレームスキップ制御**: PC側からフレームレート調整
+- **画質動的調整**: ネットワーク状況に応じてJPEG品質を変更
+- **ACK/NACK**: 重要フレームの再送制御
+- **圧縮形式拡張**: H.264, WebP対応
 
-## References
+## 参考資料
 
 - [UDP Packet Structure](https://en.wikipedia.org/wiki/User_Datagram_Protocol)
 - [JPEG File Interchange Format](https://www.w3.org/Graphics/JPEG/itu-t81.pdf)

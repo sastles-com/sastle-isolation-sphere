@@ -1,8 +1,8 @@
-> **English** · [日本語](sequence.ja.md)
+> [English](sequence.md) · **日本語**
 
-# Sequence Diagrams
+# シーケンス図
 
-## System Startup Sequence
+## システム起動シーケンス
 
 ```mermaid
 sequenceDiagram
@@ -66,7 +66,7 @@ sequenceDiagram
     IM-->>Main: true/false
     deactivate IM
     
-    Note over Main,GM: GestureManager (planned)
+    Note over Main,GM: GestureManager (実装予定)
     Main->>GM: begin(imu, mqtt)
     activate GM
     GM->>GM: Initialize shake detection
@@ -77,7 +77,7 @@ sequenceDiagram
     Main->>Main: Setup Complete
 ```
 
-## Main Loop Sequence
+## メインループシーケンス
 
 ```mermaid
 sequenceDiagram
@@ -112,7 +112,7 @@ sequenceDiagram
         end
         deactivate IM
         
-        Note over Main,GM: GestureManager (planned)
+        Note over Main,GM: GestureManager (実装予定)
         Main->>GM: update()
         activate GM
         GM->>IM: getAccel()
@@ -150,7 +150,7 @@ sequenceDiagram
     end
 ```
 
-## MQTT Command Processing Sequence
+## MQTTコマンド処理シーケンス
 
 ```mermaid
 sequenceDiagram
@@ -187,7 +187,7 @@ sequenceDiagram
     deactivate Main
 ```
 
-## IMU Data Publishing Sequence
+## IMUデータ公開シーケンス
 
 ```mermaid
 sequenceDiagram
@@ -219,7 +219,7 @@ sequenceDiagram
     end
 ```
 
-## Gesture Detection Sequence (planned)
+## ジェスチャー検出シーケンス (実装予定)
 
 ```mermaid
 sequenceDiagram
@@ -291,7 +291,7 @@ sequenceDiagram
     end
 ```
 
-## UDP Reception Sequence
+## UDP受信シーケンス
 
 ```mermaid
 sequenceDiagram
@@ -327,7 +327,7 @@ sequenceDiagram
     end
 ```
 
-## WiFi Reconnection Sequence
+## WiFi再接続シーケンス
 
 ```mermaid
 sequenceDiagram
@@ -365,7 +365,7 @@ sequenceDiagram
     end
 ```
 
-## MQTT Reconnection Sequence
+## MQTT再接続シーケンス
 
 ```mermaid
 sequenceDiagram

@@ -1,61 +1,63 @@
-# M5AtomS3R LED駆動検証 (V2ハードウェア構成)
+> **English** · [日本語](led_drive_test.ja.md)
 
-V2基板 (FPC-isolation-sphere/kiban/) は発注済みだが、到着前に
-**M5AtomS3R 単体 + 手持ちのWS2812ストリップ**で「5ストリップ×160 LED = 800 LED」
-構成を駆動できるかをベンチ検証するためのテストファームウェア。
+# M5AtomS3R LED Drive Validation (V2 Hardware Configuration)
 
-- ソース: `src/led_drive_test/led_drive_test_main.cpp`
-- ビルド環境: `pio run -e led_drive_test -t upload` (本体 `env:atoms3r` とは独立)
+The V2 board (FPC-isolation-sphere/kiban/) has already been ordered, but before it arrives,
+this is test firmware for bench-validating whether an **M5AtomS3R standalone unit + on-hand WS2812 LED strips**
+can drive a "5 strips × 160 LEDs = 800 LEDs" configuration.
 
-## 検証の論点
+- Source: `src/led_drive_test/led_drive_test_main.cpp`
+- Build environment: `pio run -e led_drive_test -t upload` (independent of the main `env:atoms3r`)
 
-| # | 論点 | 背景 |
+## Points to Validate
+
+| # | Point | Background |
 |---|---|---|
-| 1 | 5本目のデータ出力 | ESP32-S3 の RMT TX チャネルは **4ch**。FastLED が5本目をどう扱うか (多重化で逐次送信 → show() 時間が約2倍になる想定) を実測する |
-| 2 | show() 時間 | 160 LED × 30µs ≈ 4.8ms/ストリップ。4ch並列+1本逐次なら ≈9.6ms → 30fps (33ms周期) には十分収まる見込み。実測で確認 |
-| 3 | チェーン順序 | CHASE モードで DIN→DOUT の流れと160個のカウントを目視確認 |
-| 4 | 電流と輝度上限 | 全白@255 は 800 LED で約48A となり論外。輝度上限 64/255 をコードで強制 (ポゴピン RTLECS 1.5A/pin ×2枝 の制約に対応する運用の予行) |
+| 1 | 5th data output | The ESP32-S3's RMT TX has **4 channels**. Measure how FastLED handles a 5th line (expected to be sent sequentially via multiplexing → show() time roughly doubles) |
+| 2 | show() time | 160 LEDs × 30µs ≈ 4.8ms/strip. With 4 channels in parallel + 1 line sequential ≈ 9.6ms → expected to comfortably fit within 30fps (33ms period). Confirm by measurement |
+| 3 | Chain order | In CHASE mode, visually confirm the DIN→DOUT flow and the count of 160 |
+| 4 | Current and brightness cap | Full white @255 would draw about 48A across 800 LEDs, which is out of the question. The brightness cap of 64/255 is enforced in code (a rehearsal of the operational practice for the pogo-pin RTLECS 1.5A/pin × 2-branch constraint) |
 
-## ピン割当 (要確認)
+## Pin Assignment (to be confirmed)
 
-core-M5atom-FPC 基板のネット `GPIO01`〜`GPIO05` が5本のLEDデータ線。
-AtomS3R 底面ソケット (J3 "M5atom-L" / J4 "M5atomS3-R") との物理対応は
-**以下の仮説**でデフォルト値を設定している。**基板設計者の確認が必要**:
+The core-M5atom-FPC board nets `GPIO01`–`GPIO05` are the 5 LED data lines.
+The physical correspondence with the AtomS3R bottom sockets (J3 "M5atom-L" / J4 "M5atomS3-R")
+is set to default values based on **the following hypothesis**. **Confirmation by the board designer is required**:
 
-| 基板ネット | 仮説の ESP32-S3 ピン | ビルドフラグ |
+| Board net | Hypothesized ESP32-S3 pin | Build flag |
 |---|---|---|
 | GPIO01 | G5 | `LED_TEST_PIN0` (default 5) |
 | GPIO02 | G6 | `LED_TEST_PIN1` (default 6) |
 | GPIO03 | G7 | `LED_TEST_PIN2` (default 7) |
 | GPIO04 | G8 | `LED_TEST_PIN3` (default 8) |
 | GPIO05 | G38 | `LED_TEST_PIN4` (default 38) |
-| GPIO06 (予備?) | G39 | — |
+| GPIO06 (spare?) | G39 | — |
 
-違っていた場合は `platformio.ini` の `env:led_drive_test` に
-`-D LED_TEST_PIN4=39` のように追加して上書きする。
+If it turns out to be different, override it by adding something like
+`-D LED_TEST_PIN4=39` to `env:led_drive_test` in `platformio.ini`.
 
-参考: 現行本体ファーム (`BoardConfig.h`) は4ストリップ G5/G6/G7/G8。
-I2C (BNO055) は Grove ポート G2(SDA)/G1(SCL) — 基板の J9 経由。
+Reference: the current main firmware (`BoardConfig.h`) uses 4 strips on G5/G6/G7/G8.
+I2C (BNO055) uses the Grove port G2(SDA)/G1(SCL) — via the board's J9.
 
-## テストモード (本体ボタンで切替)
+## Test Modes (switched with the main unit button)
 
-| モード | 表示 | 確認内容 |
+| Mode | Display | What it checks |
 |---|---|---|
-| STRIP_ID | ストリップ毎の単色 (R/G/B/Y/M) | 5出力すべての疎通、配線とストリップ番号の対応 |
-| CHASE | 白1ピクセルが走る + 先頭に識別色 | チェーン順序、LED数 (160) |
-| RAINBOW | レインボースクロール | 描画のなめらかさ、ちらつき |
-| WHITE_64 | 輝度64の全白 | 電流実測 (クランプメータ/電源表示) |
-| FPS_BENCH | 最速ループ | show() 平均時間と上限FPS |
+| STRIP_ID | Solid color per strip (R/G/B/Y/M) | Connectivity of all 5 outputs, mapping between wiring and strip number |
+| CHASE | A single white pixel runs + an identifier color at the head | Chain order, LED count (160) |
+| RAINBOW | Rainbow scroll | Rendering smoothness, flicker |
+| WHITE_64 | Full white at brightness 64 | Current measurement (clamp meter / power supply readout) |
+| FPS_BENCH | Fastest loop | show() average time and maximum FPS |
 
-LCD とシリアル (115200) に FPS / show()平均時間 / ピン割当を毎秒表示する。
+The LCD and serial (115200) display FPS / show() average time / pin assignment every second.
 
-## 期待される結果 (合格基準)
+## Expected Results (pass criteria)
 
-- 5ストリップすべて点灯・正しい色
-- FPS_BENCH で show() ≈ 10ms 以下 → 実効 100fps 級、本番目標 30fps に余裕
-- 30fps モード時にちらつき・色化けなし
-- WHITE_64 での電流が電源・ポゴピン定格の想定内
+- All 5 strips light up with correct colors
+- In FPS_BENCH, show() ≈ 10ms or less → effectively ~100fps class, ample headroom over the 30fps production target
+- No flicker or color corruption in 30fps mode
+- Current in WHITE_64 is within the assumed ratings of the power supply and pogo pins
 
-show() が大幅に遅い (>20ms) 場合の代替策:
-FastLED の ESP32-S3 I2S/LCD並列ドライバ (`FASTLED_USES_ESP32S3_I2S`) で
-最大16ストリップ完全並列出力に切り替える。
+Alternative if show() is significantly slow (>20ms):
+switch to FastLED's ESP32-S3 I2S/LCD parallel driver (`FASTLED_USES_ESP32S3_I2S`)
+for fully parallel output of up to 16 strips.

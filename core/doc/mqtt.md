@@ -1,36 +1,38 @@
-# MQTT プロトコル仕様
+> **English** · [日本語](mqtt.ja.md)
 
-## 接続設定
+# MQTT Protocol Specification
 
-### ブローカー情報
-- **ホスト**: 192.168.49.1
-- **ポート**: 1883
-- **プロトコル**: MQTT v3.1.1
-- **認証**: Anonymous (認証なし)
-- **Keep Alive**: 15秒
+## Connection Settings
+
+### Broker Information
+- **Host**: 192.168.49.1
+- **Port**: 1883
+- **Protocol**: MQTT v3.1.1
+- **Authentication**: Anonymous (no authentication)
+- **Keep Alive**: 15 seconds
 - **QoS**: 0 (At most once)
 
-### クライアント情報
-- **Client ID**: `sphere001` (config.jsonで設定)
+### Client Information
+- **Client ID**: `sphere001` (configured in config.json)
 - **Clean Session**: true
-- **再接続間隔**: 5秒
+- **Reconnect interval**: 5 seconds
 
-## トピック体系
+## Topic Structure
 
-### トピック命名規則
+### Topic Naming Convention
 ```
 sphere/{device_id}/{category}
 ```
 
-### デバイスID
-- **sphere001**: メインデバイス (config.jsonで設定可能)
+### Device ID
+- **sphere001**: Main device (configurable in config.json)
 
-## パブリッシュトピック (デバイス → ブローカー)
+## Publish Topics (Device → Broker)
 
 ### 1. sphere/sphere001/status
-デバイスの状態通知
+Device status notification
 
-**ペイロード**:
+**Payload**:
 ```json
 {
   "status": "online" | "offline",
@@ -38,16 +40,16 @@ sphere/{device_id}/{category}
 }
 ```
 
-**送信タイミング**:
-- MQTT接続時 (status: "online")
-- 正常シャットダウン時 (status: "offline")
+**Send timing**:
+- On MQTT connection (status: "online")
+- On normal shutdown (status: "offline")
 
 ---
 
 ### 2. sphere/sphere001/imu
-IMUセンサーデータ (クォータニオン)
+IMU sensor data (quaternion)
 
-**ペイロード**:
+**Payload**:
 ```json
 {
   "w": 0.7042,
@@ -57,24 +59,24 @@ IMUセンサーデータ (クォータニオン)
 }
 ```
 
-**データ仕様**:
-- `w`: クォータニオン w成分 (スカラー部)
-- `x`: クォータニオン x成分
-- `y`: クォータニオン y成分
-- `z`: クォータニオン z成分
-- 値範囲: -1.0 ~ 1.0
-- 精度: 小数点4桁
+**Data specification**:
+- `w`: Quaternion w component (scalar part)
+- `x`: Quaternion x component
+- `y`: Quaternion y component
+- `z`: Quaternion z component
+- Value range: -1.0 ~ 1.0
+- Precision: 4 decimal places
 
-**送信タイミング**:
-- 10Hz (100msごと)
-- IMU初期化成功後のみ
+**Send timing**:
+- 10Hz (every 100ms)
+- Only after successful IMU initialization
 
 ---
 
 ### 3. sphere/sphere001/response
-コマンドに対する応答
+Response to a command
 
-**ペイロード**:
+**Payload**:
 ```json
 {
   "command": "status",
@@ -93,20 +95,20 @@ IMUセンサーデータ (クォータニオン)
 }
 ```
 
-**フィールド**:
-- `command`: 実行したコマンド名
+**Fields**:
+- `command`: Name of the executed command
 - `result`: "OK" | "ERROR"
-- `data`: コマンド固有の応答データ (任意)
+- `data`: Command-specific response data (optional)
 
-**送信タイミング**:
-- コマンド受信時の応答
+**Send timing**:
+- Response when a command is received
 
 ---
 
 ### 4. sphere/sphere001/gesture
-ジェスチャーイベント通知 (実装予定)
+Gesture event notification (planned)
 
-**ペイロード例1: トリプルシェイク検出**
+**Payload example 1: Triple shake detected**
 ```json
 {
   "event": "triple_shake",
@@ -114,7 +116,7 @@ IMUセンサーデータ (クォータニオン)
 }
 ```
 
-**ペイロード例2: 回転ジェスチャー**
+**Payload example 2: Rotation gesture**
 ```json
 {
   "event": "rotation",
@@ -125,15 +127,15 @@ IMUセンサーデータ (クォータニオン)
 }
 ```
 
-**送信タイミング**:
-- ジェスチャー検出時
+**Send timing**:
+- On gesture detection
 
 ---
 
 ### 5. sphere/sphere001/ui_mode
-UIモード状態通知 (実装予定)
+UI mode status notification (planned)
 
-**ペイロード**:
+**Payload**:
 ```json
 {
   "mode": "normal" | "active" | "selecting",
@@ -141,73 +143,73 @@ UIモード状態通知 (実装予定)
 }
 ```
 
-**送信タイミング**:
-- UIモード遷移時
+**Send timing**:
+- On UI mode transition
 
 ---
 
-## サブスクライブトピック (ブローカー → デバイス)
+## Subscribe Topics (Broker → Device)
 
 ### 1. sphere/sphere001/command
-デバイス制御コマンド
+Device control command
 
-**ペイロード形式**: プレーンテキスト
+**Payload format**: Plain text
 
-**サポートコマンド**:
+**Supported commands**:
 
 #### status
-デバイス状態問い合わせ
+Query device status
 ```
 status
 ```
 
-**応答**: `sphere/sphere001/response`にJSON形式で返信
+**Response**: Returned in JSON format to `sphere/sphere001/response`
 
 ---
 
 #### restart
-デバイス再起動
+Restart the device
 ```
 restart
 ```
 
-**動作**: ESP32をソフトウェアリセット
+**Behavior**: Software reset of the ESP32
 
 ---
 
 #### set_brightness
-LED輝度設定 (実装予定)
+Set LED brightness (planned)
 ```
 set_brightness:128
 ```
 
-**パラメータ**: 0-255
+**Parameter**: 0-255
 
 ---
 
 #### show_image
-画像表示 (実装予定)
+Display image (planned)
 ```
 show_image:/images/demo01/frame_001.jpg
 ```
 
-**パラメータ**: LittleFS上の画像パス
+**Parameter**: Image path on LittleFS
 
 ---
 
 #### set_mode
-表示モード変更 (実装予定)
+Change display mode (planned)
 ```
 set_mode:rotate
 ```
 
-**パラメータ**: `static` | `rotate` | `animate`
+**Parameter**: `static` | `rotate` | `animate`
 
 ---
 
-## メッセージフロー
+## Message Flow
 
-### 起動シーケンス
+### Startup sequence
 ```mermaid
 sequenceDiagram
     participant Device
@@ -226,7 +228,7 @@ sequenceDiagram
     end
 ```
 
-### コマンド実行シーケンス
+### Command execution sequence
 ```mermaid
 sequenceDiagram
     participant Client
@@ -242,7 +244,7 @@ sequenceDiagram
     Broker->>Client: DELIVER sphere/sphere001/response
 ```
 
-### ジェスチャー検出シーケンス (実装予定)
+### Gesture detection sequence (planned)
 ```mermaid
 sequenceDiagram
     participant IMU
@@ -269,40 +271,40 @@ sequenceDiagram
     GestureManager->>GestureManager: Execute action (next_image)
 ```
 
-## QoS設定
+## QoS Settings
 
-| トピック | QoS | 理由 |
+| Topic | QoS | Reason |
 |---------|-----|------|
-| sphere/sphere001/status | 0 | 接続状態は再送不要 |
-| sphere/sphere001/imu | 0 | 高頻度データ、ロストしても次が来る |
-| sphere/sphere001/response | 0 | リクエスト再送で対応可能 |
-| sphere/sphere001/gesture | 0 | リアルタイム性優先 |
-| sphere/sphere001/ui_mode | 0 | 状態問い合わせで補完可能 |
-| sphere/sphere001/command | 0 | 同期的な応答確認で十分 |
+| sphere/sphere001/status | 0 | Connection state does not need resending |
+| sphere/sphere001/imu | 0 | High-frequency data; the next one arrives even if lost |
+| sphere/sphere001/response | 0 | Can be handled by resending the request |
+| sphere/sphere001/gesture | 0 | Real-time responsiveness takes priority |
+| sphere/sphere001/ui_mode | 0 | Can be supplemented by a status query |
+| sphere/sphere001/command | 0 | Synchronous response confirmation is sufficient |
 
-## エラーハンドリング
+## Error Handling
 
-### 接続エラー
-- **動作**: 5秒間隔で自動再接続
-- **ログ**: シリアル出力で接続失敗を通知
+### Connection errors
+- **Behavior**: Automatic reconnection every 5 seconds
+- **Log**: Notifies of connection failures via serial output
 
-### パブリッシュ失敗
-- **動作**: エラーログ出力、次の送信を試行
-- **影響**: IMUデータなど高頻度データは次のサイクルで上書き
+### Publish failures
+- **Behavior**: Output an error log and attempt the next send
+- **Impact**: High-frequency data such as IMU data is overwritten in the next cycle
 
-### サブスクライブ失敗
-- **動作**: 再接続時に再サブスクライブ
-- **影響**: 一時的にコマンド受信不可
+### Subscribe failures
+- **Behavior**: Re-subscribe on reconnection
+- **Impact**: Commands cannot be received temporarily
 
-## セキュリティ考慮事項
+## Security Considerations
 
-### 現在の実装
-- 認証なし (Anonymous接続)
-- 暗号化なし (平文通信)
-- ローカルネットワーク内での使用を想定
+### Current implementation
+- No authentication (Anonymous connection)
+- No encryption (plaintext communication)
+- Intended for use within a local network
 
-### 今後の改善案
-- TLS/SSL対応 (ポート8883)
-- ユーザー名/パスワード認証
-- クライアント証明書認証
-- ACL (Access Control List) による権限管理
+### Future improvement proposals
+- TLS/SSL support (port 8883)
+- Username/password authentication
+- Client certificate authentication
+- Access control via ACL (Access Control List)

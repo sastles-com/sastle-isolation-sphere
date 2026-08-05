@@ -1,4 +1,4 @@
-> **English** · [日本語](sequence_diagram.ja.md)
+> [English](sequence_diagram.md) · **日本語**
 
 # Sequence Diagram (Server)
 

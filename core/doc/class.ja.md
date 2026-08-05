@@ -1,8 +1,8 @@
-> **English** · [日本語](class.ja.md)
+> [English](class.md) · **日本語**
 
-# Class Diagram
+# クラス図
 
-## Overall System Structure
+## システム全体構成
 
 ```mermaid
 classDiagram
@@ -133,7 +133,7 @@ classDiagram
         NEGATIVE
     }
 
-    %% Configuration data structures
+    %% 構成データ構造
     class SystemConfig {
         +String device_name
         +String version
@@ -179,7 +179,7 @@ classDiagram
         +String imu_sensor
     }
 
-    %% Dependencies
+    %% 依存関係
     main --> FileManager : uses
     main --> ConfigManager : uses
     main --> NetworkManager : uses
@@ -206,7 +206,7 @@ classDiagram
     GestureManager --> GestureDirection : uses
 ```
 
-## Library Dependencies
+## ライブラリ依存関係
 
 ```mermaid
 graph TB
@@ -263,7 +263,7 @@ graph TB
     main --> GestureManager
 ```
 
-## Inter-Module Data Flow
+## モジュール間データフロー
 
 ```mermaid
 flowchart LR

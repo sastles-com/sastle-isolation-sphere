@@ -1,39 +1,41 @@
-# IMU姿勢補正機能
+> **English** · [日本語](imu_compensation.ja.md)
 
-## 概要
+# IMU Orientation Compensation
 
-LED球体が物理的に回転しても、常に正しい向きで画像が表示されるように、IMUのquaternionを使って各LEDの座標を逆回転補正する機能です。
+## Overview
 
-## 動作原理
+Even when the LED sphere physically rotates, this feature ensures the image is always displayed in the correct orientation by using the IMU quaternion to inverse-rotate each LED's coordinates.
 
-### 問題
+## How It Works
 
-球体が回転すると、固定されたLED座標も一緒に回転してしまい、画像が球体の回転に追従してしまいます。
+### The Problem
+
+When the sphere rotates, the fixed LED coordinates rotate along with it, causing the image to follow the sphere's rotation.
 
 ```
-例：球体を90度傾けた場合
-- LED #0 の物理位置: (0.261, 0.804, -0.533) → 傾斜後
-- でも、画像は傾いていない空間座標で送られてくる
-→ 結果：画像が傾いて見える
+Example: rotating the sphere by 90 degrees
+- Physical position of LED #0: (0.261, 0.804, -0.533) → after tilting
+- But the image is sent in untilted spatial coordinates
+→ Result: the image appears tilted
 ```
 
-### 解決策：Quaternion逆回転
+### The Solution: Quaternion Inverse Rotation
 
-1. **IMUからquaternion取得**: 球体の現在姿勢 `q = (w, x, y, z)`
-2. **共役quaternion計算**: 逆回転 `q^-1 = (w, -x, -y, -z)`
-3. **LED座標を逆回転**: `LED座標' = q^-1 * LED座標 * q`
-4. **逆回転後の座標でUV変換**: 画像のどの部分を表示するか決定
+1. **Get quaternion from IMU**: the sphere's current orientation `q = (w, x, y, z)`
+2. **Compute the conjugate quaternion**: the inverse rotation `q^-1 = (w, -x, -y, -z)`
+3. **Inverse-rotate the LED coordinates**: `LED coordinate' = q^-1 * LED coordinate * q`
+4. **UV mapping using the inverse-rotated coordinates**: determines which part of the image to display
 
-これにより、球体がどう傾いても、LED座標を「元の姿勢に戻す」ことで、正しい画像が表示されます。
+As a result, no matter how the sphere is tilted, the LED coordinates are "returned to their original orientation," so the correct image is displayed.
 
-## 実装詳細
+## Implementation Details
 
 ### LEDManager::rotateByQuaternion()
 
 ```cpp
 void LEDManager::rotateByQuaternion(float& x, float& y, float& z, 
                                      float qw, float qx, float qy, float qz) {
-    // 最適化された quaternion ベクトル回転
+    // Optimized quaternion vector rotation
     // v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
     
     float cross1_x = qy * z - qz * y;
@@ -54,46 +56,46 @@ void LEDManager::rotateByQuaternion(float& x, float& y, float& z,
 }
 ```
 
-### updateLEDBuffer() フロー
+### updateLEDBuffer() Flow
 
 ```cpp
 void LEDManager::updateLEDBuffer() {
-    // 1. IMUからquaternion取得
+    // 1. Get quaternion from IMU
     float qw, qx, qy, qz;
     if (_imuManager->getQuaternion(qw, qx, qy, qz)) {
-        // 共役計算（逆回転）
+        // Compute conjugate (inverse rotation)
         qx = -qx;
         qy = -qy;
         qz = -qz;
     }
     
     for (uint16_t i = 0; i < _numLEDs; i++) {
-        // 2. LED座標取得
+        // 2. Get LED coordinates
         float x = ledLayout[i].x;
         float y = ledLayout[i].y;
         float z = ledLayout[i].z;
         
-        // 3. 逆回転補正
+        // 3. Inverse-rotation compensation
         rotateByQuaternion(x, y, z, qw, qx, qy, qz);
         
-        // 4. UV変換
+        // 4. UV mapping
         float u, v;
         sphereToUV(x, y, z, u, v);
         
-        // 5. 画像ピクセル取得
+        // 5. Get image pixel
         imageManager->getPixel(u * width, v * height, r, g, b);
         
-        // 6. LEDに設定
+        // 6. Set the LED
         ledBuffer[i] = CRGB(r, g, b);
     }
 }
 ```
 
-## 有効化/無効化
+## Enabling / Disabling
 
-### 自動有効化
+### Automatic Enabling
 
-IMUManagerが初期化されていれば、自動的に姿勢補正が有効になります。
+If the IMUManager is initialized, orientation compensation is enabled automatically.
 
 ```cpp
 // main.cpp
@@ -101,87 +103,87 @@ IMUManager* imuPtr = imuSensor.isInitialized() ? &imuSensor : nullptr;
 ledManager.begin(config, imageManager, imuPtr);
 ```
 
-### 手動制御
+### Manual Control
 
 ```cpp
-// 姿勢補正を無効化（デバッグ用）
+// Disable orientation compensation (for debugging)
 ledManager.setIMUCompensation(false);
 
-// 再度有効化
+// Enable it again
 ledManager.setIMUCompensation(true);
 ```
 
-## パフォーマンス
+## Performance
 
-### 処理時間
+### Processing Time
 
-| 処理 | 時間 (予測) | 最適化前 | 最適化後 |
+| Process | Time (estimated) | Before optimization | After optimization |
 |------|-------------|----------|----------|
-| quaternion取得 | ~0.1 ms | 0.1 ms | 0.1 ms |
-| 共役計算 | < 0.01 ms | < 0.01 ms | < 0.01 ms |
-| 逆回転 × 800 | ~8-12 ms | 10-15 ms | 8-12 ms |
-| UV変換 × 800 | ~10-15 ms | 15-20 ms | 10-12 ms |
-| **合計** | **~18-27 ms** | **25-35 ms** | **18-25 ms** |
+| Quaternion retrieval | ~0.1 ms | 0.1 ms | 0.1 ms |
+| Conjugate computation | < 0.01 ms | < 0.01 ms | < 0.01 ms |
+| Inverse rotation × 800 | ~8-12 ms | 10-15 ms | 8-12 ms |
+| UV mapping × 800 | ~10-15 ms | 15-20 ms | 10-12 ms |
+| **Total** | **~18-27 ms** | **25-35 ms** | **18-25 ms** |
 
-### 最適化内容
+### Optimizations
 
-#### 1. common.h 高速近似関数の使用
+#### 1. Use of Fast Approximation Functions in common.h
 
-**_sqrt() - 高速平方根**
-- 従来: `sqrt()` 標準ライブラリ
-- 最適化: `_sqrt()` 4次収束法による近似
-- **効果**: 約2-3倍高速化
+**_sqrt() - Fast square root**
+- Before: `sqrt()` from the standard library
+- Optimized: `_sqrt()` approximation using a 4th-order convergence method
+- **Effect**: about 2-3x faster
 
-**_atan2() - 高速逆正接**
-- 従来: `atan2f()` 標準ライブラリ  
-- 最適化: `_atan2()` 4次多項式近似
-- **効果**: 約3-5倍高速化
+**_atan2() - Fast arctangent**
+- Before: `atan2f()` from the standard library  
+- Optimized: `_atan2()` 4th-order polynomial approximation
+- **Effect**: about 3-5x faster
 
 ```cpp
-// 最適化前
+// Before optimization
 float len = sqrt(x*x + y*y + z*z);
 u = 0.5f + atan2f(nz, nx) / (2.0f * PI);
 v = 0.5f - asinf(ny) / PI;
 
-// 最適化後
+// After optimization
 float len = _sqrt(x*x + y*y + z*z);
-u = 0.5f + _atan2(nz, nx) / 2.0f;  // _atan2は正規化済み
-float asin_ny = _atan2(ny, _sqrt(1.0f - ny*ny));  // asin = atan2近似
+u = 0.5f + _atan2(nz, nx) / 2.0f;  // _atan2 is already normalized
+float asin_ny = _atan2(ny, _sqrt(1.0f - ny*ny));  // asin = atan2 approximation
 v = 0.5f - asin_ny / 2.0f;
 ```
 
-#### 2. Quaternion回転の最適化
+#### 2. Quaternion Rotation Optimization
 
-従来の実装でも既に最適化済み:
-- 外積ベース計算: 12回の積和演算
-- 行列計算を回避: メモリアクセス削減
+The previous implementation was already optimized:
+- Cross-product-based computation: 12 multiply-accumulate operations
+- Avoids matrix computation: reduced memory access
 
-800個のLEDに対して、フレームあたり約18-25msの処理時間です。
-目標30fps (33ms/frame) に対して**十分な余裕**があります。
+For 800 LEDs, the processing time is about 18-25 ms per frame.
+This leaves **ample headroom** relative to the target of 30 fps (33 ms/frame).
 
-## 座標系
+## Coordinate Systems
 
-### BNO055 IMUの座標系
+### BNO055 IMU Coordinate System
 
 ```
-      +Z (天頂)
+      +Z (zenith)
        |
        |
-       +------ +X (前方)
+       +------ +X (forward)
       /
      /
-   +Y (右)
+   +Y (right)
 ```
 
-### LED球体の座標系
+### LED Sphere Coordinate System
 
-`led_layout.csv` で定義される座標系がIMU座標系と一致していることを前提とします。
+This assumes that the coordinate system defined in `led_layout.csv` matches the IMU coordinate system.
 
-もし座標系が異なる場合、`rotateByQuaternion()` の前に座標変換が必要です。
+If the coordinate systems differ, a coordinate transformation is required before `rotateByQuaternion()`.
 
-## デバッグ
+## Debugging
 
-### シリアル出力例
+### Example Serial Output
 
 ```
 [LEDManager] Initializing...
@@ -193,38 +195,38 @@ v = 0.5f - asin_ny / 2.0f;
 [LED_Render] Task started on core 1
 ```
 
-### 姿勢補正の確認方法
+### How to Verify Orientation Compensation
 
-1. **静止状態**: 球体を動かさない → 画像が正常に表示
-2. **回転状態**: 球体を傾ける → 画像は常に正立を維持
-3. **補正無効化**: `setIMUCompensation(false)` → 画像が球体と一緒に回転
+1. **Stationary**: keep the sphere still → the image displays normally
+2. **Rotating**: tilt the sphere → the image always stays upright
+3. **Compensation disabled**: `setIMUCompensation(false)` → the image rotates together with the sphere
 
-## 制限事項
+## Limitations
 
-1. **IMU更新レート**: 100Hz (10ms間隔)
-   - LED更新30fpsより速いため、十分な精度
+1. **IMU update rate**: 100Hz (10ms interval)
+   - Faster than the 30fps LED update, so precision is sufficient
 
-2. **Quaternion正規化**:
-   - BNO055は正規化済みquaternionを出力
-   - 他のIMUを使う場合は正規化が必要
+2. **Quaternion normalization**:
+   - The BNO055 outputs already-normalized quaternions
+   - Normalization is required when using other IMUs
 
-3. **座標系の一致**:
-   - LED座標系とIMU座標系が一致していることが前提
-   - キャリブレーション必要な場合あり
+3. **Coordinate system alignment**:
+   - Assumes the LED coordinate system and the IMU coordinate system are aligned
+   - Calibration may be required
 
-## 今後の改善
+## Future Improvements
 
-- [ ] **キャリブレーション機能**: 座標系オフセット補正
-- [ ] **スムージング**: Quaternionの補間で滑らかな動き
-- [x] **高速近似関数**: common.h の `_sqrt()`, `_atan2()` 使用で3-5倍高速化
-- [ ] **ルックアップテーブル**: さらなる高速化（精度とのトレードオフ）
-- [ ] **座標系変換UI**: 異なる座標系への対応
+- [ ] **Calibration feature**: coordinate-system offset compensation
+- [ ] **Smoothing**: quaternion interpolation for smooth motion
+- [x] **Fast approximation functions**: 3-5x speedup by using `_sqrt()` and `_atan2()` from common.h
+- [ ] **Lookup table**: further speedup (trade-off against accuracy)
+- [ ] **Coordinate transformation UI**: support for different coordinate systems
 
-## 参考資料
+## References
 
-- [Isolation sphere の制作 - elchika](https://elchika.com/article/9b97a7b7-561f-4795-9e16-3e011c045913/)
-  - IMUによるLEDの仮想回転実装
-  - Quaternionを使った姿勢補正の原理
-- [common.h 高速近似関数](../src/common.h)
-  - `_sqrt()`: 4次収束法による平方根近似
-  - `_atan2()`: 4次多項式による逆正接近似
+- [Building the Isolation sphere - elchika](https://elchika.com/article/9b97a7b7-561f-4795-9e16-3e011c045913/)
+  - Implementation of virtual LED rotation using the IMU
+  - Principles of orientation compensation using quaternions
+- [common.h fast approximation functions](../src/common.h)
+  - `_sqrt()`: square-root approximation using a 4th-order convergence method
+  - `_atan2()`: arctangent approximation using a 4th-order polynomial

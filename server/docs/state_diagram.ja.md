@@ -1,4 +1,4 @@
-> **English** · [日本語](state_diagram.ja.md)
+> [English](state_diagram.md) · **日本語**
 
 # State Diagram (Server)
 

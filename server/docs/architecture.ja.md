@@ -1,4 +1,4 @@
-> **English** · [日本語](architecture.ja.md)
+> [English](architecture.md) · **日本語**
 
 # Server Architecture
 

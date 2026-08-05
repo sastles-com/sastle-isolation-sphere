@@ -1,55 +1,55 @@
-> **English** · [日本語](dual_core_design.ja.md)
+> [English](dual_core_design.md) · **日本語**
 
-# ESP32-S3 Dual-Core Task Distribution Design
+# ESP32-S3 デュアルコア タスク分散設計
 
-## Overview
-A design that efficiently leverages the two CPU cores (PRO_CPU / APP_CPU) of the ESP32-S3
-to run real-time image processing and LED rendering in parallel.
+## 概要
+ESP32-S3の2つのCPUコア (PRO_CPU / APP_CPU) を効率的に活用し、
+リアルタイム画像処理とLED描画を並列実行する設計。
 
-## Core Architecture
+## コアアーキテクチャ
 
-### ESP32-S3 Core Specifications
-- **PRO_CPU (Core 0)**: Protocol CPU - system control, communication processing
-- **APP_CPU (Core 1)**: Application CPU - application tasks
-- **Both cores**: 240MHz operation, independent caches
-- **Shared resources**: PSRAM, Flash, peripherals
+### ESP32-S3 コア仕様
+- **PRO_CPU (Core 0)**: Protocol CPU - システム制御、通信処理
+- **APP_CPU (Core 1)**: Application CPU - アプリケーションタスク
+- **両コア**: 240MHz動作、独立したキャッシュ
+- **共有リソース**: PSRAM, Flash, 周辺機器
 
-## Task Distribution Strategy
+## タスク分散戦略
 
 ```
 ┌──────────────────────────────────────────────────────┐
 │               ESP32-S3 Dual Core                     │
 ├───────────────────────┬──────────────────────────────┤
 │   PRO_CPU (Core 0)    │    APP_CPU (Core 1)          │
-│   System control      │    Rendering / output        │
+│   システム制御         │    描画・出力                 │
 ├───────────────────────┼──────────────────────────────┤
-│ ● Arduino setup/loop  │ ● LED rendering task         │
-│ ● WiFi communication  │ ● Image→LED conversion       │
-│ ● UDP reception       │ ● WS2812 output (RMT/I2S)    │
-│ ● MQTT communication  │ ● Coordinate mapping         │
-│ ● IMU reading         │                              │
-│ ● Gesture detection   │                              │
-│ ● JPEG decoding       │                              │
-│ ● Sound output        │                              │
-│ ● System management   │                              │
+│ ● Arduino setup/loop  │ ● LED描画タスク              │
+│ ● WiFi通信            │ ● 画像→LED変換              │
+│ ● UDP受信             │ ● WS2812出力 (RMT/I2S)      │
+│ ● MQTT通信            │ ● 座標マッピング             │
+│ ● IMU読み取り         │                              │
+│ ● ジェスチャー検出     │                              │
+│ ● JPEG デコード       │                              │
+│ ● サウンド出力         │                              │
+│ ● システム管理         │                              │
 └───────────────────────┴──────────────────────────────┘
             ↓                         ↑
       ┌─────────────────────────────────┐
-      │   Shared memory (PSRAM)         │
-      │ ● RGB565 double buffer          │
-      │ ● LED output buffer             │
-      │ ● Sync flags (Semaphore)        │
+      │   共有メモリ (PSRAM)             │
+      │ ● RGB565 ダブルバッファ          │
+      │ ● LED出力バッファ               │
+      │ ● 同期フラグ (Semaphore)        │
       └─────────────────────────────────┘
 ```
 
-## Detailed Task Placement
+## 詳細タスク配置
 
-### Core 0 (PRO_CPU) - Input / processing
+### Core 0 (PRO_CPU) - 入力・処理系
 
-#### Priority: High
+#### 優先度: 高
 ```cpp
 void setup() {
-    // Initialization executed on Core 0
+    // Core 0で実行される初期化
     - FileManager::begin()
     - ConfigManager::loadConfig()
     - NetworkManager::begin()
@@ -58,113 +58,113 @@ void setup() {
     - SoundManager::begin()
     - ImageManager::begin()
     
-    // Start Core 1 task
+    // Core 1タスク起動
     xTaskCreatePinnedToCore(
-        ledRenderTask,      // Task function
-        "LED_Render",       // Task name
-        8192,               // Stack size
-        NULL,               // Parameter
-        2,                  // Priority (high)
-        &ledTaskHandle,     // Handle
-        1                   // Pinned to Core 1
+        ledRenderTask,      // タスク関数
+        "LED_Render",       // タスク名
+        8192,               // スタックサイズ
+        NULL,               // パラメータ
+        2,                  // 優先度 (高)
+        &ledTaskHandle,     // ハンドル
+        1                   // Core 1に固定
     );
 }
 
 void loop() {
-    // Core 0 main loop (1ms period recommended)
+    // Core 0メインループ (1ms周期推奨)
     
-    // 1. Network communication (highest priority)
+    // 1. ネットワーク通信 (最優先)
     mqtt.loop();                    // ~0.1ms
     
-    // 2. UDP image reception / decode
-    if (imageManager.update()) {    // ~10-30ms (JPEG dependent)
-        // New frame ready → notify Core 1
+    // 2. UDP画像受信・デコード
+    if (imageManager.update()) {    // ~10-30ms (JPEG依存)
+        // 新フレーム準備完了 → Core 1に通知
         xSemaphoreGive(frameReadySemaphore);
     }
     
-    // 3. IMU update
+    // 3. IMU更新
     imuSensor.update();             // ~1ms (100Hz)
     
-    // 4. Gesture detection
+    // 4. ジェスチャー検出
     gesture.update();               // ~0.5ms
     
-    // 5. Periodic transmission (10Hz)
+    // 5. 定期送信 (10Hz)
     if (shouldPublishIMU()) {
         publishIMUData();           // ~1ms
     }
     
-    // 6. Sound processing
-    // (non-blocking, interrupt-driven)
+    // 6. サウンド処理
+    // (非ブロッキング、割り込み駆動)
     
-    delay(1);  // Yield to other tasks
+    delay(1);  // 他タスクに譲る
 }
 ```
 
-### Core 1 (APP_CPU) - Output / rendering
+### Core 1 (APP_CPU) - 出力・描画系
 
-#### Priority: Highest (real-time performance focused)
+#### 優先度: 最高 (リアルタイム性重視)
 ```cpp
 void ledRenderTask(void* parameter) {
     const TickType_t frameDelay = pdMS_TO_TICKS(33);  // ~30fps
     
     while (true) {
-        // Wait for new frame (with timeout)
+        // 新フレーム待機 (タイムアウト付き)
         if (xSemaphoreTake(frameReadySemaphore, frameDelay)) {
             
-            // 1. Acquire image data (read-only buffer)
-            //    Double buffering managed internally by ImageManager
+            // 1. 画像データ取得 (読み取り専用バッファ)
+            //    ImageManager内部でダブルバッファ管理
             
-            // 2. LED coordinate mapping
+            // 2. LED座標マッピング
             for (int i = 0; i < NUM_LEDS; i++) {
                 LEDCoord coord = ledLayout[i];
                 
-                // 3D coordinates → UV coordinate conversion
+                // 3D座標 → UV座標変換
                 float u, v;
                 sphereToUV(coord.x, coord.y, coord.z, u, v);
                 
-                // UV → pixel coordinates
+                // UV → ピクセル座標
                 uint16_t px = u * imageManager.getWidth();
                 uint16_t py = v * imageManager.getHeight();
                 
-                // Get pixel color
+                // ピクセル色取得
                 uint8_t r, g, b;
                 imageManager.getPixel(px, py, r, g, b);
                 
-                // Write to LED buffer
+                // LEDバッファに書き込み
                 ledBuffer[i] = CRGB(r, g, b);
             }
             
-            // 3. LED output (DMA transfer)
-            FastLED.show();  // or I2S DMA
+            // 3. LED出力 (DMA転送)
+            FastLED.show();  // または I2S DMA
         }
         
-        // Maintain frame rate
+        // フレームレート維持
         vTaskDelay(1);
     }
 }
 ```
 
-## Synchronization Mechanism
+## 同期メカニズム
 
-### Frame Synchronization via Semaphores
+### セマフォによるフレーム同期
 
 ```cpp
-// Global
+// グローバル
 SemaphoreHandle_t frameReadySemaphore;
 SemaphoreHandle_t bufferMutex;
 
 void setup() {
-    // Binary semaphore (frame-ready notification)
+    // バイナリセマフォ (フレーム準備完了通知)
     frameReadySemaphore = xSemaphoreCreateBinary();
     
-    // Mutex (buffer access protection)
+    // ミューテックス (バッファアクセス保護)
     bufferMutex = xSemaphoreCreateMutex();
 }
 
-// Core 0: on image decode completion
+// Core 0: 画像デコード完了時
 void ImageManager::swapBuffers() {
     if (xSemaphoreTake(bufferMutex, portMAX_DELAY)) {
-        // Pointer swap
+        // ポインタ交換
         uint16_t* temp = _drawBuffer;
         _drawBuffer = _decodeBuffer;
         _decodeBuffer = temp;
@@ -172,11 +172,11 @@ void ImageManager::swapBuffers() {
         xSemaphoreGive(bufferMutex);
     }
     
-    // Notify Core 1
+    // Core 1に通知
     xSemaphoreGive(frameReadySemaphore);
 }
 
-// Core 1: on pixel read
+// Core 1: ピクセル読み取り時
 uint16_t ImageManager::getPixelRGB565(uint16_t x, uint16_t y) {
     uint16_t result = 0;
     
@@ -189,55 +189,55 @@ uint16_t ImageManager::getPixelRGB565(uint16_t x, uint16_t y) {
 }
 ```
 
-## Performance Optimization
+## パフォーマンス最適化
 
-### Task Priority Settings
+### タスク優先度設定
 
-| Task | Core | Priority | Period | Processing time |
+| タスク | コア | 優先度 | 周期 | 処理時間 |
 |--------|------|--------|------|----------|
-| LED Render | 1 | 2 (high) | 33ms (30fps) | ~25ms |
-| Arduino Loop | 0 | 1 (medium) | 1ms | ~0.5ms |
-| WiFi Task | 0 | 23 (highest) | event-driven | ~0.1ms |
-| IDLE Task | 0/1 | 0 (lowest) | continuous | - |
+| LED Render | 1 | 2 (高) | 33ms (30fps) | ~25ms |
+| Arduino Loop | 0 | 1 (中) | 1ms | ~0.5ms |
+| WiFi Task | 0 | 23 (最高) | イベント駆動 | ~0.1ms |
+| IDLE Task | 0/1 | 0 (最低) | 常時 | - |
 
-### Memory Access Optimization
+### メモリアクセス最適化
 
 ```cpp
-// PSRAM placement (large capacity, low speed)
+// PSRAM配置 (大容量・低速)
 uint16_t* _bufferA;   // ps_malloc() - 100KB
 uint16_t* _bufferB;   // ps_malloc() - 100KB
 uint8_t* _udpBuffer;  // ps_malloc() - 64KB
 
-// SRAM placement (small capacity, high speed)
+// SRAM配置 (小容量・高速)
 CRGB ledBuffer[800];  // malloc() - 2.4KB
 LEDCoord ledLayout[800];  // malloc() - 9.6KB
 
-// For DMA transfer (cache coherency)
-DRAM_ATTR uint8_t dmaBuffer[2400];  // For LED output
+// DMA転送用 (キャッシュ整合性)
+DRAM_ATTR uint8_t dmaBuffer[2400];  // LED出力用
 ```
 
-### CPU Load Distribution
+### CPU負荷分散
 
 ```
-Core 0 load:
+Core 0 負荷:
 ├─ WiFi/MQTT: 5-10%
-├─ UDP reception: 5%
-├─ JPEG Decode: 20-40% (peak)
+├─ UDP受信: 5%
+├─ JPEG Decode: 20-40% (ピーク)
 ├─ IMU: 5%
 ├─ Gesture: 2%
-└─ Headroom: 40-60%
+└─ 余裕: 40-60%
 
-Core 1 load:
+Core 1 負荷:
 ├─ Coordinate Mapping: 30-40%
 ├─ LED Output (DMA): 10%
-├─ Idle time: 50-60%
+├─ 待機時間: 50-60%
 ```
 
-## Inter-Task Communication Flow
+## タスク間通信フロー
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Core 0: Image reception / processing                │
+│ Core 0: 画像受信・処理                               │
 └──┬──────────────────────────────────────────────────┘
    │
    ▼
@@ -259,7 +259,7 @@ Core 1 load:
    │
    ▼
 ┌─────────────────────────────────────────────────────┐
-│ Core 1: LED rendering                                │
+│ Core 1: LED描画                                      │
 └──┬──────────────────────────────────────────────────┘
    │
    ▼
@@ -283,9 +283,9 @@ Core 1 load:
 └──────────────┘
 ```
 
-## Implementation Class Design
+## 実装クラス設計
 
-### LEDManager (new)
+### LEDManager (新規)
 
 ```cpp
 class LEDManager {
@@ -309,7 +309,7 @@ private:
 };
 ```
 
-## Memory Map
+## メモリマップ
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -321,7 +321,7 @@ private:
 │ ├─ Heap: ~400KB                             │
 │ │  ├─ ledBuffer: 2.4KB                      │
 │ │  ├─ ledLayout: 9.6KB                      │
-│ │  └─ Other variables                       │
+│ │  └─ その他変数                            │
 │ └─ WiFi/BT: ~100KB                          │
 ├─────────────────────────────────────────────┤
 │ PSRAM (8MB)                                 │
@@ -333,31 +333,31 @@ private:
 └─────────────────────────────────────────────┘
 ```
 
-## Future Optimization Points
+## 今後の最適化ポイント
 
-1. **I2S DMA LED output**
-   - Faster and lower CPU load than RMT
-   - Stable operation at 800 LEDs @ 30fps
+1. **I2S DMA LED出力**
+   - RMTよりも高速・低CPU負荷
+   - 800 LEDs @ 30fps で安定動作
 
-2. **GPU acceleration for IMU coordinate conversion**
-   - ESP32-S3 has no GPU
-   - Speed up via lookup tables
+2. **IMU座標変換のGPU活用**
+   - ESP32-S3にはGPUなし
+   - ルックアップテーブルで高速化
 
-3. **Triple buffering of the double buffer**
-   - Extreme case: decoding / awaiting swap / rendering
-   - Memory trade-off
+3. **ダブルバッファの3重化**
+   - 極端な場合: デコード中/スワップ待ち/描画中
+   - メモリトレードオフ
 
-4. **Task Watchdog tuning**
-   - Configure so long decodes do not time out
+4. **タスクWatchdog調整**
+   - 長時間デコードでタイムアウトしないよう設定
 
-## Performance Targets
+## パフォーマンス目標
 
-| Metric | Target | Measured (estimated) |
+| 指標 | 目標値 | 実測値 (予想) |
 |------|--------|---------------|
-| Frame rate | 30 fps | 25-30 fps |
-| Decode latency | < 30 ms | 15-25 ms |
-| Rendering latency | < 20 ms | 15-20 ms |
-| Total latency | < 50 ms | 30-45 ms |
-| CPU load (Core 0) | < 80% | 60-70% |
-| CPU load (Core 1) | < 60% | 40-50% |
-| Memory usage | < 500KB | ~300KB |
+| フレームレート | 30 fps | 25-30 fps |
+| デコード遅延 | < 30 ms | 15-25 ms |
+| 描画遅延 | < 20 ms | 15-20 ms |
+| Total遅延 | < 50 ms | 30-45 ms |
+| CPU負荷 (Core 0) | < 80% | 60-70% |
+| CPU負荷 (Core 1) | < 60% | 40-50% |
+| メモリ使用量 | < 500KB | ~300KB |
