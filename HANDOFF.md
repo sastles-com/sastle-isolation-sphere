@@ -404,7 +404,10 @@ Core1 レンダリングタスク: 連続駆動 ~50Hz: adoptReadyFrame()(新フ�
   STANDBY閾値1.5s・MAX_STREAM_FPS=20 は要チューニング余地。
 
 ### C. デバイス機能のTODO (firmware)
-- **LED pixel(個別制御)モード**未実装 (`CommandHandler::_handleLed` "pixels")。
+- ~~**LED pixel(個別制御)モード**未実装~~ → **実装済み** (`CommandHandler::_handleLed` "pixels" /
+  `LEDManager::setPixel` + `OutputMode`)。1メッセージ約50 LED まで (受信バッファ 2048B 由来)。
+  全 800 LED 一括は UDP 画像ストリーム経路が担当。**描画タスクは停止させない** —
+  `vTaskDelete` は `FastLED.show()` 実行中にタスクを壊し以降 LED が駆動されなくなる。
 - **ジェスチャー→実アクション**未実装 (`GestureManager`: 検出・publishのみ。画像切替/輝度変更が空)。
 - **IMUキャリブレーション** / **config reload** コマンド未実装 (`CommandHandler::_handleSystem`)。
 - **state のプレースホルダ**: 実FPS(`ledManager.getStats().fps`)/温度/NTP時刻/seq を実値に

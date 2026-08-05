@@ -64,8 +64,12 @@ bool MQTTManager::begin(ConfigManager& config) {
     _mqttClient.setKeepAlive(15);  // 15秒のキープアライブ
     _mqttClient.setSocketTimeout(5);  // 5秒のタイムアウト
     
-    // バッファサイズ設定 (デフォルト256バイトでは不足する場合)
-    _mqttClient.setBufferSize(512);
+    // バッファサイズ設定 (デフォルト256バイトでは不足)。
+    // 送受信で共用されるため、受信最大 (led コマンドの pixels 配列) に合わせる。
+    // 1要素 約39B なので 2048B で概ね 50 LED/メッセージまで個別指定できる。
+    // 全 800 LED の一括更新は UDP の画像ストリーム経路 (オンデバイスレンダリング)
+    // が担当するため、ここは部分更新用の容量で足りる。
+    _mqttClient.setBufferSize(kMqttBufferSize);
     
     _initialized = true;
     

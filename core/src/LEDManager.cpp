@@ -370,10 +370,13 @@ void LEDManager::renderTaskFunction(void* parameter) {
 
 void LEDManager::renderFrame() {
     unsigned long start = micros();
-    
-    // LEDバッファ更新
-    updateLEDBuffer();
-    
+
+    // LEDバッファ更新。Manual では外部 (pixels/off コマンド) が _ledBuffer を
+    // 直接書くため、マッピングを飛ばして出力のみ行う。
+    if (_outputMode == OutputMode::Sphere) {
+        updateLEDBuffer();
+    }
+
     unsigned long mappingTime = micros() - start;
     _stats.mapping_time_us = mappingTime;
     
@@ -570,6 +573,15 @@ void LEDManager::fillSolid(uint8_t r, uint8_t g, uint8_t b) {
     for (uint16_t i = 0; i < _numLEDs; i++) {
         _ledBuffer[i] = color;
     }
+}
+
+bool LEDManager::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) {
+    if (!_ledBuffer || index >= _numLEDs) {
+        return false;
+    }
+
+    _ledBuffer[index] = CRGB(r, g, b);
+    return true;
 }
 
 void LEDManager::show() {

@@ -55,7 +55,10 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     strncpy(topicCopy, topic, sizeof(topicCopy) - 1);
     topicCopy[sizeof(topicCopy) - 1] = '\0';
 
-    char payloadCopy[512];
+    // 受信バッファと同容量 (led コマンドの pixels 配列で最大になる)。
+    // 2KB をコールバックのスタックに積むと loop タスク (8KB) を圧迫するため static。
+    // mqtt.loop() 経由でこのコールバックが呼ばれるのは loop タスクのみなので再入はしない。
+    static char payloadCopy[sastle::kMqttBufferSize];
     unsigned int len = (length < sizeof(payloadCopy) - 1) ? length : sizeof(payloadCopy) - 1;
     memcpy(payloadCopy, payload, len);
     payloadCopy[len] = '\0';

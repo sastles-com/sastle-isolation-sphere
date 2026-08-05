@@ -4,16 +4,26 @@
  */
 
 #include "CommandHandler.h"
+#include "RemoteLog.h"
+#include "MQTTManager.h"   // kMqttBufferSize
 
 namespace sastle {
 
+// led コマンド用 JSON ドキュメント容量 (ヒープ確保)。
+// pixels 1要素 {"index":799,"r":255,"g":255,"b":255} は JSON 文字列で約39B に対し、
+// ArduinoJson v6 のメモリプールでは JSON_OBJECT_SIZE(4)=約72B を占める。受信上限
+// (kMqttBufferSize) 全量が pixels のとき約52要素 → 約4.5KB 必要になるため、
+// 溢れない容量を確保する。足りないと DeserializationError::NoMemory で丸ごと捨てる。
+constexpr size_t kLedDocCapacity = kMqttBufferSize * 4;
+
 // JSONペイロードの deserialize + エラーログの共通処理
-// ドキュメントサイズはコマンドごとに異なるためテンプレートで吸収する
-template<size_t N>
-static bool parseJsonPayload(const char* payload, StaticJsonDocument<N>& doc) {
+// ドキュメントサイズ/確保先はコマンドごとに異なる (led は pixels 配列があるため
+// ヒープ確保の DynamicJsonDocument) ので、基底の JsonDocument& で受ける
+static bool parseJsonPayload(const char* payload, JsonDocument& doc) {
     DeserializationError error = deserializeJson(doc, payload);
     if (error) {
-        Serial.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
+        // MQTT へも出す: パース失敗はリモートから見えないと切り分けできない
+        Log.printf("[CommandHandler] JSON parse error: %s\n", error.c_str());
         return false;
     }
     return true;
@@ -51,8 +61,11 @@ bool CommandHandler::begin(LEDManager* ledManager, ConfigManager* config) {
 }
 
 bool CommandHandler::handleMessage(const char* topic, const uint8_t* payload, unsigned int length) {
-    // ペイロードを文字列に変換
-    char message[512];
+    // ペイロードを文字列に変換。受信バッファと同容量にしないと led コマンドの
+    // pixels 配列が途中で切れ、JSON パースが丸ごと失敗する。
+    // 2KB をスタックに積むと呼び出し元 (loop タスク) を圧迫するため static。
+    // 呼び出しは mqttCallback 経由の loop タスクのみなので再入はしない。
+    static char message[kMqttBufferSize];
     int len = (length < sizeof(message) - 1) ? length : sizeof(message) - 1;
     memcpy(message, payload, len);
     message[len] = '\0';
@@ -174,37 +187,105 @@ bool CommandHandler::_handlePlayback(const char* payload) {
     return false;
 }
 
+uint16_t CommandHandler::_applyPixels(JsonArrayConst pixels) {
+    if (!_ledManager) {
+        return 0;
+    }
+
+    uint16_t applied = 0;
+    uint16_t rejected = 0;
+
+    for (JsonObjectConst px : pixels) {
+        // index 必須。r/g/b は省略時 0 (= 消灯) として扱う
+        if (!px.containsKey("index")) {
+            ++rejected;
+            continue;
+        }
+
+        const int index = px["index"].as<int>();
+        if (index < 0 || index > UINT16_MAX) {
+            ++rejected;
+            continue;
+        }
+
+        const uint8_t r = px["r"] | 0;
+        const uint8_t g = px["g"] | 0;
+        const uint8_t b = px["b"] | 0;
+
+        if (_ledManager->setPixel((uint16_t)index, r, g, b)) {
+            ++applied;
+        } else {
+            ++rejected;  // LED数を超える index
+        }
+    }
+
+    // 出力は Core1 の描画タスクが行う。ここから FastLED を呼ぶと RMT ドライバを
+    // 描画タスクと同時に叩いて競合するため、タスクが止まっている場合のみ直接出す。
+    if (applied > 0 && !_ledManager->isRunning()) {
+        _ledManager->show();
+    }
+    if (rejected > 0) {
+        Log.printf("  → %u pixel(s) rejected (missing/out-of-range index)\n", rejected);
+    }
+
+    return applied;
+}
+
 bool CommandHandler::_handleLed(const char* payload) {
-    StaticJsonDocument<512> doc;
+    // pixels 配列を載せるため、他コマンドより大きめのドキュメントをヒープに確保する。
+    // 実際の上限は MQTT 受信バッファ (MQTTManager::begin の setBufferSize) 側で決まる。
+    DynamicJsonDocument doc(kLedDocCapacity);
     if (!parseJsonPayload(payload, doc)) {
         return false;
     }
 
-    Serial.println("[CommandHandler] === LED CONTROL ===");
+    Log.println("[CommandHandler] === LED CONTROL ===");
 
     bool handled = false;
 
     if (doc.containsKey("mode")) {
         String mode = doc["mode"].as<String>();
         _led.mode = mode;
-        Serial.printf("  mode: %s\n", mode.c_str());
+        Log.printf("  mode: %s\n", mode.c_str());
 
         if (mode == "off") {
-            // LEDを消灯
+            // 消灯。Manual に切り替えないと次フレームの updateLEDBuffer() で塗り戻される。
             if (_ledManager) {
+                _ledManager->setOutputMode(LEDManager::OutputMode::Manual);
                 _ledManager->fillSolid(0, 0, 0);
-                _ledManager->show();
-                Serial.println("  → LEDs turned off");
+                if (!_ledManager->isRunning()) {
+                    _ledManager->show();
+                }
+                Log.println("  → LEDs turned off");
             }
         } else if (mode == "pixels") {
-            // ピクセル個別制御
-            Serial.println("  → Pixel mode (not implemented yet)");
-            // TODO: pixels配列を処理
+            // ピクセル個別制御。updateLEDBuffer() による毎フレーム上書きを止める。
+            if (_ledManager) {
+                _ledManager->setOutputMode(LEDManager::OutputMode::Manual);
+                Log.println("  → Pixel mode");
+            }
         } else if (mode == "sphere") {
-            // 球体モード（デフォルト）
-            Serial.println("  → Sphere mode");
+            // 球体モード（デフォルト）。画像+IMU からのマッピングを再開する。
+            if (_ledManager) {
+                _ledManager->setOutputMode(LEDManager::OutputMode::Sphere);
+            }
+            Log.println("  → Sphere mode");
         }
         handled = true;
+    }
+
+    // pixels 配列は mode と同一メッセージでも、pixels モード中の逐次更新でも受け付ける
+    if (doc.containsKey("pixels") && _led.mode == "pixels") {
+        JsonArrayConst pixels = doc["pixels"].as<JsonArrayConst>();
+        if (pixels.isNull()) {
+            Log.println("  → pixels is not an array, ignored");
+        } else {
+            const uint16_t applied = _applyPixels(pixels);
+            Log.printf("  → %u pixel(s) applied\n", applied);
+            handled = true;
+        }
+    } else if (doc.containsKey("pixels")) {
+        Log.printf("  → pixels ignored (mode is \"%s\", not \"pixels\")\n", _led.mode.c_str());
     }
 
     // XYZ軸インジケータ (mode とは独立に切替可能)

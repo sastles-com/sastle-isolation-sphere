@@ -13,6 +13,11 @@
 
 namespace sastle {
 
+/// PubSubClient の送受信共用バッファサイズ。受信側の最大は led コマンドの
+/// pixels 配列で決まる。メッセージ退避バッファ (main.cpp の mqttCallback) も
+/// この値に合わせる必要があるため公開している。
+constexpr size_t kMqttBufferSize = 2048;
+
 /**
  * @class MQTTManager
  * @brief MQTT通信を管理するクラス

@@ -112,10 +112,48 @@ public:
      * @param b 青成分 (0-255)
      */
     void fillSolid(uint8_t r, uint8_t g, uint8_t b);
-    
+
+    /**
+     * @brief 単一LEDの色をバッファに書き込む
+     *
+     * @param index LED通し番号 (0起点。レイアウトCSVの並び = ストリップ連結順)
+     * @param r 赤成分 (0-255)
+     * @param g 緑成分 (0-255)
+     * @param b 青成分 (0-255)
+     * @return true 書き込み成功, false バッファ未確保または index 範囲外
+     *
+     * @note バッファのみ更新する。出力は描画タスクが行うため、書き込みを保持
+     *       させるには setOutputMode(OutputMode::Manual) が必要
+     *       (Sphere のままだと updateLEDBuffer() が毎フレーム上書きする)。
+     */
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
+
+    /**
+     * @brief LEDバッファの更新元
+     */
+    enum class OutputMode : uint8_t {
+        Sphere,  ///< 画像+IMU から updateLEDBuffer() が生成 (既定)
+        Manual,  ///< 外部が setPixel()/fillSolid() で直接書く (pixels/off モード)
+    };
+
+    /**
+     * @brief バッファ更新元を切り替える
+     *
+     * @note 描画タスクは停止させずに切り替える。stopRenderTask() による停止と
+     *       startRenderTask() での再生成は、vTaskDelete が FastLED.show() の
+     *       実行中にタスクを破棄して RMT ドライバ状態を壊すため使わない
+     *       (実測: 復帰後に出力時間が 15ms → 0.5ms に落ち LED が駆動されなくなる)。
+     */
+    void setOutputMode(OutputMode mode) { _outputMode = mode; }
+
+    /**
+     * @brief 現在のバッファ更新元を取得
+     */
+    OutputMode getOutputMode() const { return _outputMode; }
+
     /**
      * @brief LEDを即座に更新
-     * 
+     *
      * @note 通常はタスクが自動更新するため、手動呼び出しは不要
      */
     void show();
@@ -272,6 +310,7 @@ private:
     
     bool _imuCompensationEnabled;    ///< IMU姿勢補正の有効化フラグ
     bool _axisIndicatorEnabled = false;  ///< XYZ軸インジケータ表示フラグ
+    OutputMode _outputMode = OutputMode::Sphere;  ///< バッファ更新元 (Manual時はマッピングを飛ばす)
 
     // --- マルチサンプリング (中心 + 半径R円周上のN点を画像空間で平均) ---
     // 座標変換(三角関数)は中心1点のみ。円周オフセットは設定変更時に1回だけ前計算し、

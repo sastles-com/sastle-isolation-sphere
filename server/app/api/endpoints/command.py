@@ -10,6 +10,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _mqtt_json(payload: dict) -> str:
+    """デバイス向けコマンドを最小サイズで JSON 化する。
+
+    ESP32 側の PubSubClient は送受信共用の固定バッファ (sastle::kMqttBufferSize)
+    しか持たず、超過したメッセージを黙って破棄する。json.dumps の既定セパレータは
+    区切りに空白を挟むため led コマンドの pixels 配列が約 18% 膨張し、
+    50 要素で受信上限を超えていた。空白を落として上限まで使えるようにする。
+    """
+    return json.dumps(payload, separators=(",", ":"))
+
 class PlaybackCommand(BaseModel):
     action: str  # "play" | "pause" | "stop" | "toggle"
     playlist: Optional[str] = None
@@ -39,7 +50,7 @@ async def send_playback_command(command: PlaybackCommand, request: Request):
 
         mqtt_service.client.publish(
             f"{MQTT_COMMAND_TOPIC_PREFIX}/playback",
-            json.dumps(payload),
+            _mqtt_json(payload),
             qos=1
         )
         
@@ -65,7 +76,7 @@ async def send_params_command(command: ParamsCommand, request: Request):
 
         mqtt_service.client.publish(
             f"{MQTT_COMMAND_TOPIC_PREFIX}/params",
-            json.dumps(payload),
+            _mqtt_json(payload),
             qos=1
         )
 
@@ -88,7 +99,7 @@ async def send_led_command(command: LEDCommand, request: Request):
 
         mqtt_service.client.publish(
             f"{MQTT_COMMAND_TOPIC_PREFIX}/led",
-            json.dumps(payload),
+            _mqtt_json(payload),
             qos=1
         )
         

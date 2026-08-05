@@ -100,7 +100,14 @@ private:
      * @return true 成功
      */
     bool _handleLed(const char* payload);
-    
+
+    /**
+     * @brief pixels 配列を LED バッファへ適用して出力する
+     * @param pixels [{index, r, g, b}, ...] 形式の JSON 配列
+     * @return 適用できた LED 数 (index 範囲外の要素は数えない)
+     */
+    uint16_t _applyPixels(JsonArrayConst pixels);
+
     /**
      * @brief システムコマンド処理
      * @param payload JSONペイロード
