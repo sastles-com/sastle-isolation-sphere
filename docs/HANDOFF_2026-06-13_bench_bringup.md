@@ -1,6 +1,6 @@
 # 引き継ぎ (2026-06-13) — ボード抽象化 & ベンチ立ち上げ
 
-作成環境: macOS 開発機 (`neon2.local`) / 実機・サーバー: Ubuntu `NucBox-G10`
+作成環境: macOS 開発機 / 実機・サーバー: Ubuntu ビルドホスト (`<build-host>`)
 親資料: [`HANDOFF.md`](../HANDOFF.md)（全体像）。本書はそこに**今回追加した内容の差分**。
 
 このセッションで「ボード抽象化の実装」「OTG 書き込みの実証」「ESP32 専用 P2P AP の構築」「device↔broker↔server の疎通」までを完了した。
@@ -36,22 +36,22 @@ core/src/boards/
 
 ## 2. 開発フロー: Mac 編集 → Ubuntu 書き込み
 
-実機 (M5AtomS3R) は Ubuntu `NucBox-G10` に USB 接続。コード編集は Mac、ビルド/書き込みは Ubuntu で行う。
+実機 (M5AtomS3R) は Ubuntu ビルドホストに USB 接続。コード編集は Mac、ビルド/書き込みは Ubuntu で行う。
 
 ```
 Mac で編集 → git commit/push (origin/main)
-  → ssh GMKTec-G10 → git pull → pio build/upload
+  → ssh <build-host> → git pull → pio build/upload
 ```
 
 ### SSH / 環境 (構築済み)
-- ssh エイリアス `GMKTec-G10` = `yasuo@100.76.55.74`(Tailscale)。実 hostname `NucBox-G10`。**Mac の鍵で passwordless**。sudo はパスワード要。
-- Ubuntu の git `origin` は **SSH に変更済み**（HTTPS は認証情報なしで fetch 不可。GitHub SSH 鍵が `sastles-com` として通る）。
+- ssh エイリアス `<build-host>` = `<user>@<tailscale-ip>`(Tailscale 経由)。**SSH 公開鍵で passwordless**。sudo はパスワード要。
+- Ubuntu の git `origin` は **SSH に変更済み**（HTTPS は認証情報なしで fetch 不可。GitHub SSH 鍵で通る）。
 - PlatformIO: `~/.platformio/penv/bin/pio` (6.1.19)。公式インストーラで導入（前提に apt `python3-venv` `python3-pip`）。
-- `yasuo` を `dialout` に追加済み。グループ反映に再ログインが要るので、同一セッションでは `sg dialout -c '<cmd>'` を使う。デバイスは `/dev/ttyACM0`。
+- 作業ユーザを `dialout` に追加済み。グループ反映に再ログインが要るので、同一セッションでは `sg dialout -c '<cmd>'` を使う。デバイスは `/dev/ttyACM0`。
 
 ### 書き込みコマンド (OTG, 実証済み)
 ```bash
-ssh GMKTec-G10
+ssh <build-host>
 cd ~/work/sastle-isolation-sphere/core
 sg dialout -c '~/.platformio/penv/bin/pio run -e atoms3r -t upload'    # アプリ
 sg dialout -c '~/.platformio/penv/bin/pio run -e atoms3r -t uploadfs'  # LittleFS (config.json/images)
@@ -104,7 +104,7 @@ device ↔ broker(mosquitto) ↔ server(FastAPI) のフルスタックが成立�
 
 確認コマンド:
 ```bash
-ssh GMKTec-G10
+ssh <build-host>
 mosquitto_sub -h 192.168.49.1 -t '#' -v        # 全トピック傍受
 sg dialout -c 'timeout 12 cat /dev/ttyACM0'    # デバイスのシリアルログ
 ```
