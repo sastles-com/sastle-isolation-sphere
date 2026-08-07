@@ -48,9 +48,15 @@
 #define LED_TEST_LEDS_PER_STRIP 160
 #endif
 
+// MODE_BLOCK_CHASE で走らせるブロックの幅 (連続点灯するLED数)
+#ifndef LED_TEST_BLOCK_WIDTH
+#define LED_TEST_BLOCK_WIDTH 5
+#endif
+
 constexpr uint8_t kNumStrips = 5;
 constexpr uint16_t kLedsPerStrip = LED_TEST_LEDS_PER_STRIP;
 constexpr uint16_t kTotalLeds = kNumStrips * kLedsPerStrip;
+constexpr uint16_t kBlockWidth = LED_TEST_BLOCK_WIDTH;
 
 // WS2812C-2020 は WS2812B と同タイミングで駆動可能
 #define LED_TYPE WS2812B
@@ -67,6 +73,7 @@ static const uint8_t kStripPins[kNumStrips] = {
 enum TestMode : uint8_t {
     MODE_STRIP_ID = 0,   // ストリップ識別色 (0=R 1=G 2=B 3=Y 4=M)
     MODE_CHASE,          // 各ストリップを白1ピクセルが走る (チェーン順序確認)
+    MODE_BLOCK_CHASE,    // 各ストリップを識別色の5連ピクセルが走る (色分け+チェーン順序)
     MODE_RAINBOW,        // 全体レインボースクロール (描画なめらかさ)
     MODE_WHITE_LIMITED,  // 輝度制限つき全白 (電流測定用)
     MODE_FPS_BENCH,      // 最速 show() ループ (FPS計測)
@@ -77,7 +84,11 @@ static uint8_t mode = MODE_STRIP_ID;
 static uint32_t frameCount = 0;
 static uint32_t lastReportMs = 0;
 static uint32_t showTimeAccumUs = 0;
-static const char* kModeNames[] = {"STRIP_ID", "CHASE", "RAINBOW", "WHITE_64", "FPS_BENCH"};
+// TestMode と同じ並びを保つこと (report() が mode で添字する)
+static const char* kModeNames[] = {"STRIP_ID", "CHASE", "BLOCK_CHASE",
+                                   "RAINBOW", "WHITE_64", "FPS_BENCH"};
+static_assert(sizeof(kModeNames) / sizeof(kModeNames[0]) == MODE_COUNT,
+              "kModeNames と TestMode の要素数が一致していない");
 
 static CRGB stripIdColor(uint8_t strip) {
     switch (strip) {
@@ -103,6 +114,25 @@ static void renderFrame(uint32_t frame) {
                 leds[s * kLedsPerStrip + pos] = CRGB::White;
                 // 先頭LEDをストリップ識別色で常時点灯 (DIN側の目印)
                 if (pos != 0) leds[s * kLedsPerStrip] = stripIdColor(s);
+            }
+            break;
+        }
+        case MODE_BLOCK_CHASE: {
+            // 各ストリップを、そのストリップの識別色で塗った kBlockWidth 連ピクセルの
+            // ブロックが DIN 側から順に走る。ストリップ間で色が違うので、どの線が
+            // どのカセットに繋がっているかと、チェーン順序を同時に確認できる。
+            //
+            //   ●●●●●○○○○  →  ○●●●●●○○○  →  ○○●●●●●○○  → ...
+            //
+            // 末尾に達したブロックは折り返して先頭から出る (ストリップ境界は跨がない)。
+            fill_solid(leds, kTotalLeds, CRGB::Black);
+            const uint16_t head = frame % kLedsPerStrip;
+            for (uint8_t s = 0; s < kNumStrips; s++) {
+                const CRGB color = stripIdColor(s);
+                CRGB* strip = leds + s * kLedsPerStrip;
+                for (uint16_t i = 0; i < kBlockWidth; i++) {
+                    strip[(head + i) % kLedsPerStrip] = color;
+                }
             }
             break;
         }
