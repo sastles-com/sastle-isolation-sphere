@@ -75,10 +75,15 @@ private:
     } _playback;
     
     struct {
-        String mode;         // "sphere", "pixels", "off"
+        String mode;         // "sphere", "pixels", "off", "test"
         bool axisIndicator;  // XYZ軸インジケータ表示
         // pixels配列は大きいのでここでは保持しない
     } _led;
+
+    /**
+     * @brief params.brightness を LED 輝度へ再適用する (test モードからの復帰用)
+     */
+    void _restoreBrightnessFromParams();
     
     /**
      * @brief パラメータコマンド処理

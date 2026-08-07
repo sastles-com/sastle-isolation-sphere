@@ -134,6 +134,18 @@ public:
     enum class OutputMode : uint8_t {
         Sphere,  ///< 画像+IMU から updateLEDBuffer() が生成 (既定)
         Manual,  ///< 外部が setPixel()/fillSolid() で直接書く (pixels/off モード)
+        Test,    ///< updateTestBuffer() が strip index から自前生成 (点灯/配線確認)
+    };
+
+    /**
+     * @brief 点灯確認用テストパターン
+     *
+     * IMU/画像を一切通さず strip index だけで生成する。各LEDの点灯有無と
+     * チェイン順序・配線strip の確認が目的 (mode:"test" コマンドで選択)。
+     */
+    enum class TestPattern : uint8_t {
+        StripId,  ///< 各ストリップを識別色でベタ塗り (配線strip同定・全点灯確認)
+        Chase,    ///< 各ストリップを識別色の width 連LEDが DIN 側から移動 (順序/方向確認)
     };
 
     /**
@@ -150,6 +162,16 @@ public:
      * @brief 現在のバッファ更新元を取得
      */
     OutputMode getOutputMode() const { return _outputMode; }
+
+    /**
+     * @brief テストパターンとブロック幅を設定する
+     *
+     * @param pattern StripId / Chase
+     * @param width   Chase で連続点灯させるLED数 (1未満は1に丸め)。StripId では未使用
+     *
+     * @note 実際にテスト描画を始めるには setOutputMode(OutputMode::Test) が必要。
+     */
+    void setTestPattern(TestPattern pattern, uint8_t width);
 
     /**
      * @brief LEDを即座に更新
@@ -263,6 +285,14 @@ private:
      * @brief LEDバッファを更新
      */
     void updateLEDBuffer();
+
+    /**
+     * @brief テストパターンを _ledBuffer に生成する (OutputMode::Test 用)
+     *
+     * strip 境界 (_stripStartIndex / _ledsPerStrip) だけを使い、画像/IMUは
+     * 参照しない。アニメーションは millis() ベースで fps に依存しない速度。
+     */
+    void updateTestBuffer();
     
     /**
      * @brief IMU補正OFF時用の静的UV→ピクセル座標を事前計算する
@@ -311,6 +341,8 @@ private:
     bool _imuCompensationEnabled;    ///< IMU姿勢補正の有効化フラグ
     bool _axisIndicatorEnabled = false;  ///< XYZ軸インジケータ表示フラグ
     OutputMode _outputMode = OutputMode::Sphere;  ///< バッファ更新元 (Manual時はマッピングを飛ばす)
+    TestPattern _testPattern = TestPattern::Chase;  ///< OutputMode::Test 時のパターン
+    uint8_t _testWidth = 5;                         ///< Chase の連続点灯LED数
 
     // --- マルチサンプリング (中心 + 半径R円周上のN点を画像空間で平均) ---
     // 座標変換(三角関数)は中心1点のみ。円周オフセットは設定変更時に1回だけ前計算し、

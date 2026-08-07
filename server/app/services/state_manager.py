@@ -216,7 +216,7 @@ class StateManager:
         if "mode" in payload:
             mode = payload["mode"]
             
-            if mode not in ["sphere", "pixels", "off"]:
+            if mode not in ["sphere", "pixels", "off", "test"]:
                 logger.warning(f"Invalid LED mode: {mode}")
                 return
             

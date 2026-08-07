@@ -33,9 +33,11 @@ class ParamsCommand(BaseModel):
     saturation: Optional[int] = None
 
 class LEDCommand(BaseModel):
-    mode: Optional[str] = None  # "sphere" | "pixels" | "off" (axis単独切替時は省略可)
+    mode: Optional[str] = None  # "sphere" | "pixels" | "off" | "test" (axis単独切替時は省略可)
     pixels: Optional[list] = None
     axis: Optional[bool] = None  # XYZ軸インジケータ ON/OFF
+    pattern: Optional[str] = None  # test モード時のパターン: "strip_id" | "chase"
+    width: Optional[int] = None  # test:chase の連続点灯LED数
 
 @router.post("/command/playback")
 async def send_playback_command(command: PlaybackCommand, request: Request):

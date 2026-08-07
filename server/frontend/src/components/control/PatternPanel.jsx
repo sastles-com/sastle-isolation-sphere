@@ -4,42 +4,50 @@ import { useStateUpdate } from '../../hooks/useSphereState';
 import { GlassButton } from '../ui/GlassButton';
 import { Section } from './Section';
 
-// LED モード (仕様 §5 SET_LED の契約: sphere | pixels | off)
-const MODES = [
-    { value: 'sphere', label: 'SPHERE' },
-    { value: 'off', label: 'OFF' },
+// LED モード (仕様 §5 SET_LED の契約: sphere | pixels | off | test)。
+// test は点灯/配線確認用: strip index から core 内部で生成し IMU/画像を通さない。
+// key は UI 選択状態の識別子で、SET_LED に送る payload を持つ。
+const OPTIONS = [
+    { key: 'sphere', label: 'SPHERE', payload: { mode: 'sphere' } },
+    { key: 'off', label: 'OFF', payload: { mode: 'off' } },
+    { key: 'strip_id', label: 'STRIP', payload: { mode: 'test', pattern: 'strip_id' } },
+    { key: 'chase', label: 'CHASE', payload: { mode: 'test', pattern: 'chase', width: 5 } },
 ];
 
 /**
  * PatternPanel — PATTERN セクション。LED モード切替 (SET_LED)。
- * pixels 単位エディタはスコープ外 (仕様 §7) のため sphere/off のみ。
+ * sphere/off に加え、点灯確認用の test パターン (STRIP=識別色ベタ塗り /
+ * CHASE=5連LEDが移動) を選べる。pixels 単位エディタはスコープ外 (仕様 §7)。
  */
 export const PatternPanel = () => {
     const { sendMessage } = useWebSocket();
-    const [mode, setMode] = useState('sphere');
+    const [sel, setSel] = useState('sphere');
 
     useStateUpdate((payload) => {
-        if (payload.led && typeof payload.led.mode === 'string') setMode(payload.led.mode);
+        // デバイスが報告する led.mode は sphere/off/test/pixels。test の場合は
+        // パターンまで判別できないので、ローカル選択を尊重して上書きしない。
+        const m = payload.led?.mode;
+        if (m === 'sphere' || m === 'off') setSel(m);
     });
 
-    const selectMode = (m) => {
-        setMode(m);
-        sendMessage('SET_LED', { mode: m });
+    const select = (opt) => {
+        setSel(opt.key);
+        sendMessage('SET_LED', opt.payload);
     };
 
     return (
         <Section title="Pattern">
-            <div style={{ display: 'flex', gap: 10 }}>
-                {MODES.map((m) => (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {OPTIONS.map((opt) => (
                     <GlassButton
-                        key={m.value}
+                        key={opt.key}
                         variant="pill"
-                        active={mode === m.value}
-                        title={m.label}
-                        onClick={() => selectMode(m.value)}
-                        style={{ flex: 1, fontSize: 13 }}
+                        active={sel === opt.key}
+                        title={opt.label}
+                        onClick={() => select(opt)}
+                        style={{ flex: '1 1 40%', fontSize: 13 }}
                     >
-                        {m.label}
+                        {opt.label}
                     </GlassButton>
                 ))}
             </div>

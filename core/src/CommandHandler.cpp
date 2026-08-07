@@ -16,6 +16,10 @@ namespace sastle {
 // 溢れない容量を確保する。足りないと DeserializationError::NoMemory で丸ごと捨てる。
 constexpr size_t kLedDocCapacity = kMqttBufferSize * 4;
 
+// mode:"test" 突入時に強制する低輝度 (0-255)。点灯/配線確認が目的で眩しさ・電流を
+// 抑えるため暗めに固定する。sphere/pixels へ戻す際は params の brightness を再適用する。
+constexpr uint8_t kTestBrightness = 24;  // 約10%
+
 // JSONペイロードの deserialize + エラーログの共通処理
 // ドキュメントサイズ/確保先はコマンドごとに異なる (led は pixels 配列があるため
 // ヒープ確保の DynamicJsonDocument) ので、基底の JsonDocument& で受ける
@@ -261,12 +265,28 @@ bool CommandHandler::_handleLed(const char* payload) {
         } else if (mode == "pixels") {
             // ピクセル個別制御。updateLEDBuffer() による毎フレーム上書きを止める。
             if (_ledManager) {
+                _restoreBrightnessFromParams();
                 _ledManager->setOutputMode(LEDManager::OutputMode::Manual);
                 Log.println("  → Pixel mode");
+            }
+        } else if (mode == "test") {
+            // 点灯/配線確認モード。IMU/画像を通さず strip index から自前描画する。
+            // 眩しさ・電流対策で低輝度を強制する。
+            if (_ledManager) {
+                String pattern = doc["pattern"] | "chase";
+                uint8_t width = (uint8_t)(doc["width"] | 5);
+                LEDManager::TestPattern tp = (pattern == "strip_id")
+                                                 ? LEDManager::TestPattern::StripId
+                                                 : LEDManager::TestPattern::Chase;
+                _ledManager->setTestPattern(tp, width);
+                _ledManager->setBrightness(kTestBrightness);
+                _ledManager->setOutputMode(LEDManager::OutputMode::Test);
+                Log.printf("  → Test mode (pattern=%s width=%u)\n", pattern.c_str(), width);
             }
         } else if (mode == "sphere") {
             // 球体モード（デフォルト）。画像+IMU からのマッピングを再開する。
             if (_ledManager) {
+                _restoreBrightnessFromParams();
                 _ledManager->setOutputMode(LEDManager::OutputMode::Sphere);
             }
             Log.println("  → Sphere mode");
@@ -300,6 +320,14 @@ bool CommandHandler::_handleLed(const char* payload) {
     }
 
     return handled;
+}
+
+void CommandHandler::_restoreBrightnessFromParams() {
+    // test モードで下げた輝度を params の値へ戻す (_handleParams と同じ換算)。
+    if (_ledManager) {
+        uint8_t ledBrightness = map(_params.brightness, 0, 100, 0, 255);
+        _ledManager->setBrightness(ledBrightness);
+    }
 }
 
 bool CommandHandler::_handleSystem(const char* payload) {

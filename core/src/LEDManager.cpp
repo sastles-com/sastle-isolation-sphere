@@ -375,6 +375,8 @@ void LEDManager::renderFrame() {
     // 直接書くため、マッピングを飛ばして出力のみ行う。
     if (_outputMode == OutputMode::Sphere) {
         updateLEDBuffer();
+    } else if (_outputMode == OutputMode::Test) {
+        updateTestBuffer();
     }
 
     unsigned long mappingTime = micros() - start;
@@ -472,6 +474,58 @@ void LEDManager::updateLEDBuffer() {
         // XYZ軸インジケータを重畳 (IMU時は wx,wy,wz=ワールド座標, OFF時はbody座標)
         if (_axisIndicatorEnabled) {
             overlayAxisIndicator(_ledBuffer[i], wx, wy, wz);
+        }
+    }
+}
+
+namespace {
+// ストリップ識別色 (led_drive_test の STRIP_ID と同じ並び): 0=R 1=G 2=B 3=Y 4=M。
+// 6本目以降は白 (通常は kNumStrips<=5 なので未使用)。
+CRGB testStripColor(uint8_t strip) {
+    switch (strip) {
+        case 0: return CRGB::Red;
+        case 1: return CRGB::Green;
+        case 2: return CRGB::Blue;
+        case 3: return CRGB::Yellow;
+        case 4: return CRGB::Magenta;
+        default: return CRGB::White;
+    }
+}
+// Chase が 1LED 進むまでの時間 [ms]。約16 LED/s で目視しやすい速度。
+constexpr uint32_t kChaseStepMs = 60;
+}  // namespace
+
+void LEDManager::setTestPattern(TestPattern pattern, uint8_t width) {
+    _testPattern = pattern;
+    _testWidth = width < 1 ? 1 : width;
+}
+
+void LEDManager::updateTestBuffer() {
+    if (!_ledBuffer) return;
+
+    // 全消灯してから strip 単位で塗る。IMU/画像は一切参照しない。
+    fill_solid(_ledBuffer, _numLEDs, CRGB::Black);
+
+    if (_testPattern == TestPattern::StripId) {
+        for (uint8_t s = 0; s < kNumStrips; s++) {
+            const uint16_t count = _ledsPerStrip[s];
+            if (count == 0) continue;
+            fill_solid(_ledBuffer + _stripStartIndex[s], count, testStripColor(s));
+        }
+        return;
+    }
+
+    // TestPattern::Chase — 各 strip を識別色の _testWidth 連ブロックが DIN 側から走る。
+    // 進行位置は millis() ベースなので描画fpsに依存しない。ストリップ境界は跨がず折り返す。
+    const uint32_t head = (millis() / kChaseStepMs);
+    for (uint8_t s = 0; s < kNumStrips; s++) {
+        const uint16_t count = _ledsPerStrip[s];
+        if (count == 0) continue;
+        CRGB* strip = _ledBuffer + _stripStartIndex[s];
+        const CRGB color = testStripColor(s);
+        const uint16_t base = (uint16_t)(head % count);
+        for (uint8_t i = 0; i < _testWidth; i++) {
+            strip[(base + i) % count] = color;
         }
     }
 }
