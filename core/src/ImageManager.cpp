@@ -76,7 +76,11 @@ bool ImageManager::begin(ConfigManager& config, NetworkManager& network) {
     
     // TJpg_Decoder初期化
     TJpgDec.setJpgScale(_jpegScale);  // 縮小デコード (1,2,4,8)
-    TJpgDec.setSwapBytes(true);  // RGB565バイトスワップ
+    // デコード結果は uint16_t バッファへ memcpy 格納し、getPixel() が
+    // ネイティブ RGB565 (R=15..11, G=10..5, B=4..0) としてビット抽出する。
+    // そのため TFT 転送用のバイトスワップは掛けない (true にすると保存値の
+    // 上位/下位バイトが入れ替わり、読み出し時に色チャンネルが崩れて BGR 風になる)。
+    TJpgDec.setSwapBytes(false);
     TJpgDec.setCallback(tjpgOutput);
 
     _initialized = true;
