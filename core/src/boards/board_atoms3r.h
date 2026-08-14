@@ -27,11 +27,17 @@ namespace sastle {
 // --- LED ---
 // FastLED の addLeds<> はピンがテンプレート引数のため、実行時値にできない。
 // (config.json には出せず、コンパイル時定数として持つ必要がある)
-constexpr uint8_t  kLedPin0 = 5;    // Strip 0 -> GPIO 5
-constexpr uint8_t  kLedPin1 = 6;    // Strip 1 -> GPIO 6
-constexpr uint8_t  kLedPin2 = 7;    // Strip 2 -> GPIO 7
-constexpr uint8_t  kLedPin3 = 8;    // Strip 3 -> GPIO 8
-constexpr uint8_t  kLedPin4 = 38;   // Strip 4 -> GPIO 38 (V2 5本目, ベンチ実績)
+// core-M5atom-FPC の ESP32-01 コネクタ (J17) が GPIO008,007,006,005,038 の
+// 降順で配線されており、mother-ring 側 (J9: GPIO01..05 昇順, LINE01..05へ直結) と
+// 逆順に嵌合する。実機の LINE01=シルク印刷 で色テストした結果 (2026-08-15):
+// LINE01=G8, LINE02=G7, LINE03=G6, LINE04=G5, LINE05=G38 と確定。
+// Strip N = LINE0(N+1) となるよう、配線の実態に合わせてピン割り当てを反転済み。
+// 物理配線を作り直す場合はこの反転も併せて見直すこと。
+constexpr uint8_t  kLedPin0 = 8;    // Strip 0 -> LINE01 (実GPIO 8)
+constexpr uint8_t  kLedPin1 = 7;    // Strip 1 -> LINE02 (実GPIO 7)
+constexpr uint8_t  kLedPin2 = 6;    // Strip 2 -> LINE03 (実GPIO 6)
+constexpr uint8_t  kLedPin3 = 5;    // Strip 3 -> LINE04 (実GPIO 5)
+constexpr uint8_t  kLedPin4 = 38;   // Strip 4 -> LINE05 (実GPIO 38, 反転の影響なし)
 constexpr uint8_t  kNumStrips = BOARD_NUM_STRIPS;
 constexpr uint16_t kMaxLeds = 800;
 constexpr uint8_t  kTargetFps = 30;

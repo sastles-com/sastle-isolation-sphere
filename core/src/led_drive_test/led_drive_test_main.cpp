@@ -19,6 +19,16 @@
  * ピン割当はビルドフラグで上書き可能 (デフォルトは core-M5atom-FPC 基板の
  * ネット GPIO01..GPIO05 に対する想定値。基板実配線との照合は要確認):
  *   -D LED_TEST_PIN0=5 ... -D LED_TEST_PIN4=38
+ *
+ * NOTE: M5Stack公式ドキュメントにより AtomS3R 底面拡張ピンは G5/G6/G7/G8/G38/G39 の
+ * 6本のみと確認。
+ *
+ * NOTE (2026-08-15): core-M5atom-FPC の ESP32-01 コネクタ (J17) が
+ * GPIO008,007,006,005,038 の降順で配線されており、mother-ring 側 (J9: GPIO01..05
+ * 昇順、LINE01..05へ直結) と逆順に嵌合する。実機の LINE01〜05 (シルク印刷) を
+ * MODE_STRIP_ID で色確認した結果、LINE01=G8, LINE02=G7, LINE03=G6, LINE04=G5,
+ * LINE05=G38 と確定 (5本目は反転の影響なし)。下記 LED_TEST_PIN0..3 はこの実態に
+ * 合わせて反転済み — 素直な G5/G6/G7/G8 の昇順ではない点に注意。
  */
 
 #include <Arduino.h>
@@ -27,21 +37,21 @@
 
 // --- 検証構成 (V2 確定仕様) ---
 // core-M5atom-FPC のネット GPIO01..GPIO05 = 5本のLEDデータ線。
-// AtomS3R 底面ソケット経由。物理ピン対応の仮説: G5/G6/G7/G8/G38 (G39予備)。
+// AtomS3R 底面ソケット経由。物理ピン対応の仮説: G5/G6/G7/G8/G38 (G39予備=LS1スピーカー)。
 #ifndef LED_TEST_PIN0
-#define LED_TEST_PIN0 5
+#define LED_TEST_PIN0 8    // LINE01 (実配線: G8)
 #endif
 #ifndef LED_TEST_PIN1
-#define LED_TEST_PIN1 6
+#define LED_TEST_PIN1 7    // LINE02 (実配線: G7)
 #endif
 #ifndef LED_TEST_PIN2
-#define LED_TEST_PIN2 7
+#define LED_TEST_PIN2 6    // LINE03 (実配線: G6)
 #endif
 #ifndef LED_TEST_PIN3
-#define LED_TEST_PIN3 8
+#define LED_TEST_PIN3 5    // LINE04 (実配線: G5)
 #endif
 #ifndef LED_TEST_PIN4
-#define LED_TEST_PIN4 38
+#define LED_TEST_PIN4 38   // LINE05 (実配線: G38)
 #endif
 
 #ifndef LED_TEST_LEDS_PER_STRIP

@@ -66,9 +66,9 @@
     "startup_sound": true
   },
   "sphere": {
-    "id": "sphere001",
-    "mac": "F0:9E:9E:32:67:D0",
-    "static_ip": "192.168.49.101",
+    "id": "sphere002",
+    "mac": "",
+    "static_ip": "192.168.49.102",
     "features": {
       "LED": true,
       "IMU": "BNO055",

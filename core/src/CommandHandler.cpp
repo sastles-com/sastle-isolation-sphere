@@ -6,6 +6,11 @@
 #include "CommandHandler.h"
 #include "RemoteLog.h"
 #include "MQTTManager.h"   // kMqttBufferSize
+#include "SoundManager.h"
+
+// main.cpp のグローバルインスタンス。ブザー配線ピンの実機診断 (action:"sound_pin_test")
+// のためだけに直接参照する。
+extern sastle::SoundManager sound;
 
 namespace sastle {
 
@@ -79,7 +84,8 @@ bool CommandHandler::handleMessage(const char* topic, const uint8_t* payload, un
     
     // コマンドタイプを抽出
     String cmdType = _extractCommandType(topic);
-    
+    Log.printf("[CmdDbg] topic=%s cmdType=%s\n", topic, cmdType.c_str());
+
     if (cmdType == "params") {
         return _handleParams(message);
     } else if (cmdType == "playback") {
@@ -347,6 +353,31 @@ bool CommandHandler::_handleSystem(const char* payload) {
             delay(1000);
             ESP.restart();
             
+        } else if (action == "sound_pin_test") {
+            // ブザー配線ピンの実機診断: 底面露出6ピンを順に鳴らす。
+            // N番目のピンはビープを (N+1) 回鳴らすので、実際に音が出た回数を
+            // 数えればどのGPIOが本物のスピーカー配線か特定できる。
+            static const uint8_t kCandidatePins[] = {5, 6, 7, 8, 38, 39};
+            constexpr size_t kNumCandidates = sizeof(kCandidatePins) / sizeof(kCandidatePins[0]);
+            Log.println("[SoundTest] Pin scan start: 1st pin=1 beep, 2nd=2 beeps, ... (GPIO 5,6,7,8,38,39)");
+            for (size_t i = 0; i < kNumCandidates && _config; i++) {
+                uint8_t pin = kCandidatePins[i];
+                Log.printf("[SoundTest] GPIO%u -> %u beep(s)\n", pin, (unsigned)(i + 1));
+                sound.end();
+                sound.begin(*_config, pin);
+                for (size_t b = 0; b <= i; b++) {
+                    sound.playEffect(SoundEffect::BEEP);
+                    delay(150);
+                }
+                delay(700);
+            }
+            // デフォルトのブザーピンに戻す
+            sound.end();
+            if (_config) {
+                sound.begin(*_config);
+            }
+            Log.println("[SoundTest] Done. Restored default buzzer pin.");
+
         } else if (action == "calibrate") {
             Serial.println("  → IMU calibration (not implemented)");
             // TODO: IMU calibration

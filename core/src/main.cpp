@@ -111,11 +111,25 @@ static void scanI2cBus(uint8_t sda, uint8_t scl) {
 void setup() {
     // シリアル初期化
     Serial.begin(115200);
+
+    // Sound初期化を最優先で行い、起動音を即再生する。
+    // 理由: WiFi/MQTT/LCD初期化が終わるまでLED表示は数秒かかるため、
+    // 電源スイッチが正しくONになったかをすぐ確認できるよう、
+    // 他の初期化より前に音でフィードバックする。
+    bool soundReady = sound.begin(config);
+    if (soundReady) {
+        sound.playEffect(SoundEffect::STARTUP);
+    }
+
     delay(2000);  // シリアルモニタ接続待ち
 
     // tee ロガーを初期化 (MQTT 接続前のログはバッファされ、接続後に送出される)
     // 宛先トピックは接続後に sphere/<id>/log へ動的解決される
     sastle::Log.begin(&mqtt, "log");
+
+    if (!soundReady) {
+        sastle::Log.println("Sound initialization failed (continuing without sound)");
+    }
 
     sastle::Log.println("\n\n=== M5Atom S3R Network Test ===");
     
@@ -177,15 +191,7 @@ void setup() {
     sastle::Log.println("MQTT topics subscribed");
     
     // CommandHandler初期化 (LEDManager初期化後に移動)
-    
-    // Sound初期化
-    if (!sound.begin(config)) {
-        sastle::Log.println("Sound initialization failed (continuing without sound)");
-    } else {
-        // 起動音を再生
-        sound.playEffect(SoundEffect::STARTUP);
-    }
-    
+
     // IMU初期化前に I2C バスを走査 (BNO055 の有無を切り分けるため)
     scanI2cBus(kImuI2cSda, kImuI2cScl);
 
