@@ -126,8 +126,9 @@ class MQTTService:
             logger.info(f"Connected to MQTT broker at {self.broker_host}:{self.broker_port}")
             self.is_connected = True
             
-            # Subscribe to IMU topic
-            topic = f"sphere/{self.device_id}/imu"
+            # Subscribe to IMU topic (全デバイス分をワイルドカードで受信し、
+            # WebUI で sphere を選んで表示切替できるようにする)
+            topic = "sphere/+/imu"
             client.subscribe(topic)
             logger.info(f"Subscribed to topic: {topic}")
             
@@ -171,9 +172,10 @@ class MQTTService:
             # Handle command topics
             if "/command/" in topic:
                 self._handle_command(topic, payload)
-            # Handle IMU data
+            # Handle IMU data (topic: sphere/<device_id>/imu)
             elif topic.endswith("/imu"):
-                self._handle_imu_data(payload)
+                device_id = topic.split("/")[1]
+                self._handle_imu_data(device_id, payload)
             # Handle status data
             elif topic.endswith("/status"):
                 self._handle_status_data(payload)
@@ -221,8 +223,8 @@ class MQTTService:
         else:
             logger.warning("StateManager not set, cannot handle command")
 
-    def _handle_imu_data(self, payload):
-        """Handle IMU quaternion data"""
+    def _handle_imu_data(self, device_id: str, payload):
+        """Handle IMU quaternion data from a given device (topic: sphere/<device_id>/imu)"""
         if not self.state_manager:
             logger.warning("StateManager not set, skipping IMU update")
             return
@@ -240,7 +242,7 @@ class MQTTService:
             if quat:
                 # MQTT callback runs in different thread, use run_coroutine_threadsafe
                 if self._submit_coroutine(
-                    self.state_manager.update_state("imu", {
+                    self.state_manager.update_device_imu(device_id, {
                         "w": quat.get("w", 1.0),
                         "x": quat.get("x", 0.0),
                         "y": quat.get("y", 0.0),
@@ -248,7 +250,7 @@ class MQTTService:
                     }),
                     "update IMU"
                 ):
-                    logger.debug(f"Updated IMU quaternion: {quat}")
+                    logger.debug(f"Updated IMU quaternion for {device_id}: {quat}")
         except Exception as e:
             logger.error(f"Error handling IMU data: {e}")
 

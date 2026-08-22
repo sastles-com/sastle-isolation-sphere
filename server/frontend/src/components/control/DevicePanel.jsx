@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStateUpdate } from '../../hooks/useSphereState';
+import { useWebSocket } from '../../contexts/WebSocketContext';
 import { GlassButton } from '../ui/GlassButton';
+import { SegmentControl } from '../ui/SegmentControl';
 import { Section } from './Section';
 
 const Row = ({ k, v }) => (
@@ -20,14 +22,36 @@ const Row = ({ k, v }) => (
 export const DevicePanel = () => {
     const [system, setSystem] = useState(null);
     const [playbackStatus, setPlaybackStatus] = useState('stopped');
+    const [deviceIds, setDeviceIds] = useState([]);
+    const { selectedDeviceId, setSelectedDeviceId } = useWebSocket();
 
     useStateUpdate((payload) => {
         if (payload.system) setSystem(payload.system);
         if (payload.playback?.status) setPlaybackStatus(payload.playback.status);
+        if (payload.devices) {
+            const ids = Object.keys(payload.devices).sort();
+            setDeviceIds((prev) => (prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids));
+        }
     });
+
+    // まだ選んでいなければ、最初に見つかった sphere を既定で選択する
+    useEffect(() => {
+        if (!selectedDeviceId && deviceIds.length > 0) {
+            setSelectedDeviceId(deviceIds[0]);
+        }
+    }, [deviceIds, selectedDeviceId, setSelectedDeviceId]);
 
     return (
         <Section title="Device">
+            {deviceIds.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                    <SegmentControl
+                        options={deviceIds.map((id) => ({ value: id, label: id }))}
+                        value={selectedDeviceId ?? deviceIds[0]}
+                        onChange={setSelectedDeviceId}
+                    />
+                </div>
+            )}
             <Row k="Status" v={playbackStatus} />
             <Row k="FPS" v={system?.fps != null ? system.fps : '—'} />
             <Row k="Temp" v={system?.temp != null ? `${Math.round(system.temp)}°C` : '—'} />

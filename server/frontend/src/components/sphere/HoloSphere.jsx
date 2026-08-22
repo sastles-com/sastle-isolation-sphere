@@ -319,9 +319,11 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
 
     // Safe WebSocket usage with error handling
     let lastMessage = null;
+    let selectedDeviceId = null;
     try {
         const wsContext = useWebSocket();
         lastMessage = wsContext?.lastMessage;
+        selectedDeviceId = wsContext?.selectedDeviceId;
     } catch (error) {
         console.warn('WebSocket context not available:', error);
     }
@@ -340,13 +342,18 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
     const effectiveMode = colorMode === 'live' ? (live.active ? 'live' : 'params') : colorMode;
 
     useEffect(() => {
-        // Update quaternion when IMU data received
-        if (lastMessage && lastMessage.type === 'STATE_UPDATE' && lastMessage.payload?.imu) {
-            const { w, x, y, z } = lastMessage.payload.imu;
-            // Three.js uses (x, y, z, w) order
-            quaternionRef.current.set(x, y, z, w);
+        // Update quaternion when IMU data received.
+        // 選択中の sphere があればそのデバイス別IMUを使い、無ければ後方互換の単一値にフォールバック。
+        if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
+            const imu = (selectedDeviceId && lastMessage.payload?.devices?.[selectedDeviceId]?.imu)
+                || lastMessage.payload?.imu;
+            if (imu) {
+                const { w, x, y, z } = imu;
+                // Three.js uses (x, y, z, w) order
+                quaternionRef.current.set(x, y, z, w);
+            }
         }
-    }, [lastMessage]);
+    }, [lastMessage, selectedDeviceId]);
 
     useFrame(() => {
         if (groupRef.current) {

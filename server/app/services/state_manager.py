@@ -42,6 +42,9 @@ class StateManager:
         # 初期状態
         self._state: Dict[str, Any] = {
             "imu": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
+            # device_id ごとのIMU等 (複数sphere対応、WebUIでの選択用)。
+            # 例: {"sphere001": {"imu": {...}}, "sphere002": {"imu": {...}}}
+            "devices": {},
             "playback": {
                 "status": "stopped",  # "playing" | "paused" | "stopped"
                 "playlist": None,
@@ -97,7 +100,18 @@ class StateManager:
             self._state[key] = value
             
         await self._notify_observers()
-    
+
+    async def update_device_imu(self, device_id: str, quat: Dict[str, Any]):
+        """デバイス別のIMUクォータニオンを更新する (複数sphere対応)。
+
+        既存の単一値 "imu" も後方互換のため最新受信値で更新する
+        (WebUI がまだデバイス未選択の場合のフォールバック用)。
+        """
+        devices = self._state.setdefault("devices", {})
+        devices.setdefault(device_id, {})["imu"] = quat
+        self._state["imu"] = quat
+        await self._notify_observers()
+
     async def handle_command(self, topic: str, payload: Dict[str, Any]):
         """
         MQTTコマンドを処理
