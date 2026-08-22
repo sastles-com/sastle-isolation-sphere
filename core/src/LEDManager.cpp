@@ -240,30 +240,34 @@ bool LEDManager::loadLayout(const char* path) {
 }
 
 void LEDManager::sphereToUV(float x, float y, float z, float& u, float& v) {
-    // 球面座標変換: (x, y, z) -> (u, v)
-    // ブログ記事の式を使用:
-    // u = arctan2(√(rx² + rz²), ry)  // 緯度方向
-    // v = arctan2(rx, rz)             // 経度方向
-    
-    // 正規化（念のため）- common.hの高速平方根を使用
+    // 球面座標変換: (x, y, z) -> (u, v) — 極軸=Z の標準正距円筒 (equirectangular)。
+    //   u → px (画像の幅): 経度 -180..+180° (XY平面, 継ぎ目で wrap)
+    //   v → py (画像の高さ): 極角 0°(北極=+Z, 上端) .. 180°(南極=-Z, 下端) (clamp)
+    // WebUIデジタルツイン (server/frontend/src/components/sphere/HoloSphere.jsx:71)
+    // と同一式・同一量子化 trunc(u*(w-1)) にすること。
+    // (旧実装は u=緯度 / v=経度 と軸転置しており、u が 0.5..1.0 に収まるため
+    //  320px幅の右半分しかサンプリングしていなかった)
+
+    // 正規化（念のため）- FastMath.hの高速平方根を使用
     float len = _sqrt(x*x + y*y + z*z);
     if (len < 0.0001f) {
         u = 0.5f;
         v = 0.5f;
         return;
     }
-    
+
     float nx = x / len;
     float ny = y / len;
     float nz = z / len;
-    
-    // 緯度: arctan2(√(nx² + nz²), ny) を 0-1 にマッピング
-    float horizontal_dist = _sqrt(nx*nx + nz*nz);
-    u = (_atan2(horizontal_dist, ny) + 1.0f) / 2.0f;  // _atan2は-1.0~1.0を返す
-    
-    // 経度: arctan2(nx, nz) を 0-1 にマッピング
-    v = (_atan2(nx, nz) + 1.0f) / 2.0f;
-    
+
+    // 経度 (XY平面, -180..180°) → u → px (幅全域)
+    u = (_atan2(nx, ny) + 1.0f) / 2.0f;  // _atan2は-1.0~1.0を返す
+
+    // 極角 (+Zから 0..180°) → v → py (高さ全域)
+    // 第1引数 √(nx²+ny²) ≥ 0 なので _atan2 ∈ [0,1]。(+1)/2 は付けない。
+    float horizontal_dist = _sqrt(nx*nx + ny*ny);
+    v = _atan2(horizontal_dist, nz);
+
     // クランプ
     if (u < 0.0f) u = 0.0f;
     if (u > 1.0f) u = 1.0f;
@@ -571,7 +575,7 @@ void LEDManager::sampleAveraged(uint16_t cx, uint16_t cy, uint8_t& r, uint8_t& g
             sx %= w;
             if (sx < 0) sx += w;
         }
-        // y=緯度: クランプ (極をまたがない)
+        // y=極角(0=北極..h-1=南極): クランプ (極をまたがない)
         if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
 
         uint8_t pr = 0, pg = 0, pb = 0;
@@ -694,34 +698,34 @@ void LEDManager::playOpening(uint16_t durationMs) {
     float dir[3][3];
     uint32_t t0, elapsed;
 
-    // --- フェーズ1: 北極(+Y)→南極(-Y) へ螺旋降下。3点は経度120°間隔。---
-    // 極軸は Y (sphereToUV が緯度を Y で測るため)。赤道面は X-Z。
+    // --- フェーズ1: 北極(+Z)→南極(-Z) へ螺旋降下。3点は経度120°間隔。---
+    // 極軸は Z (sphereToUV が極角を +Z から測るため)。赤道面は X-Y。
     t0 = millis();
     while ((elapsed = millis() - t0) < descendMs) {
         float t = (float)elapsed / (float)descendMs;     // 0→1
-        float y = 1.0f - 2.0f * t;                        // +1(北)→-1(南)
-        float rr = sqrtf(fmaxf(0.0f, 1.0f - y * y));      // その緯度の円の半径
+        float zPos = 1.0f - 2.0f * t;                     // +1(北)→-1(南)
+        float rr = sqrtf(fmaxf(0.0f, 1.0f - zPos * zPos)); // その緯度の円の半径
         float base = kSpinTurns * kTwoPi * t;             // 回転
         for (uint8_t d = 0; d < 3; d++) {
             float phi = base + d * (kTwoPi / 3.0f);
             dir[d][0] = rr * cosf(phi);                   // X
-            dir[d][1] = y;                                // Y(極軸)
-            dir[d][2] = rr * sinf(phi);                   // Z
+            dir[d][1] = rr * sinf(phi);                   // Y
+            dir[d][2] = zPos;                             // Z(極軸)
         }
         renderOpeningDots(dir);
     }
 
-    // --- フェーズ2: 南極(-Y)→北極(+Y) へ3点が一斉に上昇 (経度固定の3本の子午線)。---
+    // --- フェーズ2: 南極(-Z)→北極(+Z) へ3点が一斉に上昇 (経度固定の3本の子午線)。---
     t0 = millis();
     while ((elapsed = millis() - t0) < ascendMs) {
         float t = (float)elapsed / (float)ascendMs;       // 0→1
-        float y = -1.0f + 2.0f * t;                       // -1(南)→+1(北)
-        float rr = sqrtf(fmaxf(0.0f, 1.0f - y * y));
+        float zPos = -1.0f + 2.0f * t;                    // -1(南)→+1(北)
+        float rr = sqrtf(fmaxf(0.0f, 1.0f - zPos * zPos));
         for (uint8_t d = 0; d < 3; d++) {
             float phi = d * (kTwoPi / 3.0f);              // 固定経度
             dir[d][0] = rr * cosf(phi);
-            dir[d][1] = y;
-            dir[d][2] = rr * sinf(phi);
+            dir[d][1] = rr * sinf(phi);
+            dir[d][2] = zPos;
         }
         renderOpeningDots(dir);
     }
@@ -732,7 +736,8 @@ void LEDManager::playOpening(uint16_t durationMs) {
         float t = (float)elapsed / (float)bloomMs;        // 0→1
         uint8_t val = (uint8_t)(sinf(3.14159265f * t) * 255.0f);  // 0→1→0
         for (uint16_t i = 0; i < _numLEDs; i++) {
-            float az = atan2f(_ledLayout[i].x, _ledLayout[i].z);  // Y軸まわりの経度
+            // Z軸まわりの経度 (sphereToUV の u と同じ引数順なので色相 ≒ u*255)
+            float az = atan2f(_ledLayout[i].x, _ledLayout[i].y);
             uint8_t hue = (uint8_t)((az + 3.14159265f) / kTwoPi * 255.0f);
             _ledBuffer[i] = CHSV(hue, 255, val);
         }
