@@ -42,7 +42,7 @@ CommandHandler::CommandHandler()
     : _ledManager(nullptr)
     , _config(nullptr) {
     // デフォルト値設定
-    _params.brightness = 80;
+    _params.brightness = 50;
     _params.speed = 50;
     _params.hue = 120;
     _params.saturation = 100;
