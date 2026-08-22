@@ -63,7 +63,7 @@ isolation-sphere/
 │   │   └── ConfigManager.*  # 設定管理 (JSON)
 │   ├── data/                # LittleFS データ
 │   │   ├── config.json      # WiFi、MQTT設定
-│   │   ├── led_layout.csv   # LED座標マッピング
+│   │   ├── led_layouts-5strip.csv   # LED座標マッピング
 │   │   └── images/          # デモ画像データ
 │   ├── doc/                 # ドキュメント
 │   │   ├── dual_core_design.md       # デュアルコア設計

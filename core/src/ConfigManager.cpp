@@ -75,7 +75,7 @@ PathsConfig ConfigManager::getPathsConfig() {
     config.config = doc["system"]["paths"]["config"] | "/littlefs/config.json";
     config.images = doc["system"]["paths"]["images"] | "/littlefs/images/";
     config.opening = doc["system"]["paths"]["opening"] | "/littlefs/images/opening/";
-    config.layout = doc["system"]["paths"]["layout"] | "/littlefs/led_layout.csv";
+    config.layout = doc["system"]["paths"]["layout"] | "/littlefs/led_layouts-5strip.csv";
     config.logs = doc["system"]["paths"]["logs"] | "/littlefs/logs/";
     return config;
 }

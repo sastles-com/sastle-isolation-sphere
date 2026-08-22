@@ -47,7 +47,7 @@ MFT2025プロジェクトをベースに、通信アーキテクチャを最適�
 - **Debug**:
   - `lcd_enable`: LCD表示のON/OFF (デバッグ用、デフォルト: false)
 
-### LED Layout (`led_layout.csv`)
+### LED Layout (`led_layouts-5strip.csv`)
 - フォーマット: `faceID, stripID, stripIndex, x, y, z`
 - 各LEDの3次元座標を定義し、テクスチャマッピングに使用。
 

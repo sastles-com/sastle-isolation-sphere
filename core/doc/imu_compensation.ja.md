@@ -177,7 +177,7 @@ v = 0.5f - asin_ny / 2.0f;
 
 ### LED球体の座標系
 
-`led_layout.csv` で定義される座標系がIMU座標系と一致していることを前提とします。
+`led_layouts-5strip.csv` で定義される座標系がIMU座標系と一致していることを前提とします。
 
 もし座標系が異なる場合、`rotateByQuaternion()` の前に座標変換が必要です。
 

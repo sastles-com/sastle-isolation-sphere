@@ -309,7 +309,7 @@ core/
 │   └── LCDManager.cpp/h       # M5Unified display
 ├── data/                      # LittleFS files
 │   ├── config.json            # System config
-│   ├── led_layout.csv         # LED positions
+│   ├── led_layouts-5strip.csv         # LED positions
 │   └── images/                # Image files
 └── platformio.ini             # Build config
 ```

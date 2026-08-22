@@ -177,7 +177,7 @@ This leaves **ample headroom** relative to the target of 30 fps (33 ms/frame).
 
 ### LED Sphere Coordinate System
 
-This assumes that the coordinate system defined in `led_layout.csv` matches the IMU coordinate system.
+This assumes that the coordinate system defined in `led_layouts-5strip.csv` matches the IMU coordinate system.
 
 If the coordinate systems differ, a coordinate transformation is required before `rotateByQuaternion()`.
 

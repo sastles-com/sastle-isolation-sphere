@@ -47,7 +47,7 @@ Considering real-time performance and reliability, roles are divided as follows.
 - **Debug**:
   - `lcd_enable`: turn LCD display ON/OFF (for debugging, default: false)
 
-### LED Layout (`led_layout.csv`)
+### LED Layout (`led_layouts-5strip.csv`)
 - Format: `faceID, stripID, stripIndex, x, y, z`
 - Defines the 3D coordinates of each LED, used for texture mapping.
 

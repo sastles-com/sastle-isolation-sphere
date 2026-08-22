@@ -42,7 +42,7 @@ As of the last update, the project is in the **TDD Implementation Phase**.
 - **Completed**:
     - `ConfigManager`: JSON parsing, default values.
     - `DeviceManager`: Platform initialization (M5, PSRAM, LittleFS) and component delegation. **Refactored for Dependency Injection.**
-    - `esp32/data`: Configuration files (`config.json`, `led_layout.csv`) are prepared and uploaded.
+    - `esp32/data`: Configuration files (`config.json`, `led_layouts-5strip.csv`) are prepared and uploaded.
 - **In Progress / Next Steps**:
     - **IMU Implementation**: Needs `test_imu` implementation (I2C init, Sensor check).
     - **LEDController**: Needs FastLED initialization tests.

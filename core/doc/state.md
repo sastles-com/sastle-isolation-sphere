@@ -290,7 +290,7 @@ stateDiagram-v2
         
         Files:
         - /config.json
-        - /led_layout.csv
+        - /led_layouts-5strip.csv
         - /images/*.jpg (151 files)
     end note
 ```

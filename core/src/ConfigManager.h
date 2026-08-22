@@ -209,7 +209,7 @@ public:
     bool isLEDEnabled() { return doc["sphere"]["features"]["LED"] | false; }
     String getIMUType() { return doc["sphere"]["features"]["IMU"] | ""; }
     
-    String getLayoutPath() { return doc["system"]["paths"]["layout"] | "/led_layout.csv"; }
+    String getLayoutPath() { return doc["system"]["paths"]["layout"] | "/led_layouts-5strip.csv"; }
     String getImagesPath() { return doc["system"]["paths"]["images"] | "/images/"; }
     String getOpeningPath() { return doc["system"]["paths"]["opening"] | "/images/opening/"; }
 
