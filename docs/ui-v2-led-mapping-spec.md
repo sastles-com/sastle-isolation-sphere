@@ -247,14 +247,20 @@ The conversion "320×160 image → 800 LED RGB" has a complete implementation in
 Processing order (same as updateLEDBuffer):
 `conjugate quaternion → per LED [rotate → sphereToUV → quantize px,py → sampleAveraged(K7)] → multiply by brightness → into the color attribute`
 
-> ⚠️ **Decode resolution**: the device decodes at a reduced **160×80** with `ImageManager._jpegScale = 2`,
-> and px/py quantization is also done at that resolution. To match exactly in the UI, make the offscreen canvas
-> **160×80** and quantize with the same W,H (recommended). Leaving it at 320×160 has almost no visible difference, but
-> if a discrepancy appears, suspect this first.
+> ⚠️ **Decode resolution**: the device decodes the JPEG at **full 320×160** —
+> [`ImageManager.cpp:53`](../core/src/ImageManager.cpp#L53) forces `_jpegScale = 1`, so `_width/_height`
+> equal the configured source size. px/py quantization therefore uses **W=320, H=160**.
+> Make the UI's offscreen canvas 320×160 and quantize with the same W,H.
+> (An older revision of this document claimed a reduced 160×80 / `_jpegScale = 2` decode — that was stale.)
 
-> ⚠️ **Distribution of u**: since `_atan2(hd, ny)`'s first argument is ≥0, it only returns 0..180°, so
-> **u ∈ [0.5, 1.0] → px uses only the right half of the image width.** Because the video content
-> is made on this premise, do not arbitrarily correct it in the UI.
+> ✅ **UV convention (fixed 2026-08-23)**: firmware `sphereToUV()` now implements the **standard Z-polar
+> equirectangular** mapping, identical to the twin:
+> `u = (_atan2(nx, ny) + 1)/2` (longitude −180..+180° → the **full** image width, wrapping) and
+> `v = _atan2(√(nx²+ny²), nz)` (polar angle 0° at +Z / north / image top .. 180° at −Z / south / image bottom, clamped).
+> The first argument of the `v` term is ≥0 so `_atan2 ∈ [0,1]` already — **do not** apply `(+1)/2` to it.
+> Previously the two axes were transposed (`u` = latitude, `v` = longitude), which structurally confined
+> `u` to `[0.5, 1.0]` and made the device sample **only the right half of the image width** — the cause of the
+> garbled video. Both the firmware and the twin now use the formulas above; keep them in lockstep.
 
 **Rotation consistency (sorting out the double correction)**: the firmware "rotates the LED body coordinates by the (conjugate)
 quaternion, then samples" = a world-fixed video is projected onto the LEDs. In the UI, the point-cloud group itself is also

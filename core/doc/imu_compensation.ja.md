@@ -140,17 +140,20 @@ ledManager.setIMUCompensation(true);
 - **効果**: 約3-5倍高速化
 
 ```cpp
-// 最適化前
+// 最適化前 (標準ライブラリ)
 float len = sqrt(x*x + y*y + z*z);
-u = 0.5f + atan2f(nz, nx) / (2.0f * PI);
-v = 0.5f - asinf(ny) / PI;
+u = 0.5f + atan2f(nx, ny) / (2.0f * PI);              // 経度 → 幅
+v = atan2f(sqrt(nx*nx + ny*ny), nz) / PI;             // 極角 (+Zから) → 高さ
 
-// 最適化後
+// 最適化後 (FastMath.h。_atan2 は「度/180」を返すので /PI 相当の除算は不要)
 float len = _sqrt(x*x + y*y + z*z);
-u = 0.5f + _atan2(nz, nx) / 2.0f;  // _atan2は正規化済み
-float asin_ny = _atan2(ny, _sqrt(1.0f - ny*ny));  // asin = atan2近似
-v = 0.5f - asin_ny / 2.0f;
+u = (_atan2(nx, ny) + 1.0f) / 2.0f;                   // 経度 -180..180 → [0,1]
+v = _atan2(_sqrt(nx*nx + ny*ny), nz);                 // 極角 0..180 → [0,1]
 ```
+
+> 極軸=Z の標準正距円筒。`v` は第1引数が ≥0 なので `_atan2 ∈ [0,1]` に収まり、`(+1)/2` は付けない。
+> 実装は [`LEDManager::sphereToUV()`](../src/LEDManager.cpp) が正典で、WebUIツイン
+> `server/frontend/src/components/sphere/HoloSphere.jsx` と同一式・同一量子化。
 
 #### 2. Quaternion回転の最適化
 

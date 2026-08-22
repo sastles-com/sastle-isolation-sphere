@@ -140,17 +140,21 @@ ledManager.setIMUCompensation(true);
 - **Effect**: about 3-5x faster
 
 ```cpp
-// Before optimization
+// Before optimization (standard library)
 float len = sqrt(x*x + y*y + z*z);
-u = 0.5f + atan2f(nz, nx) / (2.0f * PI);
-v = 0.5f - asinf(ny) / PI;
+u = 0.5f + atan2f(nx, ny) / (2.0f * PI);              // longitude -> width
+v = atan2f(sqrt(nx*nx + ny*ny), nz) / PI;             // polar angle (from +Z) -> height
 
-// After optimization
+// After optimization (FastMath.h; _atan2 returns "degrees/180", so no /PI is needed)
 float len = _sqrt(x*x + y*y + z*z);
-u = 0.5f + _atan2(nz, nx) / 2.0f;  // _atan2 is already normalized
-float asin_ny = _atan2(ny, _sqrt(1.0f - ny*ny));  // asin = atan2 approximation
-v = 0.5f - asin_ny / 2.0f;
+u = (_atan2(nx, ny) + 1.0f) / 2.0f;                   // longitude -180..180 -> [0,1]
+v = _atan2(_sqrt(nx*nx + ny*ny), nz);                 // polar angle 0..180 -> [0,1]
 ```
+
+> Standard Z-polar equirectangular. For `v`, the first argument is ≥0 so `_atan2 ∈ [0,1]` already —
+> do **not** apply `(+1)/2`. [`LEDManager::sphereToUV()`](../src/LEDManager.cpp) is canonical, and the
+> WebUI twin `server/frontend/src/components/sphere/HoloSphere.jsx` uses the identical formulas and
+> the identical quantization.
 
 #### 2. Quaternion Rotation Optimization
 

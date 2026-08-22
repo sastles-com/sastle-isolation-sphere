@@ -129,7 +129,7 @@ private:
     // 画像パラメータ
     uint16_t _width;             ///< デコード後の画像幅 (= src幅/_jpegScale)
     uint16_t _height;            ///< デコード後の画像高さ
-    uint8_t _jpegScale = 2;      ///< 縮小デコード倍率 (1,2,4,8)
+    uint8_t _jpegScale = 1;      ///< 縮小デコード倍率 (1,2,4,8)。begin() が 1 を強制 (320x160 をそのままデコード)
     size_t _bufferSize;          ///< 1バッファのサイズ (bytes)
     
     // 描画/デコードのトリプルバッファ (display/ready/decode)。差し替えロジックは FrameBufferPool。
