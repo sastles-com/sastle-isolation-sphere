@@ -228,6 +228,14 @@ public:
      */
     bool getLCDDebugEnabled() { return doc["sphere"]["features"]["LCD"]["debug"] | false; }
 
+    // params ブロック = 表示パラメータの起動時デフォルト (CommandHandler::_params)。
+    // MQTT の params コマンドで実行時に上書きされる。fallback は server 側
+    // (config_service.DEFAULT_PARAMS) と同じ値に揃えておく。
+    uint8_t getParamBrightness() { return doc["params"]["brightness"] | 50; }
+    uint8_t getParamSpeed() { return doc["params"]["speed"] | 50; }
+    uint16_t getParamHue() { return doc["params"]["hue"] | 120; }
+    uint8_t getParamSaturation() { return doc["params"]["saturation"] | 100; }
+
     // LEDカラーのマルチサンプリング (中心+半径R円周上N点を画像空間で平均)。
     // 実機でちらつき低減↔ボケ/負荷のトレードオフを調整するための可変パラメータ。
     bool getLedMultisampleEnabled() { return doc["led"]["multisample"]["enabled"] | true; }

@@ -397,7 +397,7 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
     );
 };
 
-export const HoloSphere = ({ color = 120, brightness = 80, colorMode = 'live' }) => {
+export const HoloSphere = ({ color = 120, brightness = 50, colorMode = 'live' }) => {
     return (
         <div style={{ width: '100%', height: '100%', minHeight: '300px' }}>
             <Canvas camera={{ position: [0, 0, 6] }}>

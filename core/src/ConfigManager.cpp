@@ -180,7 +180,12 @@ void ConfigManager::printConfig() {
     Serial.printf("  Config: %s\n", paths.config.c_str());
     Serial.printf("  Images: %s\n", paths.images.c_str());
     Serial.printf("  Layout: %s\n", paths.layout.c_str());
-    
+
+    Serial.printf("\nParams (startup defaults):\n");
+    Serial.printf("  Brightness: %d%%, Speed: %d%%, Hue: %d, Saturation: %d%%\n",
+                  getParamBrightness(), getParamSpeed(),
+                  getParamHue(), getParamSaturation());
+
     Serial.println("====================\n");
 }
 

@@ -31,7 +31,7 @@ export const SpherePlayer = () => {
     const sendParam = useParamSender();
 
     // ---- WS STATE_UPDATE からのライブ状態 ----
-    const [brightness, setBrightness] = useState(80);
+    const [brightness, setBrightness] = useState(50);  // STATE_UPDATE 受信までの暫定値 (server DEFAULT_PARAMS と同値)
     const [hue, setHue] = useState(190);
     const [system, setSystem] = useState(null);
     const brtDragging = useRef(false);

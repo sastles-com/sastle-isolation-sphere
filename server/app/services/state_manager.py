@@ -53,7 +53,7 @@ class StateManager:
                 "duration": 0.0
             },
             "params": {
-                "brightness": 80,
+                "brightness": 50,
                 "speed": 50,
                 "hue": 120,
                 "saturation": 100

@@ -41,12 +41,13 @@ static bool parseJsonPayload(const char* payload, JsonDocument& doc) {
 CommandHandler::CommandHandler()
     : _ledManager(nullptr)
     , _config(nullptr) {
-    // デフォルト値設定
+    // config.json の params ブロックが読めなかった場合のフォールバック。
+    // 実際の初期値は begin() で ConfigManager から取り直す。
     _params.brightness = 50;
     _params.speed = 50;
     _params.hue = 120;
     _params.saturation = 100;
-    
+
     _playback.status = "stopped";
     _playback.position = 0.0f;
     _playback.duration = 0.0f;
@@ -58,14 +59,24 @@ CommandHandler::CommandHandler()
 bool CommandHandler::begin(LEDManager* ledManager, ConfigManager* config) {
     _ledManager = ledManager;
     _config = config;
-    
+
+    // config.json の params ブロックを起動時デフォルトとして反映する。
+    // (未設定/読み込み失敗時は ConfigManager 側の fallback = コンストラクタと同値)
+    if (_config) {
+        _params.brightness = _config->getParamBrightness();
+        _params.speed = _config->getParamSpeed();
+        _params.hue = _config->getParamHue();
+        _params.saturation = _config->getParamSaturation();
+    }
+
     // 初期brightness適用
     if (_ledManager) {
         uint8_t ledBrightness = map(_params.brightness, 0, 100, 0, 255);
         _ledManager->setBrightness(ledBrightness);
     }
-    
-    Serial.println("[CommandHandler] Initialized");
+
+    Serial.printf("[CommandHandler] Initialized (brightness=%d%% speed=%d%% hue=%d sat=%d%%)\n",
+                  _params.brightness, _params.speed, _params.hue, _params.saturation);
     return true;
 }
 

@@ -14,7 +14,7 @@ from app.core.config import CONFIG_SEARCH_PATHS
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PARAMS = {"brightness": 80, "speed": 50, "hue": 120, "saturation": 100}
+DEFAULT_PARAMS = {"brightness": 50, "speed": 50, "hue": 120, "saturation": 100}
 DEFAULT_PLAYBACK = {"active_playlist": None, "loop": True, "shuffle": False, "autoplay": False}
 
 
