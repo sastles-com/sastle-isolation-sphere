@@ -92,6 +92,49 @@ bool IMUManager::update() {
     _accel = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
     _gyro = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
 
+    // 融合停止ウォッチドッグ (電源瞬断で BNO055 の fusion が止まり、quat が
+    // 姿勢に追従しなくなる事象への対策)。2秒ごとに SYS_STATUS を確認し、
+    // 「fusion動作中(=5)」以外なら再初期化する。加えて「回転している
+    // (gyroが大きい) のに quat が動かない」場合も融合停止と判定する。
+    if (now - _wdLastChange > 2000) {
+        _wdLastChange = now;
+
+        uint8_t sysStatus = 0, selfTest = 0, sysError = 0;
+        _bno.getSystemStatus(&sysStatus, &selfTest, &sysError);
+
+        const float gyroMag = fabsf((float)_gyro.x()) + fabsf((float)_gyro.y()) +
+                              fabsf((float)_gyro.z());
+        const float dq = fabsf((float)_quat.w() - _wdPrev[0]) +
+                         fabsf((float)_quat.x() - _wdPrev[1]) +
+                         fabsf((float)_quat.y() - _wdPrev[2]) +
+                         fabsf((float)_quat.z() - _wdPrev[3]);
+        _wdPrev[0] = (float)_quat.w(); _wdPrev[1] = (float)_quat.x();
+        _wdPrev[2] = (float)_quat.y(); _wdPrev[3] = (float)_quat.z();
+
+        const bool fusionDead = (sysStatus != 5) || (gyroMag > 0.3f && dq < 0.001f);
+        if (fusionDead) {
+            _wdRecoveries++;
+            Serial.printf("[IMU] Fusion dead (sys=%u err=%u gyro=%.2f dq=%.4f) — recover #%u\n",
+                          sysStatus, sysError, gyroMag, dq, _wdRecoveries);
+            if (_wdRecoveries % 3 != 0) {
+                // まずモード入れ直し (軽量)
+                _bno.setMode(OPERATION_MODE_CONFIG);
+                delay(25);
+                _bno.setMode(OPERATION_MODE_NDOF);
+                delay(20);
+            } else {
+                // 3回に1回はフル再初期化 (リセット込み)
+                Serial.println("[IMU] Mode cycle insufficient — full re-begin");
+                if (_bno.begin()) {
+                    delay(50);
+                    _bno.setExtCrystalUse(true);
+                    _bno.setMode(OPERATION_MODE_NDOF);
+                    delay(20);
+                }
+            }
+        }
+    }
+
     return true;
 }
 

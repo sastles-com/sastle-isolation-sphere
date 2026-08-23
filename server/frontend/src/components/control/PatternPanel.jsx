@@ -6,12 +6,15 @@ import { Section } from './Section';
 
 // LED モード (仕様 §5 SET_LED の契約: sphere | pixels | off | test)。
 // test は点灯/配線確認用: strip index から core 内部で生成し IMU/画像を通さない。
+// XYZ は映像表示のまま ±X/±Y/±Z 軸マーカー (R/G/B) をオーバーレイする。
+// 他のパターンを選ぶと axis:false でオーバーレイを消す。
 // key は UI 選択状態の識別子で、SET_LED に送る payload を持つ。
 const OPTIONS = [
-    { key: 'sphere', label: 'SPHERE', payload: { mode: 'sphere' } },
-    { key: 'off', label: 'OFF', payload: { mode: 'off' } },
-    { key: 'strip_id', label: 'STRIP', payload: { mode: 'test', pattern: 'strip_id' } },
-    { key: 'chase', label: 'CHASE', payload: { mode: 'test', pattern: 'chase', width: 5 } },
+    { key: 'sphere', label: 'SPHERE', payload: { mode: 'sphere', axis: false } },
+    { key: 'off', label: 'OFF', payload: { mode: 'off', axis: false } },
+    { key: 'strip_id', label: 'STRIP', payload: { mode: 'test', pattern: 'strip_id', axis: false } },
+    { key: 'chase', label: 'CHASE', payload: { mode: 'test', pattern: 'chase', width: 5, axis: false } },
+    { key: 'xyz', label: 'XYZ', payload: { mode: 'sphere', axis: true } },
 ];
 
 /**
@@ -26,8 +29,10 @@ export const PatternPanel = () => {
     useStateUpdate((payload) => {
         // デバイスが報告する led.mode は sphere/off/test/pixels。test の場合は
         // パターンまで判別できないので、ローカル選択を尊重して上書きしない。
+        // sphere + axis:true は XYZ (軸オーバーレイ) として表示する。
         const m = payload.led?.mode;
-        if (m === 'sphere' || m === 'off') setSel(m);
+        if (m === 'sphere') setSel(payload.led?.axis ? 'xyz' : 'sphere');
+        else if (m === 'off') setSel(m);
     });
 
     const select = (opt) => {

@@ -174,6 +174,14 @@ private:
     unsigned long _lastUpdate;     ///< 最終更新時刻 (ms)
     const unsigned long UPDATE_INTERVAL = 10; ///< 更新間隔 10ms = 100Hz
 
+    // 凍結検知ウォッチドッグ (BNO055 が電源瞬断等で融合停止しレジスタが
+    // 固まる事象への対策)。健全なセンサーはノイズで毎回値が揺らぐため、
+    // quat/gyro/accel が全てビット同一のまま長時間続いたら凍結と判定する。
+    float _wdPrev[10] = {0};       ///< 前回読み値 (quat4 + gyro3 + accel3)
+    unsigned long _wdLastChange = 0; ///< 最後に値が変化した時刻 (ms)
+    uint16_t _wdRecoveries = 0;    ///< 復旧試行回数
+    static constexpr unsigned long kFrozenTimeoutMs = 10000;
+
 #if defined(IMU_SENSOR_M5IMU)
     MadgwickAHRS _ahrs;            ///< ソフト姿勢推定フィルタ (6軸)
     unsigned long _lastMicros;     ///< 前回更新のマイクロ秒 (dt算出用)
