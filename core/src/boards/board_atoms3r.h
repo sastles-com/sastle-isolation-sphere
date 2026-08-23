@@ -43,6 +43,10 @@ constexpr uint16_t kMaxLeds = 800;
 constexpr uint8_t  kTargetFps = 30;
 constexpr uint32_t kFrameDelayMs = 1000 / kTargetFps;
 constexpr uint8_t  kLedDefaultBrightness = 128;  // デフォルト輝度 50%
+// 電源保護: FastLED のパワーリミット (5V 系の合計電流上限)。
+// 全LED白点灯のような高負荷フレームでも FastLED が輝度を自動スケールして
+// この上限内に収める。実測で電源容量が確定したら見直すこと。
+constexpr uint32_t kLedMaxPowerMa = 3000;
 
 // --- IMU (BNO055) I2C ---
 constexpr uint8_t kImuI2cSda = 2;  // Grove SDA

@@ -151,6 +151,8 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(_stripBuffers[4], _ledsPerStrip[4]);
 #endif
 
+    // 電源保護: 高負荷フレーム (全白など) でも合計電流を上限内に自動スケール。
+    FastLED.setMaxPowerInVoltsAndMilliamps(5, kLedMaxPowerMa);
     FastLED.setBrightness(kLedDefaultBrightness);
     FastLED.clear();
     FastLED.show();

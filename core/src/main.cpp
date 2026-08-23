@@ -132,6 +132,25 @@ void setup() {
     }
 
     sastle::Log.println("\n\n=== M5Atom S3R Network Test ===");
+
+    // 直前のリセット理由を記録 (勝手な再起動の原因切り分け用)
+    // 1=POWERON 3=SW 4=PANIC 5/6=WDT 7=TASK_WDT 9=BROWNOUT (esp_reset_reason_t)
+    {
+        esp_reset_reason_t rr = esp_reset_reason();
+        const char* rrName;
+        switch (rr) {
+            case ESP_RST_POWERON:  rrName = "POWERON"; break;
+            case ESP_RST_SW:       rrName = "SW_RESTART"; break;
+            case ESP_RST_PANIC:    rrName = "PANIC"; break;
+            case ESP_RST_INT_WDT:  rrName = "INT_WDT"; break;
+            case ESP_RST_TASK_WDT: rrName = "TASK_WDT"; break;
+            case ESP_RST_WDT:      rrName = "WDT"; break;
+            case ESP_RST_BROWNOUT: rrName = "BROWNOUT"; break;
+            case ESP_RST_DEEPSLEEP:rrName = "DEEPSLEEP"; break;
+            default:               rrName = "OTHER"; break;
+        }
+        sastle::Log.printf("[BOOT] Reset reason: %d (%s)\n", (int)rr, rrName);
+    }
     
     // PSRAM初期化確認
     if (psramFound()) {
