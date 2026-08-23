@@ -111,7 +111,7 @@ LEDの3D配置とストリップごとの配線順序（実FPC配線順）:
 
 ◆は各ストリップの`num0`（開始点）、✕は終点を示します。
 
-インタラクティブ版（回転・ズーム可能なplotlyグラフ）は [core/data/led_layout_3d.html](core/data/led_layout_3d.html) をローカルでブラウザで開いてください（GitHub上ではソース表示になります）。データ更新時は `core/data/plot_led_layout_3d.py` で再生成できます。
+**[インタラクティブ版を開く](https://sastles-com.github.io/sastle-isolation-sphere/led_layout_3d.html)**（回転・ズーム可能なplotlyグラフ / GitHub Pages）。ローカルでは [core/data/led_layout_3d.html](core/data/led_layout_3d.html) をブラウザで開いても同じです。データ更新時は `core/data/plot_led_layout_3d.py` で再生成し、`docs/led_layout_3d.html` にもコピーしてください。
 
 ## クイックスタート
 

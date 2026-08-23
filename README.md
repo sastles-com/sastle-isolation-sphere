@@ -111,7 +111,7 @@ isolation-sphere/
 
 ◆ marks each strip's `num0` (start point), ✕ marks the end point.
 
-For the interactive version (rotatable/zoomable plotly graph), open [core/data/led_layout_3d.html](core/data/led_layout_3d.html) locally in a browser (GitHub renders it as source only). Regenerate with `core/data/plot_led_layout_3d.py` after layout changes.
+**[Open the interactive version](https://sastles-com.github.io/sastle-isolation-sphere/led_layout_3d.html)** (rotatable/zoomable plotly graph, via GitHub Pages). Locally you can also open [core/data/led_layout_3d.html](core/data/led_layout_3d.html) in a browser. Regenerate with `core/data/plot_led_layout_3d.py` after layout changes and copy it to `docs/led_layout_3d.html` as well.
 
 ## Quick Start
 
