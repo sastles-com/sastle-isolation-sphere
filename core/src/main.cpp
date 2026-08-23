@@ -371,6 +371,24 @@ static void publishTimeSyncIfDue(unsigned long now) {
 }
 
 void loop() {
+    // --- 実効レート計装 (5秒ごとにMQTTログへ) ---
+    {
+        static uint32_t s_loops = 0, s_pReads = 0, s_pFails = 0, s_pDisc = 0;
+        static unsigned long s_lastRate = 0;
+        s_loops++;
+        unsigned long nowR = millis();
+        if (nowR - s_lastRate >= 5000) {
+            uint32_t rt = imuSensor.debugReadTotal(), rf = imuSensor.debugReadFails(),
+                     rd = imuSensor.debugDiscards();
+            float dt = (nowR - s_lastRate) * 0.001f;
+            sastle::Log.printf("[RATE] loop=%.0f/s imu_read=%.0f/s fail=%.0f/s disc=%.0f/s\n",
+                               s_loops / dt, (rt - s_pReads) / dt,
+                               (rf - s_pFails) / dt, (rd - s_pDisc) / dt);
+            s_loops = 0; s_pReads = rt; s_pFails = rf; s_pDisc = rd;
+            s_lastRate = nowR;
+        }
+    }
+
     // OTA 要求を最優先で処理。書き込みセッション中は handle() が転送完了まで
     // ブロックするため、描画・配信は自然に停止する (要件どおり)。
     ota.handle();

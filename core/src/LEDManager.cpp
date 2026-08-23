@@ -46,7 +46,7 @@ LEDManager::~LEDManager() {
     stopRenderTask();
     
     if (_ledBuffer) {
-        free(_ledBuffer);
+        // _ledBuffer は静的バッファのため free しない
         _ledBuffer = nullptr;
     }
     
@@ -62,22 +62,24 @@ LEDManager::~LEDManager() {
 }
 
 namespace {
-// earlyBlank 用の共有ゼロバッファ (1ストリップ分)。黒の送信専用なので
-// 全コントローラで同じバッファを指してよい。begin() で実バッファへ差し替える。
-CRGB s_blankBuf[sastle::kMaxLeds / sastle::kNumStrips];
+// LED実バッファ (静的確保, 2.4KB)。earlyBlank() がこのバッファで FastLED を
+// 登録し、begin() も同じバッファを使う。setLeds() による差し替えは FastLED の
+// ESP32 RMTドライバで効かないことがある (実機で全消灯のままになった) ため、
+// 「最初から実バッファで登録する」方式にする。
+CRGB s_ledBufferStatic[sastle::kMaxLeds];
 bool s_earlyBlanked = false;
 }  // namespace
 
 void LEDManager::earlyBlank() {
     if (s_earlyBlanked) return;
-    memset(s_blankBuf, 0, sizeof(s_blankBuf));
+    memset(s_ledBufferStatic, 0, sizeof(s_ledBufferStatic));
     constexpr int n = sastle::kMaxLeds / sastle::kNumStrips;
-    FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(s_blankBuf, n);
-    FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(s_blankBuf, n);
-    FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(s_blankBuf, n);
-    FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(s_blankBuf, n);
+    FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(s_ledBufferStatic + 0 * n, n);
+    FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(s_ledBufferStatic + 1 * n, n);
+    FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(s_ledBufferStatic + 2 * n, n);
+    FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(s_ledBufferStatic + 3 * n, n);
 #if BOARD_NUM_STRIPS >= 5
-    FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(s_blankBuf, n);
+    FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(s_ledBufferStatic + 4 * n, n);
 #endif
     FastLED.setBrightness(0);
     FastLED.show();
@@ -110,14 +112,13 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     
     Serial.printf("[LEDManager] Loaded %d LEDs from layout\n", _numLEDs);
     
-    // LEDバッファ確保 (SRAM)
-    _ledBuffer = (CRGB*)malloc(_numLEDs * sizeof(CRGB));
-    if (!_ledBuffer) {
-        Serial.println("[LEDManager] Failed to allocate LED buffer");
+    // LEDバッファは静的確保 (earlyBlank と共有。kMaxLeds を超えないこと)
+    if (_numLEDs > kMaxLeds) {
+        Serial.printf("[LEDManager] LED count %d exceeds kMaxLeds %d\n", _numLEDs, kMaxLeds);
         return false;
     }
-    
-    Serial.printf("[LEDManager] Allocated LED buffer: %d bytes\n", _numLEDs * sizeof(CRGB));
+    _ledBuffer = s_ledBufferStatic;
+    Serial.printf("[LEDManager] Using static LED buffer: %d bytes\n", _numLEDs * sizeof(CRGB));
 
     // IMU補正OFF時用に静的UV→ピクセル座標を事前計算 (毎フレームの三角関数を回避)
     precomputeStaticUV();
@@ -164,11 +165,15 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     }
     Serial.println();
 
-    // FastLED初期化。earlyBlank() 済みならコントローラのバッファを実バッファへ
-    // 差し替えるだけ (addLeds の二重登録を回避)。未実行なら従来どおり登録する。
+    // FastLED初期化。earlyBlank() 済みなら同一の静的バッファで登録済みのため
+    // 何もしない (均等160/本の前提のみ確認)。未実行なら従来どおり登録する。
     if (s_earlyBlanked) {
-        for (int i = 0; i < kNumStrips && i < (int)FastLED.count(); i++) {
-            FastLED[i].setLeds(_stripBuffers[i], _ledsPerStrip[i]);
+        constexpr uint16_t n = kMaxLeds / kNumStrips;
+        for (int i = 0; i < kNumStrips; i++) {
+            if (_ledsPerStrip[i] != n || _stripBuffers[i] != s_ledBufferStatic + i * n) {
+                Serial.printf("[LEDManager] WARN strip%d layout mismatch (count=%d)\n",
+                              i, _ledsPerStrip[i]);
+            }
         }
     } else {
         // ピンはコンパイル時定数が必須のため本数は #if で出し分ける。

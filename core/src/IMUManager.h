@@ -161,6 +161,11 @@ public:
      * @return true 初期化済み, false 未初期化
      */
     bool isInitialized() { return _initialized; }
+
+    // 計装用カウンタ (main の周期ログでレート計算に使う)
+    uint32_t debugReadTotal() const { return _wdReadTotal; }
+    uint32_t debugReadFails() const { return _wdReadFails; }
+    uint32_t debugDiscards()  const { return _wdDiscards; }
     
     /**
      * @brief センサー温度を取得
@@ -187,6 +192,7 @@ private:
     uint16_t _wdRecoveries = 0;    ///< 復旧試行回数
     uint32_t _wdDiscards = 0;      ///< 化けquat破棄の累計
     uint8_t _wdConsecDiscards = 0; ///< 連続破棄数 (再同期判定用)
+    portMUX_TYPE _quatMux = portMUX_INITIALIZER_UNLOCKED; ///< _quat のコア間排他
     uint32_t _wdReadFails = 0;     ///< I2C quat読み出し失敗の累計
     uint32_t _wdReadTotal = 0;     ///< I2C quat読み出し試行の累計
     static constexpr unsigned long kFrozenTimeoutMs = 10000;

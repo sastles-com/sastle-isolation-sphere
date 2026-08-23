@@ -31,8 +31,8 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     // I2C初期化（既に初期化されている場合はスキップ）
     // BNO055 は I2C クロックストレッチが長く、400kHz ではレジスタ読み出しが
     // 化ける (quat の w だけ動き x/y/z=0、ノルム≠1 の壊れた値を実機で確認)。
-    // 50kHz まで落とす (100kHzでも8バイトのquat読みは高頻度で失敗するため)。
-    if (!Wire.begin(sda, scl, 50000)) {
+    // 100kHz (エラー検出+リトライ付き直接読みがあるため、失敗は検出・再試行される)。
+    if (!Wire.begin(sda, scl, 100000)) {
         Serial.println("I2C bus initialization failed or already initialized");
     }
     delay(100);
@@ -135,24 +135,44 @@ bool IMUManager::update() {
                           (unsigned long)_wdReadFails, (unsigned long)_wdReadTotal);
         }
     }
-    // I2C化けガード1: 単位quaternionでない読み値は破棄して前回値を保持する
+    // I2C化けガード1: このBNO055個体はノルム0.96〜0.99のquatを常用するため、
+    // 「単位でない=破棄」にすると正常値の半分を捨ててしまう (実測 disc=loopの
+    // 半分〜全部でカクつきの主因になった)。妥当な範囲なら正規化して受理し、
+    // 明らかな化け (ノルムが大きく崩れている) だけ破棄する。
     const float n2 = (float)(q.w()*q.w() + q.x()*q.x() + q.y()*q.y() + q.z()*q.z());
-    bool ok = fabsf(n2 - 1.0f) < 0.05f;
+    bool ok = (n2 > 0.5f && n2 < 2.0f);
+    if (ok && fabsf(n2 - 1.0f) > 1e-4f) {
+        const float inv = 1.0f / sqrtf(n2);
+        q = imu::Quaternion(q.w() * inv, q.x() * inv, q.y() * inv, q.z() * inv);
+    }
     // I2C化けガード2 (連続性): 1サンプル(10ms)で25°超の姿勢ジャンプは物理的に
     // あり得ない (2500°/s)。ノルムが偶然1に近い化け値もこれで弾く。
     // q と -q は同じ回転なので |dot| で比較する。
     if (ok) {
         const float dot = fabsf((float)(q.w()*_quat.w() + q.x()*_quat.x() +
                                         q.y()*_quat.y() + q.z()*_quat.z()));
-        // cos(12.5°)≈0.976 (quatの半角なので姿勢25°に相当)。
-        // ただし連続10回(100ms)破棄が続いたら再同期として受け入れる
-        // (真に大きく動いた場合や初回に永久ロックしないため)。
-        if (dot < 0.976f && _wdConsecDiscards < 10) {
+        // 動的しきい値: 前回受理からの経過時間×角速度に余裕を掛けた角度まで許容。
+        // 固定25°だと「読み損ねの隙間+速い回転」で正常値を誤破棄し追従が止まる。
+        static unsigned long lastAcceptMs = 0;
+        float dts = (now - lastAcceptMs) * 0.001f;
+        if (dts < 0.01f) dts = 0.01f;
+        if (dts > 0.5f)  dts = 0.5f;
+        const float gyroMag = fabsf((float)_gyro.x()) + fabsf((float)_gyro.y()) +
+                              fabsf((float)_gyro.z());          // [rad/s]
+        const float maxAngle = 0.26f + gyroMag * dts * 1.5f;    // [rad] 基本15°+速度比例
+        const float dotClamped = dot > 1.0f ? 1.0f : dot;
+        const float ang = 2.0f * acosf(dotClamped);             // 姿勢差 [rad]
+        if (ang > maxAngle && _wdConsecDiscards < 10) {
             ok = false;
+        } else {
+            lastAcceptMs = now;
         }
     }
     if (ok) {
+        // renderタスク (core1) が読む最中の引き裂かれ (torn read) を防ぐ
+        taskENTER_CRITICAL(&_quatMux);
         _quat = q;
+        taskEXIT_CRITICAL(&_quatMux);
         _wdConsecDiscards = 0;
     } else {
         static unsigned long lastBadLog = 0;
@@ -164,9 +184,17 @@ bool IMUManager::update() {
                           n2, _wdDiscards);
         }
     }
-    _euler = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
-    _accel = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
-    _gyro = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    // I2C時間の節約: quat以外は間引いて読む (accel/gyro=2回に1回, euler=10回に1回)
+    static uint8_t subCycle = 0;
+    subCycle++;
+    if ((subCycle & 1) == 0) {
+        _accel = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
+        _gyro = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    }
+    if (subCycle >= 10) {
+        subCycle = 0;
+        _euler = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+    }
 
     // 融合停止ウォッチドッグ (電源瞬断で BNO055 の fusion が止まり、quat が
     // 姿勢に追従しなくなる事象への対策)。2秒ごとに SYS_STATUS を確認し、
@@ -363,11 +391,15 @@ bool IMUManager::getQuaternion(float& w, float& x, float& y, float& z) {
     // 回転の向きが逆 (実機テスト 2026-08-23: 生値では X/Y/Z 全軸で補正方向が逆)。
     // 完全共役 q → q* = (w,-x,-y,-z) で逆回転に変換する。
     // ここで変換することで LED描画・MQTT配信(ツイン)・ジェスチャすべてに
-    // 一括適用される。
-    w = _quat.w();
-    x = -_quat.x();
-    y = -_quat.y();
-    z = -_quat.z();
+    // 一括適用される。読み出しはコア間排他の下でコピーする (torn read防止)。
+    taskENTER_CRITICAL(&_quatMux);
+    const float qw = (float)_quat.w(), qx = (float)_quat.x(),
+                qy = (float)_quat.y(), qz = (float)_quat.z();
+    taskEXIT_CRITICAL(&_quatMux);
+    w = qw;
+    x = -qx;
+    y = -qy;
+    z = -qz;
 
     return true;
 }
