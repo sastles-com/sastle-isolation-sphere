@@ -336,6 +336,16 @@ bool CommandHandler::_handleLed(const char* payload) {
         handled = true;
     }
 
+    // IMU補正 (mode とは独立に切替可能)。OFF 時は静的LUTの高速パスになる。
+    if (doc.containsKey("imu_comp")) {
+        bool on = doc["imu_comp"].as<bool>();
+        if (_ledManager) {
+            _ledManager->setIMUCompensation(on);
+        }
+        Serial.printf("  → IMU compensation: %s\n", on ? "ON" : "OFF");
+        handled = true;
+    }
+
     return handled;
 }
 

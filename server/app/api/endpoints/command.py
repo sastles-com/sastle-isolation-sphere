@@ -38,6 +38,7 @@ class LEDCommand(BaseModel):
     axis: Optional[bool] = None  # XYZ軸インジケータ ON/OFF
     pattern: Optional[str] = None  # test モード時のパターン: "strip_id" | "chase"
     width: Optional[int] = None  # test:chase の連続点灯LED数
+    imu_comp: Optional[bool] = None  # IMU補正 ON/OFF (mode とは独立)
 
 @router.post("/command/playback")
 async def send_playback_command(command: PlaybackCommand, request: Request):
