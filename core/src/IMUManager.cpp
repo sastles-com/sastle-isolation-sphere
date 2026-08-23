@@ -31,8 +31,8 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     // I2C初期化（既に初期化されている場合はスキップ）
     // BNO055 は I2C クロックストレッチが長く、400kHz ではレジスタ読み出しが
     // 化ける (quat の w だけ動き x/y/z=0、ノルム≠1 の壊れた値を実機で確認)。
-    // 定石どおり 100kHz に落とす。
-    if (!Wire.begin(sda, scl, 100000)) {
+    // 50kHz まで落とす (100kHzでも8バイトのquat読みは高頻度で失敗するため)。
+    if (!Wire.begin(sda, scl, 50000)) {
         Serial.println("I2C bus initialization failed or already initialized");
     }
     delay(100);
@@ -67,16 +67,23 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     // 実機で cal=0300 + quat恒久(1,0,0,0) の症状を確認したため false に変更。
     _bno.setExtCrystalUse(false);
 
-    // 動作モードをNDOF（9軸融合）に設定
-    _bno.setMode(OPERATION_MODE_NDOF);
+    // 動作モードは IMUPLUS (加速度+ジャイロの6軸融合、磁気不使用)。
+    // NDOF (9軸) は磁気キャリブレーション未完了時にヨーが「動かない→90°ジャンプ」
+    // する上、本機はLED大電流・LiPoが磁気センサー近傍にあり磁気データが常に乱れる
+    // ため不採用。IMUPLUS はヨーがジャイロ積分で滑らか (ドリフトは SET ZERO で解消)。
+    // 注意: BNO055 は fusionモード間の直接切替を無視するため、必ず CONFIG を経由する
+    // (begin() が NDOF にするので、直接 IMUPLUS を書いても効かない)。
+    _bno.setMode(OPERATION_MODE_CONFIG);
+    delay(25);
+    _bno.setMode(OPERATION_MODE_IMUPLUS);
     delay(20);
 
-    // 診断: モード/システム状態を起動ログに残す
+    // 診断: モード/システム状態を起動ログに残す (mode=8 が IMUPLUS)
     {
         uint8_t sysStatus = 0, selfTest = 0, sysError = 0;
         _bno.getSystemStatus(&sysStatus, &selfTest, &sysError);
-        Serial.printf("[IMU] boot diag: sys_status=%u selftest=0x%X sys_error=%u\n",
-                      sysStatus, selfTest, sysError);
+        Serial.printf("[IMU] boot diag: mode=%d sys_status=%u selftest=0x%X sys_error=%u\n",
+                      (int)_bno.getMode(), sysStatus, selfTest, sysError);
     }
 
     _initialized = true;
@@ -100,17 +107,61 @@ bool IMUManager::update() {
 
     _lastUpdate = now;
 
-    // データ取得
-    imu::Quaternion q = _bno.getQuat();
-    // I2C化けガード: 単位quaternionでない読み値は破棄して前回値を保持する
+    // データ取得: Adafruit の getQuat() は I2C 失敗を無視して古いバッファを返す
+    // (実測: 回転中でも約8割のサンプルが停滞→たまに成功してジャンプ)。
+    // エラー検出付きの直接レジスタ読みに置き換え、失敗時は前回値を保持する。
+    imu::Quaternion q = _quat;  // 読めなければ前回値
+    {
+        bool readOk = false;
+        for (int attempt = 0; attempt < 2 && !readOk; attempt++) {
+            Wire.beginTransmission(0x28);
+            Wire.write(0x20);  // QUA_DATA_W_LSB
+            if (Wire.endTransmission(false) != 0) continue;   // repeated start
+            if (Wire.requestFrom(0x28, 8) != 8) continue;
+            uint8_t b[8];
+            for (int i = 0; i < 8; i++) b[i] = Wire.read();
+            const float s = 1.0f / 16384.0f;  // 2^14 LSB/unit
+            q = imu::Quaternion(
+                (int16_t)((b[1] << 8) | b[0]) * s,
+                (int16_t)((b[3] << 8) | b[2]) * s,
+                (int16_t)((b[5] << 8) | b[4]) * s,
+                (int16_t)((b[7] << 8) | b[6]) * s);
+            readOk = true;
+        }
+        if (!readOk) _wdReadFails++;
+        _wdReadTotal++;
+        if (_wdReadTotal % 1000 == 0) {
+            Serial.printf("[IMU] quat read stats: fails=%lu/%lu\n",
+                          (unsigned long)_wdReadFails, (unsigned long)_wdReadTotal);
+        }
+    }
+    // I2C化けガード1: 単位quaternionでない読み値は破棄して前回値を保持する
     const float n2 = (float)(q.w()*q.w() + q.x()*q.x() + q.y()*q.y() + q.z()*q.z());
-    if (fabsf(n2 - 1.0f) < 0.05f) {
+    bool ok = fabsf(n2 - 1.0f) < 0.05f;
+    // I2C化けガード2 (連続性): 1サンプル(10ms)で25°超の姿勢ジャンプは物理的に
+    // あり得ない (2500°/s)。ノルムが偶然1に近い化け値もこれで弾く。
+    // q と -q は同じ回転なので |dot| で比較する。
+    if (ok) {
+        const float dot = fabsf((float)(q.w()*_quat.w() + q.x()*_quat.x() +
+                                        q.y()*_quat.y() + q.z()*_quat.z()));
+        // cos(12.5°)≈0.976 (quatの半角なので姿勢25°に相当)。
+        // ただし連続10回(100ms)破棄が続いたら再同期として受け入れる
+        // (真に大きく動いた場合や初回に永久ロックしないため)。
+        if (dot < 0.976f && _wdConsecDiscards < 10) {
+            ok = false;
+        }
+    }
+    if (ok) {
         _quat = q;
+        _wdConsecDiscards = 0;
     } else {
         static unsigned long lastBadLog = 0;
+        _wdDiscards++;
+        _wdConsecDiscards++;
         if (now - lastBadLog > 5000) {
             lastBadLog = now;
-            Serial.printf("[IMU] Discarded corrupt quat (|q|^2=%.3f)\n", n2);
+            Serial.printf("[IMU] Discarded corrupt quat (|q|^2=%.3f, discards=%u)\n",
+                          n2, _wdDiscards);
         }
     }
     _euler = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
@@ -137,7 +188,7 @@ bool IMUManager::update() {
         _wdPrev[2] = (float)_quat.y(); _wdPrev[3] = (float)_quat.z();
 
         const bool fusionDead = (sysStatus != 5) || (gyroMag > 0.3f && dq < 0.001f);
-        if (fusionDead) {
+        if (fusionDead && false) {  // 調査中は自動復旧を無効化 (thrashing防止)
             _wdRecoveries++;
             Serial.printf("[IMU] Fusion dead (sys=%u err=%u gyro=%.2f dq=%.4f) — recover #%u\n",
                           sysStatus, sysError, gyroMag, dq, _wdRecoveries);
@@ -145,7 +196,7 @@ bool IMUManager::update() {
                 // まずモード入れ直し (軽量)
                 _bno.setMode(OPERATION_MODE_CONFIG);
                 delay(25);
-                _bno.setMode(OPERATION_MODE_NDOF);
+                _bno.setMode(OPERATION_MODE_IMUPLUS);
                 delay(20);
             } else {
                 // 3回に1回はフル再初期化 (リセット込み)
@@ -153,7 +204,10 @@ bool IMUManager::update() {
                 if (_bno.begin()) {
                     delay(50);
                     _bno.setExtCrystalUse(false);  // begin() と同じ設定 (外部水晶なし)
-                    _bno.setMode(OPERATION_MODE_NDOF);
+                    // begin() は NDOF にするため CONFIG 経由で IMUPLUS へ
+                    _bno.setMode(OPERATION_MODE_CONFIG);
+                    delay(25);
+                    _bno.setMode(OPERATION_MODE_IMUPLUS);
                     delay(20);
                 }
             }
@@ -296,12 +350,17 @@ bool IMUManager::getQuaternion(float& w, float& x, float& y, float& z) {
     if (!_initialized) {
         return false;
     }
-    
+
+    // センサー→LED座標系の変換: BNO055 の quaternion は本システムの規約と
+    // 回転の向きが逆 (実機テスト 2026-08-23: 生値では X/Y/Z 全軸で補正方向が逆)。
+    // 完全共役 q → q* = (w,-x,-y,-z) で逆回転に変換する。
+    // ここで変換することで LED描画・MQTT配信(ツイン)・ジェスチャすべてに
+    // 一括適用される。
     w = _quat.w();
-    x = _quat.x();
-    y = _quat.y();
-    z = _quat.z();
-    
+    x = -_quat.x();
+    y = -_quat.y();
+    z = -_quat.z();
+
     return true;
 }
 

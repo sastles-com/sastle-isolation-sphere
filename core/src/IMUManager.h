@@ -180,6 +180,10 @@ private:
     float _wdPrev[10] = {0};       ///< 前回読み値 (quat4 + gyro3 + accel3)
     unsigned long _wdLastChange = 0; ///< 最後に値が変化した時刻 (ms)
     uint16_t _wdRecoveries = 0;    ///< 復旧試行回数
+    uint32_t _wdDiscards = 0;      ///< 化けquat破棄の累計
+    uint8_t _wdConsecDiscards = 0; ///< 連続破棄数 (再同期判定用)
+    uint32_t _wdReadFails = 0;     ///< I2C quat読み出し失敗の累計
+    uint32_t _wdReadTotal = 0;     ///< I2C quat読み出し試行の累計
     static constexpr unsigned long kFrozenTimeoutMs = 10000;
 
 #if defined(IMU_SENSOR_M5IMU)

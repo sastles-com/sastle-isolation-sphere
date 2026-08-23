@@ -308,9 +308,11 @@ static void publishImuIfDue(unsigned long now) {
             imuSensor.getAccel(ax, ay, az);
             uint8_t cs, cg, ca, cm;
             imuSensor.getCalibration(cs, cg, ca, cm);
+            imu::Vector<3> eul = imuSensor.getEuler();
             sastle::Log.printf(
-                "[IMU] q=(%.3f,%.3f,%.3f,%.3f) gyro=(%.2f,%.2f,%.2f) acc=(%.1f,%.1f,%.1f) cal=%u%u%u%u\n",
-                w, x, y, z, gx, gy, gz, ax, ay, az, cs, cg, ca, cm);
+                "[IMU] q=(%.3f,%.3f,%.3f,%.3f) eul=(%.1f,%.1f,%.1f) gyro=(%.2f,%.2f,%.2f) acc=(%.1f,%.1f,%.1f) cal=%u%u%u%u\n",
+                w, x, y, z, (float)eul.x(), (float)eul.y(), (float)eul.z(),
+                gx, gy, gz, ax, ay, az, cs, cg, ca, cm);
         }
     }
 }

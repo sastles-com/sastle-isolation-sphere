@@ -151,6 +151,20 @@ class VideoStreamer:
         self.current_path = None
         self.current_video_id = None
         self.current_playlist_id = None
+        self._send_black_frame()
+
+    def _send_black_frame(self):
+        """停止時に黒フレームを1枚送る。デバイスは最後に受信したフレームを
+        表示し続けるため、これが無いと停止後も残像が出続ける。"""
+        try:
+            import cv2
+            import numpy as np
+            black = np.zeros((self._h, self._w, 3), np.uint8)
+            ok, jpeg = cv2.imencode(".jpg", black, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if ok:
+                self._send_frame(0xFFFFFFFF, jpeg.tobytes())
+        except Exception as e:  # 停止処理は失敗しても継続
+            logger.warning(f"black frame send failed: {e}")
 
     def _run(self, entries):
         """エントリ列を順次再生。各動画を最後まで送出し、末尾で self._loop なら先頭へ。"""

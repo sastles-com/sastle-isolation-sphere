@@ -60,6 +60,7 @@ class StateManager:
             },
             "led": {
                 "mode": "sphere",  # "sphere" | "pixels" | "off"
+                "axis": False,  # XYZ軸オーバーレイ
                 "pixels": []  # [{index: int, r: int, g: int, b: int}, ...]
             },
             "system": {
@@ -226,7 +227,11 @@ class StateManager:
         - {"mode": "off"}
         """
         logger.info(f"LED command received: {payload}")
-        
+
+        # 軸オーバーレイ (mode と独立に切替可能)。UIの XYZ 選択状態の同期に使う
+        if "axis" in payload:
+            self._state["led"]["axis"] = bool(payload["axis"])
+
         if "mode" in payload:
             mode = payload["mode"]
             

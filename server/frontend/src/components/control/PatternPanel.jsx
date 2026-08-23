@@ -30,8 +30,10 @@ export const PatternPanel = () => {
         // デバイスが報告する led.mode は sphere/off/test/pixels。test の場合は
         // パターンまで判別できないので、ローカル選択を尊重して上書きしない。
         // sphere + axis:true は XYZ (軸オーバーレイ) として表示する。
+        // axis が payload に無い (古いサーバー) 場合は選択を巻き戻さない。
         const m = payload.led?.mode;
-        if (m === 'sphere') setSel(payload.led?.axis ? 'xyz' : 'sphere');
+        const ax = payload.led?.axis;
+        if (m === 'sphere' && ax !== undefined) setSel(ax ? 'xyz' : 'sphere');
         else if (m === 'off') setSel(m);
     });
 
