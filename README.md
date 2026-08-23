@@ -103,6 +103,16 @@ isolation-sphere/
 └── README.md                # This file
 ```
 
+## LED Layout Graph
+
+3D positions of all 800 LEDs and the wiring order of each strip (actual FPC chain order):
+
+![LED layout preview](docs/images/led_layout_3d_preview.png)
+
+◆ marks each strip's `num0` (start point), ✕ marks the end point.
+
+For the interactive version (rotatable/zoomable plotly graph), open [core/data/led_layout_3d.html](core/data/led_layout_3d.html) locally in a browser (GitHub renders it as source only). Regenerate with `core/data/plot_led_layout_3d.py` after layout changes.
+
 ## Quick Start
 
 ### Requirements

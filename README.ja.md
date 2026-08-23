@@ -105,11 +105,13 @@ isolation-sphere/
 
 ## LED配置グラフ
 
-LEDの3D配置とストリップごとの配線順序は、インタラクティブなHTMLグラフで確認できます。
+LEDの3D配置とストリップごとの配線順序（実FPC配線順）:
 
-[LED配置の3Dグラフを開く](core/data/led_layout_3d.html)
+![LED配置プレビュー](docs/images/led_layout_3d_preview.png)
 
-◆は各ストリップの`num0`（開始点）、❌は終点を示します。
+◆は各ストリップの`num0`（開始点）、✕は終点を示します。
+
+インタラクティブ版（回転・ズーム可能なplotlyグラフ）は [core/data/led_layout_3d.html](core/data/led_layout_3d.html) をローカルでブラウザで開いてください（GitHub上ではソース表示になります）。データ更新時は `core/data/plot_led_layout_3d.py` で再生成できます。
 
 ## クイックスタート
 
