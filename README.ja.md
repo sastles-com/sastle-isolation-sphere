@@ -7,6 +7,8 @@
 ![Project Status](https://img.shields.io/badge/status-active-success.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32--S3%20%7C%20Ubuntu-blue.svg)
 
+[![Isolation Sphere デモ動画](https://img.youtube.com/vi/xlg76uM-GLs/maxresdefault.jpg)](https://youtu.be/xlg76uM-GLs)
+
 ## 概要
 
 Isolation Sphereは、M5Atom S3Rをベースとした球体型LEDディスプレイと、Ubuntu MiniPC/Raspberry Piで動作する制御サーバーで構成される統合システムです。リアルタイム映像表示、IMUによる姿勢補正、WebUIおよび物理ジョイスティックによる制御を実現します。
@@ -437,6 +439,10 @@ npm test
 - [Eclipse Mosquitto](https://mosquitto.org/)
 - [MQTT Protocol](https://mqtt.org/)
 - [React Three Fiber](https://docs.pmnd.rs/react-three-fiber/)
+
+## デモ動画
+
+[![Isolation Sphere デモ動画](https://img.youtube.com/vi/fm8s0EFCG08/maxresdefault.jpg)](https://youtu.be/fm8s0EFCG08)
 
 ---
 

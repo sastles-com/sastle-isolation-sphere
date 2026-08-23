@@ -7,6 +7,8 @@
 ![Project Status](https://img.shields.io/badge/status-active-success.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32--S3%20%7C%20Ubuntu-blue.svg)
 
+[![Isolation Sphere Demo](https://img.youtube.com/vi/xlg76uM-GLs/maxresdefault.jpg)](https://youtu.be/xlg76uM-GLs)
+
 ## Overview
 
 Isolation Sphere is an integrated system consisting of a spherical LED display based on the M5Atom S3R and a control server running on an Ubuntu MiniPC / Raspberry Pi. It provides real-time video display, IMU-based orientation compensation, and control via a WebUI and a physical joystick.
@@ -429,6 +431,10 @@ For the license of this project, please contact the project owner.
 - [Eclipse Mosquitto](https://mosquitto.org/)
 - [MQTT Protocol](https://mqtt.org/)
 - [React Three Fiber](https://docs.pmnd.rs/react-three-fiber/)
+
+## Demo Video
+
+[![Isolation Sphere Demo](https://img.youtube.com/vi/fm8s0EFCG08/maxresdefault.jpg)](https://youtu.be/fm8s0EFCG08)
 
 ---
 
