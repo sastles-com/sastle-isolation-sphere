@@ -109,6 +109,11 @@ static void scanI2cBus(uint8_t sda, uint8_t scl) {
 }
 
 void setup() {
+    // 最優先: LED即時消灯。WS2812は起動中のデータ線ノイズでランダム点灯
+    // (白=フル電流もあり得る) し、電源が引き倒されて起動に失敗する事象があるため、
+    // 何よりも先に全ストリップへ黒を送信する。
+    LEDManager::earlyBlank();
+
     // シリアル初期化
     Serial.begin(115200);
 
@@ -310,9 +315,9 @@ static void publishImuIfDue(unsigned long now) {
             imuSensor.getCalibration(cs, cg, ca, cm);
             imu::Vector<3> eul = imuSensor.getEuler();
             sastle::Log.printf(
-                "[IMU] q=(%.3f,%.3f,%.3f,%.3f) eul=(%.1f,%.1f,%.1f) gyro=(%.2f,%.2f,%.2f) acc=(%.1f,%.1f,%.1f) cal=%u%u%u%u\n",
+                "[IMU] q=(%.3f,%.3f,%.3f,%.3f) eul=(%.1f,%.1f,%.1f) gyro=(%.2f,%.2f,%.2f) acc=(%.1f,%.1f,%.1f) cal=%u%u%u%u mode=%u\n",
                 w, x, y, z, (float)eul.x(), (float)eul.y(), (float)eul.z(),
-                gx, gy, gz, ax, ay, az, cs, cg, ca, cm);
+                gx, gy, gz, ax, ay, az, cs, cg, ca, cm, imuSensor.getOperationMode());
         }
     }
 }

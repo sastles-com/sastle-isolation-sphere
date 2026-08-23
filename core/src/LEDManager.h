@@ -66,6 +66,17 @@ public:
      * @param imuManager IMUマネージャー（姿勢補正用、nullptrで無効化）
      * @return 初期化成功時true
      */
+    /**
+     * @brief 起動直後の即時消灯。setup() の最初に呼ぶこと。
+     *
+     * WS2812 はデータ線がフロートする起動中にノイズを拾いランダム点灯
+     * (白=フル電流もあり得る) し、begin() が走るのは WiFi 初期化後で数秒かかる。
+     * その間の電流で電源が落ちる事象があるため、ゼロバッファで FastLED を
+     * 即初期化して黒を送信する。begin() はコントローラのバッファを実バッファへ
+     * 差し替えるだけにする (addLeds の二重登録を回避)。
+     */
+    static void earlyBlank();
+
     bool begin(ConfigManager& config, ImageManager& imageManager, IMUManager* imuManager = nullptr);
     
     /**

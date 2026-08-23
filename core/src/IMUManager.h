@@ -145,6 +145,11 @@ public:
      * @param mag 磁気計キャリブレーション値 (0-3) (出力)
      */
     void getCalibration(uint8_t& sys, uint8_t& gyro, uint8_t& accel, uint8_t& mag);
+
+    /**
+     * @brief 現在の動作モードレジスタ値 (BNO055: 8=IMUPLUS, 12=NDOF / M5IMU: 255)
+     */
+    uint8_t getOperationMode();
     
     /**
      * @brief IMUステータスを表示

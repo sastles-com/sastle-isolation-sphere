@@ -61,6 +61,29 @@ LEDManager::~LEDManager() {
     _instance = nullptr;
 }
 
+namespace {
+// earlyBlank 用の共有ゼロバッファ (1ストリップ分)。黒の送信専用なので
+// 全コントローラで同じバッファを指してよい。begin() で実バッファへ差し替える。
+CRGB s_blankBuf[sastle::kMaxLeds / sastle::kNumStrips];
+bool s_earlyBlanked = false;
+}  // namespace
+
+void LEDManager::earlyBlank() {
+    if (s_earlyBlanked) return;
+    memset(s_blankBuf, 0, sizeof(s_blankBuf));
+    constexpr int n = sastle::kMaxLeds / sastle::kNumStrips;
+    FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(s_blankBuf, n);
+    FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(s_blankBuf, n);
+    FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(s_blankBuf, n);
+    FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(s_blankBuf, n);
+#if BOARD_NUM_STRIPS >= 5
+    FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(s_blankBuf, n);
+#endif
+    FastLED.setBrightness(0);
+    FastLED.show();
+    s_earlyBlanked = true;
+}
+
 bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUManager* imuManager) {
     Serial.println("[LEDManager] Initializing...");
     
@@ -141,15 +164,22 @@ bool LEDManager::begin(ConfigManager& config, ImageManager& imageManager, IMUMan
     }
     Serial.println();
 
-    // FastLED初期化 (RMT DMA自動使用)。各ストリップは独立RMTチャンネルで並列出力。
-    // ピンはコンパイル時定数が必須のため本数は #if で出し分ける。
-    FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(_stripBuffers[0], _ledsPerStrip[0]);
-    FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(_stripBuffers[1], _ledsPerStrip[1]);
-    FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(_stripBuffers[2], _ledsPerStrip[2]);
-    FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(_stripBuffers[3], _ledsPerStrip[3]);
+    // FastLED初期化。earlyBlank() 済みならコントローラのバッファを実バッファへ
+    // 差し替えるだけ (addLeds の二重登録を回避)。未実行なら従来どおり登録する。
+    if (s_earlyBlanked) {
+        for (int i = 0; i < kNumStrips && i < (int)FastLED.count(); i++) {
+            FastLED[i].setLeds(_stripBuffers[i], _ledsPerStrip[i]);
+        }
+    } else {
+        // ピンはコンパイル時定数が必須のため本数は #if で出し分ける。
+        FastLED.addLeds<LED_TYPE, kLedPin0, COLOR_ORDER>(_stripBuffers[0], _ledsPerStrip[0]);
+        FastLED.addLeds<LED_TYPE, kLedPin1, COLOR_ORDER>(_stripBuffers[1], _ledsPerStrip[1]);
+        FastLED.addLeds<LED_TYPE, kLedPin2, COLOR_ORDER>(_stripBuffers[2], _ledsPerStrip[2]);
+        FastLED.addLeds<LED_TYPE, kLedPin3, COLOR_ORDER>(_stripBuffers[3], _ledsPerStrip[3]);
 #if BOARD_NUM_STRIPS >= 5
-    FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(_stripBuffers[4], _ledsPerStrip[4]);
+        FastLED.addLeds<LED_TYPE, kLedPin4, COLOR_ORDER>(_stripBuffers[4], _ledsPerStrip[4]);
 #endif
+    }
 
     // 電源保護: 高負荷フレーム (全白など) でも合計電流を上限内に自動スケール。
     FastLED.setMaxPowerInVoltsAndMilliamps(5, kLedMaxPowerMa);
@@ -650,7 +680,8 @@ void LEDManager::show() {
 
 // --- オープニングパターン用パラメータ ---
 namespace {
-constexpr uint8_t  kOpeningBrightness = 80;     // 起動演出の輝度 (全白回避のため控えめ)
+constexpr uint8_t  kOpeningBrightness = 76;     // 起動演出の輝度 30% (起動時の電流スパイクで
+                                                // 電源が落ちる事象があるため控えめに)
 constexpr float    kDotSigma          = 0.13f;  // 光点の角半径(rad) ≒ 7-8° (数ピクセル相当)
 constexpr float    kSpinTurns         = 1.5f;   // 降下中に軸まわりに回る回数
 constexpr uint8_t  kDotColors[3][3]   = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}};  // R/G/B

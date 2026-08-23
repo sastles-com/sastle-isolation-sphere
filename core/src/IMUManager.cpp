@@ -342,6 +342,14 @@ void IMUManager::calibrateGyroBias() {
 }
 #endif
 
+uint8_t IMUManager::getOperationMode() {
+#if !defined(IMU_SENSOR_M5IMU)
+    return _initialized ? (uint8_t)_bno.getMode() : 0xFE;
+#else
+    return 0xFF;
+#endif
+}
+
 imu::Quaternion IMUManager::getQuaternion() {
     return _quat;
 }
