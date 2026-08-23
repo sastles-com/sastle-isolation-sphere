@@ -300,10 +300,17 @@ static void publishImuIfDue(unsigned long now) {
                  w, x, y, z);
         mqtt.publishDevice("imu", payload, false);
 
-        // 3秒に1回だけシリアルログ出力
+        // 3秒に1回だけシリアルログ出力 (診断用に gyro/accel/キャリブ状態も出す)
         if (now - lastIMULog >= IMU_LOG_INTERVAL) {
             lastIMULog = now;
-            sastle::Log.printf("[IMU] Quaternion: w=%.3f x=%.3f y=%.3f z=%.3f\n", w, x, y, z);
+            float gx, gy, gz, ax, ay, az;
+            imuSensor.getGyro(gx, gy, gz);
+            imuSensor.getAccel(ax, ay, az);
+            uint8_t cs, cg, ca, cm;
+            imuSensor.getCalibration(cs, cg, ca, cm);
+            sastle::Log.printf(
+                "[IMU] q=(%.3f,%.3f,%.3f,%.3f) gyro=(%.2f,%.2f,%.2f) acc=(%.1f,%.1f,%.1f) cal=%u%u%u%u\n",
+                w, x, y, z, gx, gy, gz, ax, ay, az, cs, cg, ca, cm);
         }
     }
 }

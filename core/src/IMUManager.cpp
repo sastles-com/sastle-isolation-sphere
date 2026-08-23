@@ -29,7 +29,10 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     Serial.println("\n=== IMU Manager Initialization (BNO055) ===");
 
     // I2C初期化（既に初期化されている場合はスキップ）
-    if (!Wire.begin(sda, scl, 400000)) {  // 400kHzで初期化
+    // BNO055 は I2C クロックストレッチが長く、400kHz ではレジスタ読み出しが
+    // 化ける (quat の w だけ動き x/y/z=0、ノルム≠1 の壊れた値を実機で確認)。
+    // 定石どおり 100kHz に落とす。
+    if (!Wire.begin(sda, scl, 100000)) {
         Serial.println("I2C bus initialization failed or already initialized");
     }
     delay(100);
@@ -58,12 +61,23 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
 
     delay(100);
 
-    // クリスタルを使用（より高精度）
-    _bno.setExtCrystalUse(true);
+    // 外部クリスタルは使用しない。
+    // 注意: 外部水晶が実装されていないボードで true にすると、生センサー値
+    // (gyro/accel) は読めるのに fusion 出力 (quat) が単位のまま固まる。
+    // 実機で cal=0300 + quat恒久(1,0,0,0) の症状を確認したため false に変更。
+    _bno.setExtCrystalUse(false);
 
     // 動作モードをNDOF（9軸融合）に設定
     _bno.setMode(OPERATION_MODE_NDOF);
     delay(20);
+
+    // 診断: モード/システム状態を起動ログに残す
+    {
+        uint8_t sysStatus = 0, selfTest = 0, sysError = 0;
+        _bno.getSystemStatus(&sysStatus, &selfTest, &sysError);
+        Serial.printf("[IMU] boot diag: sys_status=%u selftest=0x%X sys_error=%u\n",
+                      sysStatus, selfTest, sysError);
+    }
 
     _initialized = true;
     Serial.println("BNO055 initialized successfully!");
@@ -87,7 +101,18 @@ bool IMUManager::update() {
     _lastUpdate = now;
 
     // データ取得
-    _quat = _bno.getQuat();
+    imu::Quaternion q = _bno.getQuat();
+    // I2C化けガード: 単位quaternionでない読み値は破棄して前回値を保持する
+    const float n2 = (float)(q.w()*q.w() + q.x()*q.x() + q.y()*q.y() + q.z()*q.z());
+    if (fabsf(n2 - 1.0f) < 0.05f) {
+        _quat = q;
+    } else {
+        static unsigned long lastBadLog = 0;
+        if (now - lastBadLog > 5000) {
+            lastBadLog = now;
+            Serial.printf("[IMU] Discarded corrupt quat (|q|^2=%.3f)\n", n2);
+        }
+    }
     _euler = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
     _accel = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
     _gyro = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
@@ -127,7 +152,7 @@ bool IMUManager::update() {
                 Serial.println("[IMU] Mode cycle insufficient — full re-begin");
                 if (_bno.begin()) {
                     delay(50);
-                    _bno.setExtCrystalUse(true);
+                    _bno.setExtCrystalUse(false);  // begin() と同じ設定 (外部水晶なし)
                     _bno.setMode(OPERATION_MODE_NDOF);
                     delay(20);
                 }
