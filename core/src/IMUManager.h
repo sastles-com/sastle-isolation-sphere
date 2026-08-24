@@ -113,16 +113,17 @@ public:
     
     /**
      * @brief ジャイロデータを取得
-     * @return ジャイロベクトル (x, y, z) [rad/s]
+     * @return ジャイロベクトル (x, y, z) [deg/s]
      */
     imu::Vector<3> getGyro();
     
     /**
      * @brief ジャイロデータを個別変数で取得
-     * @param x X軸角速度 [rad/s] (出力)
-     * @param y Y軸角速度 [rad/s] (出力)
-     * @param z Z軸角速度 [rad/s] (出力)
+     * @param x X軸角速度 [deg/s] (出力)
+     * @param y Y軸角速度 [deg/s] (出力)
+     * @param z Z軸角速度 [deg/s] (出力)
      * @return true 取得成功, false 取得失敗
+     * @note BNO055 / M5IMU いずれの実装も deg/s で格納している。
      */
     bool getGyro(float& x, float& y, float& z);
     
@@ -162,10 +163,34 @@ public:
      */
     bool isInitialized() { return _initialized; }
 
+    /**
+     * @brief 専用タスクで IMU をポーリングする (推奨)
+     *
+     * Arduino の loop() から update() を呼ぶ方式では、同じ core1 で動く
+     * LED レンダリングタスク (優先度2) に押されて実効 43Hz まで落ち、かつ
+     * サンプル間隔が 1ms〜22ms とばらついていた。描画は毎フレーム「最新の」
+     * quat を読むため、間隔のばらつきがそのまま「同じ姿勢を保持 → 突然2ステップ
+     * 分ジャンプ」というカクつきになる。専用タスク + vTaskDelayUntil で
+     * 位相ゆらぎのない固定周期にすることが滑らかさの本質的な条件。
+     *
+     * @param core     実行コア (LEDレンダリングと分けるため 0 を推奨)
+     * @param priority 優先度 (デコードタスク=1 より高い 3 を推奨)
+     * @param stackSize スタックサイズ [byte]
+     * @return true 起動成功
+     */
+    bool startTask(uint8_t core = 0, uint8_t priority = 3, uint32_t stackSize = 4096);
+
+    /**
+     * @brief 専用タスクが動作中か (loop からの update() を抑止する判定に使う)
+     */
+    bool isTaskRunning() const { return _taskRunning; }
+
     // 計装用カウンタ (main の周期ログでレート計算に使う)
     uint32_t debugReadTotal() const { return _wdReadTotal; }
     uint32_t debugReadFails() const { return _wdReadFails; }
     uint32_t debugDiscards()  const { return _wdDiscards; }
+    /// 受理された姿勢更新の通番。描画側が「前回と同じ姿勢か」を判定できる。
+    uint32_t quatSeq() const { return _quatSeq; }
     
     /**
      * @brief センサー温度を取得
@@ -179,7 +204,7 @@ private:
     imu::Quaternion _quat;         ///< 最新クォータニオン
     imu::Vector<3> _euler;         ///< 最新オイラー角 (x=heading, y=roll, z=pitch)
     imu::Vector<3> _accel;         ///< 最新加速度 [m/s²]
-    imu::Vector<3> _gyro;          ///< 最新ジャイロ [rad/s]
+    imu::Vector<3> _gyro;          ///< 最新ジャイロ [deg/s]
 
     unsigned long _lastUpdate;     ///< 最終更新時刻 (ms)
     const unsigned long UPDATE_INTERVAL = 10; ///< 更新間隔 10ms = 100Hz
@@ -195,6 +220,11 @@ private:
     portMUX_TYPE _quatMux = portMUX_INITIALIZER_UNLOCKED; ///< _quat のコア間排他
     uint32_t _wdReadFails = 0;     ///< I2C quat読み出し失敗の累計
     uint32_t _wdReadTotal = 0;     ///< I2C quat読み出し試行の累計
+    volatile uint32_t _quatSeq = 0;///< 姿勢を受理するたびに +1 (描画側の鮮度判定用)
+    TaskHandle_t _taskHandle = nullptr; ///< 専用ポーリングタスク
+    volatile bool _taskRunning = false;
+    static void taskFunction(void* parameter); ///< 固定周期ポーリングループ
+    bool _updateOnce();            ///< 時間ゲートなしの1回分の取得 (タスクから呼ぶ)
     static constexpr unsigned long kFrozenTimeoutMs = 10000;
 
 #if defined(IMU_SENSOR_M5IMU)

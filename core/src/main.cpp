@@ -283,6 +283,18 @@ void setup() {
         imageManager.startDecodeTask(0, 1, 8192);
     }
 
+    // IMUポーリングを専用タスク (Core0, 優先度3) に移す。
+    // loop() から呼んでいた頃は core1 のレンダリングタスク (優先度2) に押されて
+    // 実効 43Hz・間隔 1〜22ms のばらつきになり、描画が同じ姿勢を数フレーム
+    // 使い回してから2ステップ分ジャンプする「カクつき」の主因になっていた。
+    // デコードタスク (優先度1) より高い優先度にして、1周期あたり ~2ms の I2C
+    // アクセスを確実に定刻で実行させる。
+    if (imuSensor.isInitialized()) {
+        if (!imuSensor.startTask(0, 3, 4096)) {
+            sastle::Log.println("Failed to start IMU task (fallback: loop polling)");
+        }
+    }
+
     // OTA (espota) 初期化: WiFi 接続済みなので無線書き込みを受け付ける。
     // OTA 開始時はレンダリングタスクを停止する (要件: 更新中は描画停止で可)。
     ota.begin(&ledManager);
@@ -345,9 +357,20 @@ static void publishPerfStatsIfDue(unsigned long now) {
 
     LEDStats led = ledManager.getStats();
     ImageStats img = imageManager.getStats();
+
+    // 姿勢の鮮度: 「前フレームと同じ姿勢で描いたフレーム」の割合。
+    // これが高いほど IMU のレートが描画に追いついていない = カクつく。
+    static uint32_t sPrevRendered = 0, sPrevStale = 0;
+    const uint32_t dRendered = led.frames_rendered - sPrevRendered;
+    const uint32_t dStale = led.imu_stale_frames - sPrevStale;
+    sPrevRendered = led.frames_rendered;
+    sPrevStale = led.imu_stale_frames;
+    const float stalePct = dRendered ? (100.0f * dStale / dRendered) : 0.0f;
+
     sastle::Log.printf(
-        "[PERF] render_fps=%.1f map=%luus out=%luus | img_fps=%.1f decode=%luus jpeg=%uB recv=%lu hits=%lu drop=%lu | heap=%u\n",
+        "[PERF] render_fps=%.1f map=%luus out=%luus stale=%.0f%% | img_fps=%.1f decode=%luus jpeg=%uB recv=%lu hits=%lu drop=%lu | heap=%u\n",
         led.fps, (unsigned long)led.mapping_time_us, (unsigned long)led.output_time_us,
+        stalePct,
         img.fps, (unsigned long)img.decode_time_us, (unsigned)img.last_jpeg_size,
         (unsigned long)img.frames_received, (unsigned long)imageManager.getParseHits(),
         (unsigned long)imageManager.getDropped(), (unsigned)ESP.getFreeHeap());
@@ -435,12 +458,13 @@ void loop() {
         }
     }
 
-    // IMU更新
+    // IMU更新。専用タスク (Core0/100Hz) が動いている場合 update() は即 return する
+    // ので、ここでの呼び出しはタスク起動に失敗したときのフォールバックになる。
     unsigned long now = millis();
     if (imuSensor.isInitialized()) {
         imuSensor.update();
 
-        // ジェスチャー検出更新
+        // ジェスチャー検出更新 (I2Cは触らずキャッシュ済みeulerを読むだけ)
         gesture.update();
 
         publishImuIfDue(now);

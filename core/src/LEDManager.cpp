@@ -481,6 +481,14 @@ void LEDManager::updateLEDBuffer() {
         if (_imuManager->getQuaternion(qw, qx, qy, qz)) {
             qx = -qx; qy = -qy; qz = -qz;
             useIMU = true;
+            // 姿勢の鮮度を計測する。描画が前フレームと同じ姿勢を使い回した回数を
+            // 数えると、「IMUが遅い」のか「描画が速すぎて姿勢が追いつかない」のか
+            // を切り分けられる。stale が多い = IMU側のレート不足。
+            const uint32_t seq = _imuManager->quatSeq();
+            if (seq == _lastQuatSeq) {
+                _stats.imu_stale_frames++;
+            }
+            _lastQuatSeq = seq;
         }
     }
 

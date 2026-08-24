@@ -99,12 +99,62 @@ bool IMUManager::update() {
     if (!_initialized) {
         return false;
     }
+    // 専用タスク稼働中は I2C の二重アクセスになるため loop からの呼び出しは無視。
+    if (_taskRunning) {
+        return true;
+    }
 
     unsigned long now = millis();
     if (now - _lastUpdate < UPDATE_INTERVAL) {
         return true; // まだ更新タイミングではない
     }
 
+    _lastUpdate = now;
+    return _updateOnce();
+}
+
+void IMUManager::taskFunction(void* parameter) {
+    IMUManager* self = static_cast<IMUManager*>(parameter);
+    Serial.printf("[IMU_Task] Started on core %d (%lu Hz)\n",
+                  xPortGetCoreID(), 1000UL / self->UPDATE_INTERVAL);
+
+    // vTaskDelayUntil で「前回起床時刻 + 10ms」に固定する。vTaskDelay(10) だと
+    // 処理時間ぶん周期が伸びて位相がずれていくため、姿勢サンプル間隔を一定に
+    // 保つにはこちらが必須。
+    TickType_t lastWake = xTaskGetTickCount();
+    const TickType_t period = pdMS_TO_TICKS(self->UPDATE_INTERVAL);
+    while (true) {
+        self->_updateOnce();
+        vTaskDelayUntil(&lastWake, period);
+    }
+}
+
+bool IMUManager::startTask(uint8_t core, uint8_t priority, uint32_t stackSize) {
+    if (!_initialized) {
+        Serial.println("[IMU_Task] Not initialized");
+        return false;
+    }
+    if (_taskRunning) {
+        return true;
+    }
+    // 先に立ててから生成する: タスクが動き出した直後に loop 側の update() が
+    // 割り込んで I2C を触るのを防ぐ。
+    _taskRunning = true;
+    if (xTaskCreatePinnedToCore(taskFunction, "IMU_Poll", stackSize, this,
+                                priority, &_taskHandle, core) != pdPASS) {
+        _taskRunning = false;
+        _taskHandle = nullptr;
+        Serial.println("[IMU_Task] Failed to create task");
+        return false;
+    }
+    return true;
+}
+
+bool IMUManager::_updateOnce() {
+    if (!_initialized) {
+        return false;
+    }
+    const unsigned long now = millis();
     _lastUpdate = now;
 
     // データ取得: Adafruit の getQuat() は I2C 失敗を無視して古いバッファを返す
@@ -130,10 +180,8 @@ bool IMUManager::update() {
         }
         if (!readOk) _wdReadFails++;
         _wdReadTotal++;
-        if (_wdReadTotal % 1000 == 0) {
-            Serial.printf("[IMU] quat read stats: fails=%lu/%lu\n",
-                          (unsigned long)_wdReadFails, (unsigned long)_wdReadTotal);
-        }
+        // 統計は main の [RATE] ログが debugReadTotal()/debugReadFails() から
+        // 算出するので、ここでは出力しない (100Hz タスク内の Serial は禁物)。
     }
     // I2C化けガード1: このBNO055個体はノルム0.96〜0.99のquatを常用するため、
     // 「単位でない=破棄」にすると正常値の半分を捨ててしまう (実測 disc=loopの
@@ -157,8 +205,14 @@ bool IMUManager::update() {
         float dts = (now - lastAcceptMs) * 0.001f;
         if (dts < 0.01f) dts = 0.01f;
         if (dts > 0.5f)  dts = 0.5f;
+        // 注意: BNO055 の VECTOR_GYROSCOPE は deg/s を返す (ヘッダのコメントは
+        // rad/s と書いてあるが誤り)。つまり下の maxAngle は意図の約57倍ゆるい。
+        // これは意図して維持している: 以前ここを厳密にしていたため「読み損ねの
+        // 隙間 + 速い回転」で正常値を大量に誤破棄し (disc が imu_read の半分)、
+        // 追従が止まる主因になっていた。ガードは「明らかな化け値だけ弾く」緩い
+        // 網として使い、精度は上流 (I2C 100kHz + エラー検出付き直接読み) で担保する。
         const float gyroMag = fabsf((float)_gyro.x()) + fabsf((float)_gyro.y()) +
-                              fabsf((float)_gyro.z());          // [rad/s]
+                              fabsf((float)_gyro.z());          // [deg/s]
         const float maxAngle = 0.26f + gyroMag * dts * 1.5f;    // [rad] 基本15°+速度比例
         const float dotClamped = dot > 1.0f ? 1.0f : dot;
         const float ang = 2.0f * acosf(dotClamped);             // 姿勢差 [rad]
@@ -172,6 +226,7 @@ bool IMUManager::update() {
         // renderタスク (core1) が読む最中の引き裂かれ (torn read) を防ぐ
         taskENTER_CRITICAL(&_quatMux);
         _quat = q;
+        _quatSeq++;
         taskEXIT_CRITICAL(&_quatMux);
         _wdConsecDiscards = 0;
     } else {
@@ -404,19 +459,29 @@ bool IMUManager::getQuaternion(float& w, float& x, float& y, float& z) {
     return true;
 }
 
+// _euler は IMU タスク (core0) が書き、GestureManager は loop (core1) から読む。
+// imu::Vector<3> は double×3 = 24byte でアトミックに読めないため、ジェスチャー
+// 判定が引き裂かれた値 (別サンプルの成分の混合) を見ないよう排他する。
 imu::Vector<3> IMUManager::getEuler() {
-    return _euler;
+    taskENTER_CRITICAL(&_quatMux);
+    const imu::Vector<3> e = _euler;
+    taskEXIT_CRITICAL(&_quatMux);
+    return e;
 }
 
 bool IMUManager::getEuler(float& heading, float& roll, float& pitch) {
     if (!_initialized) {
         return false;
     }
-    
-    heading = _euler.x();
-    roll = _euler.y();
-    pitch = _euler.z();
-    
+
+    taskENTER_CRITICAL(&_quatMux);
+    const float h = (float)_euler.x(), r = (float)_euler.y(), p = (float)_euler.z();
+    taskEXIT_CRITICAL(&_quatMux);
+
+    heading = h;
+    roll = r;
+    pitch = p;
+
     return true;
 }
 

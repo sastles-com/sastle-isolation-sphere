@@ -42,6 +42,7 @@ struct LEDStats {
     uint32_t render_time_us;     ///< 最後のレンダリング時間 (μs)
     uint32_t mapping_time_us;    ///< 座標マッピング時間 (μs)
     uint32_t output_time_us;     ///< LED出力時間 (μs)
+    uint32_t imu_stale_frames;   ///< 前フレームと同じ姿勢で描いたフレーム数の累計
 };
 
 /**
@@ -380,6 +381,7 @@ private:
     LEDStats _stats;                 ///< 統計情報
     unsigned long _lastFPSUpdate;    ///< 最後のFPS更新時刻
     uint32_t _frameCount;            ///< フレームカウント
+    uint32_t _lastQuatSeq = 0;       ///< 前フレームで使った姿勢の通番 (鮮度計測用)
     
     static LEDManager* _instance;    ///< 静的インスタンスポインタ (コールバック用)
 };
