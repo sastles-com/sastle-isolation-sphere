@@ -367,6 +367,14 @@ static void publishPerfStatsIfDue(unsigned long now) {
     sPrevStale = led.imu_stale_frames;
     const float stalePct = dRendered ? (100.0f * dStale / dRendered) : 0.0f;
 
+    // 姿勢データの健全性診断。ortho/norm が 0 でなければ渡っている quat が
+    // 壊れている (非正規化 or torn read)。step は1フレームあたりの回転角で、
+    // 滑らかに回しているのに値が飛び飛びならレート差によるビートを示す。
+    sastle::Log.printf("[QDIAG] ortho_max=%.6f norm_max=%.6f step_max=%.2fdeg\n",
+                       led.imu_ortho_err_max, led.imu_norm_err_max,
+                       led.imu_step_deg_max);
+    ledManager.resetImuDiag();
+
     sastle::Log.printf(
         "[PERF] render_fps=%.1f map=%luus out=%luus stale=%.0f%% | img_fps=%.1f decode=%luus jpeg=%uB recv=%lu hits=%lu drop=%lu | heap=%u\n",
         led.fps, (unsigned long)led.mapping_time_us, (unsigned long)led.output_time_us,

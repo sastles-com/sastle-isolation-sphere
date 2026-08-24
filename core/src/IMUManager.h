@@ -225,6 +225,29 @@ private:
     volatile bool _taskRunning = false;
     static void taskFunction(void* parameter); ///< 固定周期ポーリングループ
     bool _updateOnce();            ///< 時間ゲートなしの1回分の取得 (タスクから呼ぶ)
+
+    // --- I2C バスの排他 ---
+    // IMU タスク (core0) が 100Hz でセンサーを読む一方、診断系の getter
+    // (getCalibration/getOperationMode/getTemperature) は loop タスク (core1)
+    // から呼ばれる。ESP32 の I2C HAL はロックを「API呼び出しごと」にしか
+    // 取らないため、quat 読み出しの
+    //     endTransmission(false)  → repeated start のためSTOPを出さない
+    //     requestFrom(...)
+    // の"間"に別コアのトランザクションが割り込むと、双方が誤ったレジスタ窓を
+    // 読む。実測: mode が 8 と 61(不正値) を交互に返し、静止中の加速度が
+    // 2.2 m/s² (正しくは約9.81) になっていた。
+    // 複数トランザクションから成るシーケンスを1単位として保護する。
+    // 再帰ミューテックスなのは printStatus() 等が他の公開getterを呼ぶため。
+    SemaphoreHandle_t _i2cMutex = nullptr;
+    void _lockI2c();
+    void _unlockI2c();
+
+    /// RAII ガード。early return が多いので都度 unlock を書かずに済ませる。
+    struct I2cGuard {
+        IMUManager* m;
+        explicit I2cGuard(IMUManager* mm) : m(mm) { m->_lockI2c(); }
+        ~I2cGuard() { m->_unlockI2c(); }
+    };
     static constexpr unsigned long kFrozenTimeoutMs = 10000;
 
 #if defined(IMU_SENSOR_M5IMU)

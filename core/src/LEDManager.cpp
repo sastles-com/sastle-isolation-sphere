@@ -489,6 +489,34 @@ void LEDManager::updateLEDBuffer() {
                 _stats.imu_stale_frames++;
             }
             _lastQuatSeq = seq;
+
+            // --- 診断: この姿勢が「正規な回転」かを毎フレーム検算する ---
+            // XYZ軸マーカーが相互90°にならない現象の切り分け用。回転行列なら
+            // 3軸の直交性は数学的に保証されるので、誤差が出るなら渡っている
+            // quat が壊れている (非正規化 / torn read)。逆に誤差ゼロなら原因は
+            // 姿勢データではなく、レート差によるビートか空間量子化の側にある。
+            const float n2 = qw*qw + qx*qx + qy*qy + qz*qz;
+            float e[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
+            for (int k = 0; k < 3; k++) {
+                rotateByQuaternion(e[k][0], e[k][1], e[k][2], qw, qx, qy, qz);
+            }
+            const float d01 = e[0][0]*e[1][0] + e[0][1]*e[1][1] + e[0][2]*e[1][2];
+            const float d12 = e[1][0]*e[2][0] + e[1][1]*e[2][1] + e[1][2]*e[2][2];
+            const float d20 = e[2][0]*e[0][0] + e[2][1]*e[0][1] + e[2][2]*e[0][2];
+            float ortho = fabsf(d01);
+            if (fabsf(d12) > ortho) ortho = fabsf(d12);
+            if (fabsf(d20) > ortho) ortho = fabsf(d20);
+            if (ortho > _stats.imu_ortho_err_max) _stats.imu_ortho_err_max = ortho;
+            const float normErr = fabsf(n2 - 1.0f);
+            if (normErr > _stats.imu_norm_err_max) _stats.imu_norm_err_max = normErr;
+
+            // 前フレームから何度動いたか (ビート検出用: 滑らかな回転なら一定、
+            // レート差で飛び飛びなら1step/2stepが交互に出る)
+            const float dot = fabsf(qw*_prevQw + qx*_prevQx + qy*_prevQy + qz*_prevQz);
+            const float dc = dot > 1.0f ? 1.0f : dot;
+            const float stepDeg = 2.0f * acosf(dc) * 57.2957795f;
+            if (stepDeg > _stats.imu_step_deg_max) _stats.imu_step_deg_max = stepDeg;
+            _prevQw = qw; _prevQx = qx; _prevQy = qy; _prevQz = qz;
         }
     }
 

@@ -28,6 +28,16 @@ IMUManager::~IMUManager() {
 bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     Serial.println("\n=== IMU Manager Initialization (BNO055) ===");
 
+    // I2C 排他用ミューテックス。startTask() より前に必ず作る (作られる前に
+    // _lockI2c() が呼ばれても no-op で安全だが、この時点ではまだ単一タスク)。
+    if (!_i2cMutex) {
+        _i2cMutex = xSemaphoreCreateRecursiveMutex();
+        if (!_i2cMutex) {
+            Serial.println("[IMU] I2C mutex creation failed");
+            return false;
+        }
+    }
+
     // I2C初期化（既に初期化されている場合はスキップ）
     // BNO055 は I2C クロックストレッチが長く、400kHz ではレジスタ読み出しが
     // 化ける (quat の w だけ動き x/y/z=0、ノルム≠1 の壊れた値を実機で確認)。
@@ -150,6 +160,18 @@ bool IMUManager::startTask(uint8_t core, uint8_t priority, uint32_t stackSize) {
     return true;
 }
 
+void IMUManager::_lockI2c() {
+    if (_i2cMutex) {
+        xSemaphoreTakeRecursive(_i2cMutex, portMAX_DELAY);
+    }
+}
+
+void IMUManager::_unlockI2c() {
+    if (_i2cMutex) {
+        xSemaphoreGiveRecursive(_i2cMutex);
+    }
+}
+
 bool IMUManager::_updateOnce() {
     if (!_initialized) {
         return false;
@@ -162,6 +184,10 @@ bool IMUManager::_updateOnce() {
     // エラー検出付きの直接レジスタ読みに置き換え、失敗時は前回値を保持する。
     imu::Quaternion q = _quat;  // 読めなければ前回値
     {
+        // endTransmission(false) と requestFrom() は repeated start で1つの
+        // シーケンスを成す。その間に他コアの I2C が割り込むと別のレジスタ窓を
+        // 読んでしまうため、シーケンス全体を排他する。
+        I2cGuard guard(this);
         bool readOk = false;
         for (int attempt = 0; attempt < 2 && !readOk; attempt++) {
             Wire.beginTransmission(0x28);
@@ -243,12 +269,22 @@ bool IMUManager::_updateOnce() {
     static uint8_t subCycle = 0;
     subCycle++;
     if ((subCycle & 1) == 0) {
-        _accel = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
-        _gyro = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+        I2cGuard guard(this);
+        const imu::Vector<3> a = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
+        const imu::Vector<3> g = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+        taskENTER_CRITICAL(&_quatMux);
+        _accel = a;
+        _gyro = g;
+        taskEXIT_CRITICAL(&_quatMux);
     }
     if (subCycle >= 10) {
         subCycle = 0;
-        _euler = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+        I2cGuard guard(this);
+        const imu::Vector<3> e = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+        // _euler は loop タスク (GestureManager) が読むので排他して差し替える
+        taskENTER_CRITICAL(&_quatMux);
+        _euler = e;
+        taskEXIT_CRITICAL(&_quatMux);
     }
 
     // 融合停止ウォッチドッグ (電源瞬断で BNO055 の fusion が止まり、quat が
@@ -259,7 +295,10 @@ bool IMUManager::_updateOnce() {
         _wdLastChange = now;
 
         uint8_t sysStatus = 0, selfTest = 0, sysError = 0;
-        _bno.getSystemStatus(&sysStatus, &selfTest, &sysError);
+        {
+            I2cGuard guard(this);
+            _bno.getSystemStatus(&sysStatus, &selfTest, &sysError);
+        }
 
         const float gyroMag = fabsf((float)_gyro.x()) + fabsf((float)_gyro.y()) +
                               fabsf((float)_gyro.z());
@@ -305,6 +344,15 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     (void)sda; (void)scl;  // 内蔵IMUは内部I2Cバスを使うため外部ピン指定は不使用
     Serial.println("\n=== IMU Manager Initialization (M5 internal IMU) ===");
 
+    // I2C 排他用 (BNO055 側と同じ理由: IMUタスクと loop の同時アクセス防止)
+    if (!_i2cMutex) {
+        _i2cMutex = xSemaphoreCreateRecursiveMutex();
+        if (!_i2cMutex) {
+            Serial.println("[IMU] I2C mutex creation failed");
+            return false;
+        }
+    }
+
     // M5Unified 本体初期化。LCDManager は LCDデバッグ無効時に M5.begin を呼ばないため、
     // IMU 側で確実に内部I2C/IMU電源を立ち上げておく (二重 begin は M5Unified が許容)。
     auto cfg = M5.config();
@@ -345,7 +393,10 @@ bool IMUManager::update() {
     }
     _lastUpdate = now;
 
-    M5.Imu.update();
+    {
+        I2cGuard guard(this);   // loop 側の getTemperature() と排他
+        M5.Imu.update();
+    }
 
     // 全初期化 (LCDManager の M5.begin を含む) 完了後の最初の機会にバイアスを推定。
     // begin() 直後に行うと LCDManager の後続 M5.begin で IMU が再初期化され無効化される。
@@ -427,14 +478,19 @@ void IMUManager::calibrateGyroBias() {
 
 uint8_t IMUManager::getOperationMode() {
 #if !defined(IMU_SENSOR_M5IMU)
-    return _initialized ? (uint8_t)_bno.getMode() : 0xFE;
+    if (!_initialized) return 0xFE;
+    I2cGuard guard(this);   // IMUタスクの読み出しシーケンスに割り込まない
+    return (uint8_t)_bno.getMode();
 #else
     return 0xFF;
 #endif
 }
 
 imu::Quaternion IMUManager::getQuaternion() {
-    return _quat;
+    taskENTER_CRITICAL(&_quatMux);
+    const imu::Quaternion q = _quat;
+    taskEXIT_CRITICAL(&_quatMux);
+    return q;
 }
 
 bool IMUManager::getQuaternion(float& w, float& x, float& y, float& z) {
@@ -485,35 +541,51 @@ bool IMUManager::getEuler(float& heading, float& roll, float& pitch) {
     return true;
 }
 
+// _accel/_gyro も IMU タスク (core0) が書き loop (core1) が読むので排他する。
+// これらは I2C を触らない (キャッシュ済みの値を返すだけ)。
 imu::Vector<3> IMUManager::getAccel() {
-    return _accel;
+    taskENTER_CRITICAL(&_quatMux);
+    const imu::Vector<3> a = _accel;
+    taskEXIT_CRITICAL(&_quatMux);
+    return a;
 }
 
 bool IMUManager::getAccel(float& x, float& y, float& z) {
     if (!_initialized) {
         return false;
     }
-    
-    x = _accel.x();
-    y = _accel.y();
-    z = _accel.z();
-    
+
+    taskENTER_CRITICAL(&_quatMux);
+    const float ax = (float)_accel.x(), ay = (float)_accel.y(), az = (float)_accel.z();
+    taskEXIT_CRITICAL(&_quatMux);
+
+    x = ax;
+    y = ay;
+    z = az;
+
     return true;
 }
 
 imu::Vector<3> IMUManager::getGyro() {
-    return _gyro;
+    taskENTER_CRITICAL(&_quatMux);
+    const imu::Vector<3> g = _gyro;
+    taskEXIT_CRITICAL(&_quatMux);
+    return g;
 }
 
 bool IMUManager::getGyro(float& x, float& y, float& z) {
     if (!_initialized) {
         return false;
     }
-    
-    x = _gyro.x();
-    y = _gyro.y();
-    z = _gyro.z();
-    
+
+    taskENTER_CRITICAL(&_quatMux);
+    const float gx = (float)_gyro.x(), gy = (float)_gyro.y(), gz = (float)_gyro.z();
+    taskEXIT_CRITICAL(&_quatMux);
+
+    x = gx;
+    y = gy;
+    z = gz;
+
     return true;
 }
 
@@ -525,7 +597,10 @@ void IMUManager::displayCalibrationStatus() {
     }
 
     uint8_t system, gyro, accel, mag = 0;
-    _bno.getCalibration(&system, &gyro, &accel, &mag);
+    {
+        I2cGuard guard(this);
+        _bno.getCalibration(&system, &gyro, &accel, &mag);
+    }
 
     Serial.println("\n=== Calibration Status ===");
     Serial.print("System: "); Serial.print(system, DEC);
@@ -542,13 +617,17 @@ bool IMUManager::isFullyCalibrated() {
     }
 
     uint8_t system, gyro, accel, mag = 0;
-    _bno.getCalibration(&system, &gyro, &accel, &mag);
+    {
+        I2cGuard guard(this);
+        _bno.getCalibration(&system, &gyro, &accel, &mag);
+    }
 
     return (system == 3 && gyro == 3 && accel == 3 && mag == 3);
 }
 
 void IMUManager::getCalibration(uint8_t& sys, uint8_t& gyro, uint8_t& accel, uint8_t& mag) {
     if (_initialized) {
+        I2cGuard guard(this);   // loop タスクから呼ばれる: IMUタスクと排他する
         _bno.getCalibration(&sys, &gyro, &accel, &mag);
     } else {
         sys = gyro = accel = mag = 0;
@@ -559,6 +638,7 @@ int8_t IMUManager::getTemperature() {
     if (!_initialized) {
         return 0;
     }
+    I2cGuard guard(this);
     return _bno.getTemp();
 }
 
@@ -596,6 +676,7 @@ int8_t IMUManager::getTemperature() {
         return 0;
     }
     float t = 0.0f;
+    I2cGuard guard(this);
     M5.Imu.getTemp(&t);
     return (int8_t)t;
 }
