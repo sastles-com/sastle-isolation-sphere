@@ -189,6 +189,7 @@ public:
     uint32_t debugReadTotal() const { return _wdReadTotal; }
     uint32_t debugReadFails() const { return _wdReadFails; }
     uint32_t debugDiscards()  const { return _wdDiscards; }
+    uint32_t debugZeroReads() const { return _wdZeroReads; }
     /// 受理された姿勢更新の通番。描画側が「前回と同じ姿勢か」を判定できる。
     uint32_t quatSeq() const { return _quatSeq; }
     
@@ -220,6 +221,7 @@ private:
     portMUX_TYPE _quatMux = portMUX_INITIALIZER_UNLOCKED; ///< _quat のコア間排他
     uint32_t _wdReadFails = 0;     ///< I2C quat読み出し失敗の累計
     uint32_t _wdReadTotal = 0;     ///< I2C quat読み出し試行の累計
+    uint32_t _wdZeroReads = 0;     ///< I2Cが成功を返しつつ全ゼロだった回数
     volatile uint32_t _quatSeq = 0;///< 姿勢を受理するたびに +1 (描画側の鮮度判定用)
     TaskHandle_t _taskHandle = nullptr; ///< 専用ポーリングタスク
     volatile bool _taskRunning = false;

@@ -1,5 +1,6 @@
 #include "IMUManager.h"
 #include <Arduino.h>
+#include "RemoteLog.h"
 
 namespace sastle {
 
@@ -189,13 +190,26 @@ bool IMUManager::_updateOnce() {
         // 読んでしまうため、シーケンス全体を排他する。
         I2cGuard guard(this);
         bool readOk = false;
-        for (int attempt = 0; attempt < 2 && !readOk; attempt++) {
+        uint8_t lastBytes[8] = {0};
+        for (int attempt = 0; attempt < 3 && !readOk; attempt++) {
             Wire.beginTransmission(0x28);
             Wire.write(0x20);  // QUA_DATA_W_LSB
             if (Wire.endTransmission(false) != 0) continue;   // repeated start
             if (Wire.requestFrom(0x28, 8) != 8) continue;
             uint8_t b[8];
             for (int i = 0; i < 8; i++) b[i] = Wire.read();
+            memcpy(lastBytes, b, 8);
+
+            // 実測: I2C が「成功」を返しつつ 8バイト全ゼロを返すことがある
+            // (加速度も同じ周期で 0.0 と 9.9 を交互に返していた)。全ゼロ quat は
+            // ノルム0なので下流のガードが必ず棄却し、姿勢が凍結する
+            // (disc=100/s, step_max=0.00deg を実測)。ここで読み失敗として扱い
+            // 再試行させる。BNO055 が全ゼロの姿勢を返すことは原理的に無い
+            // (単位クォータニオンなので必ずどれかの成分が非0)。
+            bool allZero = true;
+            for (int i = 0; i < 8; i++) { if (b[i] != 0) { allZero = false; break; } }
+            if (allZero) { _wdZeroReads++; continue; }
+
             const float s = 1.0f / 16384.0f;  // 2^14 LSB/unit
             q = imu::Quaternion(
                 (int16_t)((b[1] << 8) | b[0]) * s,
@@ -204,10 +218,24 @@ bool IMUManager::_updateOnce() {
                 (int16_t)((b[7] << 8) | b[6]) * s);
             readOk = true;
         }
-        if (!readOk) _wdReadFails++;
+        if (!readOk) {
+            _wdReadFails++;
+            // 生バイトを出して「ゼロ埋めか化けか」を切り分ける。5秒に1回だけ。
+            // Serial ではなく sastle::Log なので MQTT で観測できる。
+            static unsigned long lastRawLog = 0;
+            const unsigned long nowRaw = millis();
+            if (nowRaw - lastRawLog > 5000) {
+                lastRawLog = nowRaw;
+                sastle::Log.printf(
+                    "[IMU] quat read failed, raw=%02X %02X %02X %02X %02X %02X %02X %02X"
+                    " (zero_reads=%lu fails=%lu/%lu)\n",
+                    lastBytes[0], lastBytes[1], lastBytes[2], lastBytes[3],
+                    lastBytes[4], lastBytes[5], lastBytes[6], lastBytes[7],
+                    (unsigned long)_wdZeroReads, (unsigned long)_wdReadFails,
+                    (unsigned long)_wdReadTotal);
+            }
+        }
         _wdReadTotal++;
-        // 統計は main の [RATE] ログが debugReadTotal()/debugReadFails() から
-        // 算出するので、ここでは出力しない (100Hz タスク内の Serial は禁物)。
     }
     // I2C化けガード1: このBNO055個体はノルム0.96〜0.99のquatを常用するため、
     // 「単位でない=破棄」にすると正常値の半分を捨ててしまう (実測 disc=loopの
