@@ -67,9 +67,19 @@ public:
             return false;
         }
 
-        // 新フレーム開始
-        if (h->frame_id != _frameId) {
-            if (_frameId != 0xFFFFFFFF && _received < _chunkCount) {
+        // 新フレーム開始。
+        // 「再構成中かどうか」は _inProgress で明示的に持つ。以前は _frameId に
+        // 0xFFFFFFFF を「未受信」センチネルとして詰めていたが、frame_id は
+        // プロトコル上ただの連番なので送信側が 0xFFFFFFFF を使うと衝突し、
+        //   1. 完了直後は _frameId==0xFFFFFFFF なので新フレーム判定が false
+        //   2. よって _gotMask/_received が前フレームのまま残る
+        //   3. chunk_index=0 のビットが既に立っているので memcpy がスキップされ、
+        //      直後の (_received==_chunkCount) が前フレームの値で真になる
+        // → そのフレームは捨てられ、代わりに前フレームが再度デコードされていた。
+        // 実害: 停止時の黒フレーム(旧実装は frame_id=0xFFFFFFFF で送っていた)が
+        // 効かず、最後の映像が残り続けていた。
+        if (!_inProgress || h->frame_id != _frameId) {
+            if (_inProgress && _received < _chunkCount) {
                 _dropped++;  // 前フレームは未完のまま破棄
             }
             _frameId = h->frame_id;
@@ -77,6 +87,7 @@ public:
             _received = 0;
             _totalSize = 0;
             _gotMask = 0;
+            _inProgress = true;
         }
 
         size_t off = (size_t)h->chunk_index * MAX_CHUNK_DATA;
@@ -95,7 +106,7 @@ public:
 
         if (_received == _chunkCount && _totalSize > 0) {
             outSize = _totalSize;
-            _frameId = 0xFFFFFFFF;  // 完了 → 次フレーム待ち
+            _inProgress = false;  // 完了 → 次フレーム待ち
             return true;
         }
         return false;
@@ -105,7 +116,8 @@ public:
 
 private:
     void reset() {
-        _frameId = 0xFFFFFFFF;
+        _inProgress = false;
+        _frameId = 0;
         _chunkCount = 0;
         _received = 0;
         _totalSize = 0;
@@ -114,7 +126,8 @@ private:
 
     uint8_t* _buf = nullptr;
     size_t _bufSize = 0;
-    uint32_t _frameId = 0xFFFFFFFF;
+    bool _inProgress = false;   ///< 再構成中か (frame_id にセンチネルを混ぜない)
+    uint32_t _frameId = 0;
     uint16_t _chunkCount = 0;
     uint16_t _received = 0;
     uint32_t _totalSize = 0;

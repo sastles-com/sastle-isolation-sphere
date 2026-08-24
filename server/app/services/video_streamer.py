@@ -63,6 +63,7 @@ class VideoStreamer:
         self.current_video_id = None
         self.current_playlist_id = None
         self._loop = True                # ループ再生フラグ (再生中も変更可能)
+        self._blank_fid = 0              # 黒フレーム用 frame_id (本編の連番と衝突させない)
         # UI プレビュー配信 (デジタルツイン用)。main.py で set_preview_broadcaster() 済み。
         self._preview_sm = None          # StateManager
         self._preview_loop = None        # uvicorn イベントループ (別スレッドから投入する)
@@ -109,11 +110,12 @@ class VideoStreamer:
 
         各動画は最後まで再生してから次へ進む。末尾まで来たら loop なら先頭へ戻る。
         """
-        self.stop()
+        self.stop(blank=False)  # 直後に新しい映像を流すので消灯は不要
         entries = [e for e in entries if e.get("path") and os.path.exists(e["path"])]
         if not entries:
             self.status = "error"
             logger.error("no playable entries")
+            self._send_black_frame()  # 再生しないので前の映像を残さない
             return False
         self._stop.clear()
         self._pause.clear()
@@ -142,7 +144,13 @@ class VideoStreamer:
         elif self.status == "paused":
             self.resume()
 
-    def stop(self):
+    def stop(self, blank: bool = True):
+        """再生を停止する。
+
+        blank=False は play_entries() が「直前の再生を畳む」ために呼ぶ場合に使う。
+        直後に新しい映像を流すので、消灯は無駄な 60ms の遅延と黒画面の一瞬の
+        点滅にしかならない。
+        """
         self._stop.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
@@ -151,18 +159,36 @@ class VideoStreamer:
         self.current_path = None
         self.current_video_id = None
         self.current_playlist_id = None
-        self._send_black_frame()
+        if blank:
+            self._send_black_frame()
 
     def _send_black_frame(self):
-        """停止時に黒フレームを1枚送る。デバイスは最後に受信したフレームを
-        表示し続けるため、これが無いと停止後も残像が出続ける。"""
+        """停止時に黒フレームを送る。デバイスは最後に受信したフレームを
+        表示し続けるため、これが無いと停止後も残像が出続ける。
+
+        UDP は取りこぼすので数回送る。1枚落ちただけで残像が残るのを避ける。
+        frame_id は 0xFFFFFFFF を避けること: 旧ファームの FrameReassembler は
+        その値を「未受信」センチネルとして使っており、黒フレームが新フレームと
+        判定されず丸ごと無視されていた (このバグの原因)。
+        """
         try:
             import cv2
             import numpy as np
             black = np.zeros((self._h, self._w, 3), np.uint8)
             ok, jpeg = cv2.imencode(".jpg", black, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if ok:
-                self._send_frame(0xFFFFFFFF, jpeg.tobytes())
+            if not ok:
+                logger.warning("black frame encode failed")
+                return
+            data = jpeg.tobytes()
+            # 3回送るが間隔は詰める: stop() は同期呼び出しなので、ここでの sleep が
+            # そのまま uvicorn のイベントループを止める。合計 20ms に抑える。
+            for _ in range(3):
+                self._blank_fid = (self._blank_fid + 1) & 0x7FFFFFFF
+                self._send_frame(self._blank_fid, data)
+                time.sleep(0.01)
+            # UI プレビューも同時に黒へ (再生中しか送っていないため、
+            # これが無いと WebUI 側に最後のフレームが残る)
+            self._emit_preview(self._blank_fid, data)
         except Exception as e:  # 停止処理は失敗しても継続
             logger.warning(f"black frame send failed: {e}")
 
@@ -232,7 +258,12 @@ class VideoStreamer:
                         break
         finally:
             if not self._stop.is_set():
-                self.status = "stopped"   # 自然終了 (loop=False)
+                # 自然終了 (loop=False でプレイリスト末尾に到達)。stop() を経由しない
+                # ためここで消灯する。これが無いと最後のフレームが残り続けていた。
+                self.status = "stopped"
+                self.current_path = None
+                self.current_video_id = None
+                self._send_black_frame()
         logger.info("streaming ended")
 
     def _send_frame(self, fid, jpeg):
