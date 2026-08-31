@@ -2,10 +2,18 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from app.core.config import MQTT_STATE_TOPIC, MQTT_COMMAND_TOPIC_PREFIX
+from app.core.config import (
+    DEVICE_OFFLINE_TIMEOUT_SEC,
+    DEVICE_PRESENCE_SWEEP_SEC,
+    DEVICE_TARGET_ALL,
+    MQTT_COMMAND_TOPIC_PREFIX,
+    MQTT_DEVICE_COMMAND_PREFIX_FMT,
+    MQTT_STATE_TOPIC,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +51,19 @@ class StateManager:
         self._state: Dict[str, Any] = {
             "imu": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
             # device_id ごとのIMU等 (複数sphere対応、WebUIでの選択用)。
-            # 例: {"sphere001": {"imu": {...}}, "sphere002": {"imu": {...}}}
+            # 例: {"sphere001": {"imu": {...}, "last_seen": 1756...}, ...}
+            # 一度 publish してきた core は落ちても残る (最後の姿勢を保持するため)。
+            # 現在生きているかは last_seen ベースの "online" を見ること。
             "devices": {},
+            # config.json の spheres[] から作るデバイスレジストリ (set_spheres)。
+            # オフラインの core も含む全一覧で、WebUI の操作対象セレクタの選択肢になる。
+            "spheres": [],
+            # 現在の操作対象 core の id ("all" = 全 core にブロードキャスト)。
+            "target": DEVICE_TARGET_ALL,
+            # 死活判定を通ったオンライン core の id 一覧。配信直前に
+            # _refresh_presence() が devices[].last_seen から毎回作り直す。
+            # UI のインジケータはこの配列だけを見ればよい (時刻の突き合わせ不要)。
+            "online": [],
             "playback": {
                 "status": "stopped",  # "playing" | "paused" | "stopped"
                 "playlist": None,
@@ -83,6 +102,108 @@ class StateManager:
         self._mqtt_client = mqtt_client
         logger.info("MQTT client set in StateManager")
 
+    def set_spheres(self, spheres: List[Dict[str, Any]]):
+        """config.json の spheres[] をデバイスレジストリとして取り込む (起動時)。
+
+        _state は MQTT (retained) と WebSocket の両方に毎回まるごと載るため、
+        ここでは UI が必要な最小項目だけに絞る (ファーム側の受信バッファは
+        sastle::kMqttBufferSize = 2048B で、超えたメッセージは捨てられる)。
+        LCD 等を含む全項目は GET /api/config/spheres で取得できる。
+        """
+        self._state["spheres"] = [
+            {"id": s.get("id"), "static_ip": s.get("static_ip")}
+            for s in (spheres or []) if s.get("id")
+        ]
+        logger.info(f"sphere registry: {[s['id'] for s in self._state['spheres']]}")
+
+    def set_initial_target(self, device_id: str):
+        """操作対象 core の初期値を設定する (起動時、config の active_sphere)。"""
+        if device_id:
+            self._state["target"] = device_id
+            logger.info(f"initial command target: {device_id}")
+
+    async def set_target(self, device_id: str):
+        """操作対象 core を切り替え、WebSocket/MQTT に新しい状態を配信する。"""
+        self._state["target"] = device_id
+        logger.info(f"command target -> {device_id}")
+        await self._publish_state()
+
+    def get_target(self) -> str:
+        return self._state.get("target") or DEVICE_TARGET_ALL
+
+    # ===== core の死活判定 =====
+    # core からの publish (IMU/status/log) が届くたびに last_seen を打ち、
+    # DEVICE_OFFLINE_TIMEOUT_SEC 以上途切れた core をオフラインと見なす。
+    # MQTT の LWT に頼らないのは、電源を抜かれた場合ブローカーが keepalive の
+    # 満了を待つまで (既定で最大1.5倍) offline を出さず、検知が遅いため。
+
+    def touch_device(self, device_id: str):
+        """core から何か届いたことを記録する (死活判定用)。
+
+        MQTT の受信スレッドから同期的に呼ばれる。dict への代入だけなので
+        イベントループへ投入せずに済ませている (配信は次の notify に乗る)。
+        """
+        if not device_id:
+            return
+        devices = self._state.setdefault("devices", {})
+        devices.setdefault(device_id, {})["last_seen"] = time.time()
+
+    def online_ids(self) -> List[str]:
+        """死活判定を通った core の id 一覧 (登録順ではなく id 昇順)。"""
+        now = time.time()
+        return sorted(
+            device_id
+            for device_id, entry in (self._state.get("devices") or {}).items()
+            if now - (entry.get("last_seen") or 0) < DEVICE_OFFLINE_TIMEOUT_SEC
+        )
+
+    def _refresh_presence(self):
+        """配信直前に "online" を作り直す。
+
+        last_seen は「最後に届いた時刻」なので、時間が経つだけで online から
+        外れる。配信のたびに再計算しないと、静かになった core が居残る。
+        """
+        self._state["online"] = self.online_ids()
+
+    async def presence_sweep_loop(self, interval: float = DEVICE_PRESENCE_SWEEP_SEC,
+                                  on_change=None):
+        """online 集合の変化を監視して配信する asyncio タスク。
+
+        core が完全に黙った場合は他の更新契機が無く、_notify_observers() が
+        呼ばれないままオンライン表示が残り続ける。そのための定期チェック。
+        変化が無ければ配信しないので、平常時のトラフィックは増えない。
+
+        Args:
+            on_change: online 集合が変わったとき online_ids を渡して呼ぶ同期関数。
+                映像 (UDP) の宛先から落ちた core を外すために使う (main.py で接続)。
+                StateManager に ConfigService/VideoStreamer を持たせたくないので
+                コールバックで外に出す。
+        """
+        last = None
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                current = self.online_ids()
+                if current != last:
+                    if last is not None:
+                        gone = set(last) - set(current)
+                        came = set(current) - set(last)
+                        if gone:
+                            logger.info(f"core offline: {sorted(gone)}")
+                        if came:
+                            logger.info(f"core online: {sorted(came)}")
+                    last = current
+                    if on_change:
+                        try:
+                            on_change(current)
+                        except Exception as e:
+                            logger.error(f"presence on_change failed: {e}")
+                    await self._notify_observers()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # 監視タスクは落とさない
+                logger.error(f"presence sweep error: {e}")
+
     def set_initial_params(self, params: Dict[str, Any]):
         """起動時に config の既定パラメータを反映する（クライアント接続前の初期化用）。"""
         if isinstance(params, dict):
@@ -109,7 +230,9 @@ class StateManager:
         (WebUI がまだデバイス未選択の場合のフォールバック用)。
         """
         devices = self._state.setdefault("devices", {})
-        devices.setdefault(device_id, {})["imu"] = quat
+        entry = devices.setdefault(device_id, {})
+        entry["imu"] = quat
+        entry["last_seen"] = time.time()
         self._state["imu"] = quat
         await self._notify_observers()
 
@@ -278,8 +401,10 @@ class StateManager:
         """
         msg_type = data.get("type")
         payload = data.get("payload", {})
+        # 宛先 core。WebUI が選択中の id を毎メッセージに載せる (未指定ならサーバー既定)
+        device = data.get("device") or self.get_target()
 
-        logger.info(f"[WebSocket] Processing message: type={msg_type}")
+        logger.info(f"[WebSocket] Processing message: type={msg_type} device={device}")
 
         # WSメッセージ種別 → デバイスコマンドトピックの suffix
         COMMAND_SUFFIX = {"SET_PARAMS": "params", "SET_PLAYBACK": "playback", "SET_LED": "led"}
@@ -295,22 +420,45 @@ class StateManager:
             return
 
         # サーバー状態更新だけでなく、デバイスのコマンドトピックへも転送する。
-        # (デバイスは sphere/all/command/* のみ購読。これが無いとUI操作が実機に届かない)
+        # (これが無いとUI操作が実機に届かない)
         suffix = COMMAND_SUFFIX.get(msg_type)
         if suffix:
-            self._publish_command(suffix, payload)
+            self._publish_command(suffix, payload, device)
 
-    def _publish_command(self, suffix: str, payload: Dict[str, Any]):
-        """デバイスのコマンドトピック sphere/all/command/<suffix> へ publish する。"""
+    @staticmethod
+    def _command_prefix(device: Optional[str]) -> str:
+        """宛先 core に応じたコマンドトピックの prefix を返す。
+
+        "all"/未指定 → sphere/all/command (全 core が購読)
+        それ以外     → sphere/<id>/command (その core だけが購読)
+        """
+        if not device or device == DEVICE_TARGET_ALL:
+            return MQTT_COMMAND_TOPIC_PREFIX
+        return MQTT_DEVICE_COMMAND_PREFIX_FMT.format(device_id=device)
+
+    def command_prefix(self, device: Optional[str] = None) -> str:
+        """現在の操作対象 (または指定 core) 宛のコマンドトピック prefix を返す。
+
+        MQTT を直接叩く REST エンドポイント (api/endpoints/command.py) からも
+        同じ宛先解決を使うための公開版。
+        """
+        return self._command_prefix(device or self.get_target())
+
+    def _publish_command(self, suffix: str, payload: Dict[str, Any], device: Optional[str] = None):
+        """コマンドトピック <prefix>/<suffix> へ publish する。
+
+        Args:
+            suffix: params / playback / led / system
+            device: 宛先 core の id。None なら現在の操作対象 (self.get_target())
+        """
         if not self._mqtt_client:
             return
+        topic = f"{self._command_prefix(device or self.get_target())}/{suffix}"
         try:
-            self._mqtt_client.publish(
-                f"{MQTT_COMMAND_TOPIC_PREFIX}/{suffix}", json.dumps(payload), qos=1
-            )
-            logger.debug(f"Command -> {MQTT_COMMAND_TOPIC_PREFIX}/{suffix}: {payload}")
+            self._mqtt_client.publish(topic, json.dumps(payload), qos=1)
+            logger.debug(f"Command -> {topic}: {payload}")
         except Exception as e:
-            logger.error(f"Failed to publish command: {e}")
+            logger.error(f"Failed to publish command to {topic}: {e}")
     
     async def _publish_state(self):
         """
@@ -320,6 +468,7 @@ class StateManager:
         WebSocket: STATE_UPDATE message
         """
         # シーケンス番号とタイムスタンプを更新
+        self._refresh_presence()
         self._seq += 1
         self._state["seq"] = self._seq
         self._state["timestamp"] = datetime.utcnow().isoformat() + "Z"
@@ -354,6 +503,7 @@ class StateManager:
 
     async def _notify_observers(self):
         """WebSocketクライアントに状態を配信"""
+        self._refresh_presence()
         await self._broadcast({"type": "STATE_UPDATE", "payload": self._state})
 
     async def _broadcast(self, message: Dict[str, Any]):

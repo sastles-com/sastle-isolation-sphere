@@ -12,8 +12,12 @@ export const WebSocketProvider = ({ children }) => {
     const [isConnected, setIsConnected] = useState(false);
     const [lastMessage, setLastMessage] = useState(null);
     const [logs, setLogs] = useState([]);
-    // WebUI で表示対象として選んでいる sphere の device_id (未選択時は null → imu の後方互換値にフォールバック)
+    // WebUI で操作/表示対象として選んでいる sphere の device_id。
+    // "all" = 全 core にブロードキャスト。null は未選択 (サーバー側の既定対象に従う)。
     const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+    // sendMessage の identity を変えずに最新の選択値を読むための ref
+    // (sendMessage を再生成すると、これを deps に持つフック側で送信処理が作り直される)
+    const selectedDeviceRef = useRef(null);
     const ws = useRef(null);
     const reconnectTimeout = useRef(null);
     // FRAME_PREVIEW は 5fps の base64 JPEG。React state に載せると購読者が毎フレーム
@@ -95,9 +99,14 @@ export const WebSocketProvider = ({ children }) => {
         };
     }, [connect]);
 
+    useEffect(() => { selectedDeviceRef.current = selectedDeviceId; }, [selectedDeviceId]);
+
     const sendMessage = useCallback((type, payload) => {
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({ type, payload }));
+            // device = 宛先 core。サーバーは sphere/<device>/command/* へ転送する
+            // (未指定ならサーバー保持の操作対象。"all" は全 core ブロードキャスト)
+            const device = selectedDeviceRef.current;
+            ws.current.send(JSON.stringify(device ? { type, payload, device } : { type, payload }));
         } else {
             console.warn('WebSocket not connected, cannot send message:', type);
         }

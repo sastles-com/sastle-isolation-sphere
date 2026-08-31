@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useStateUpdate } from '../hooks/useSphereState';
+import { useCorePresence } from '../hooks/useCorePresence';
 import { usePlayback } from '../hooks/usePlayback';
 import { useDynamicAccent } from '../hooks/useDynamicAccent';
 import { useParamSender } from '../hooks/useParamSender';
@@ -39,6 +40,9 @@ export const SpherePlayer = () => {
 
     // hue → --sphere-hue (UI アクセント / オーロラが即応)
     useDynamicAccent(hue);
+
+    // 接続中の core (StatusBar のドット表示用)
+    const { spheres, online, target, presenceKnown } = useCorePresence();
 
     useStateUpdate((payload) => {
         if (payload.params) {
@@ -215,9 +219,13 @@ export const SpherePlayer = () => {
             >
                 <StatusBar
                     isConnected={isConnected}
-                    deviceOnline={system != null}
+                    deviceOnline={online.length > 0}
                     playbackStatus={pb.playback.status}
                     system={system}
+                    spheres={spheres}
+                    online={online}
+                    target={target}
+                    presenceKnown={presenceKnown}
                     onOpenControl={() => setCtlOpen(0)}
                 />
                 <div style={{ flex: 1 }} />

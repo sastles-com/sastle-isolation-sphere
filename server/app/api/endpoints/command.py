@@ -4,7 +4,8 @@ from typing import Optional, Dict, Any
 import logging
 import json
 
-from app.core.config import MQTT_COMMAND_TOPIC_PREFIX
+# 宛先 core は StateManager が保持する操作対象に従う (command_prefix)。
+# WebUI のセレクタで切り替えると、この経路のコマンドも同じ core に向く。
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,9 @@ async def send_playback_command(command: PlaybackCommand, request: Request):
         mqtt_service = request.app.state.mqtt_service
         payload = command.model_dump(exclude_none=True)
 
+        prefix = request.app.state.state_manager.command_prefix()
         mqtt_service.client.publish(
-            f"{MQTT_COMMAND_TOPIC_PREFIX}/playback",
+            f"{prefix}/playback",
             _mqtt_json(payload),
             qos=1
         )
@@ -77,8 +79,9 @@ async def send_params_command(command: ParamsCommand, request: Request):
         if not payload:
             raise HTTPException(status_code=400, detail="No parameters provided")
 
+        prefix = request.app.state.state_manager.command_prefix()
         mqtt_service.client.publish(
-            f"{MQTT_COMMAND_TOPIC_PREFIX}/params",
+            f"{prefix}/params",
             _mqtt_json(payload),
             qos=1
         )
@@ -100,8 +103,9 @@ async def send_led_command(command: LEDCommand, request: Request):
         mqtt_service = request.app.state.mqtt_service
         payload = command.model_dump(exclude_none=True)
 
+        prefix = request.app.state.state_manager.command_prefix()
         mqtt_service.client.publish(
-            f"{MQTT_COMMAND_TOPIC_PREFIX}/led",
+            f"{prefix}/led",
             _mqtt_json(payload),
             qos=1
         )

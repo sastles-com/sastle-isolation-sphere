@@ -65,26 +65,51 @@
     "volume": 50,
     "startup_sound": true
   },
-  "sphere": {
-    "id": "sphere001",
-    "mac": "F0:9E:9E:32:67:D0",
-    "static_ip": "192.168.49.101",
-    "features": {
-      "LED": true,
-      "IMU": "BNO055",
-      "LCD": {
-        "width": 128,
-        "height": 128,
-        "rotation": 0,
-        "offset": [
-          0,
-          0
-        ],
-        "color_depth": 16,
-        "switch": true,
-        "debug": true
-      },
-      "ui": true
+  "spheres": [
+    {
+      "id": "sphere001",
+      "mac": "F0:9E:9E:32:67:D0",
+      "static_ip": "192.168.49.101",
+      "features": {
+        "LED": true,
+        "IMU": "BNO055",
+        "LCD": {
+          "width": 128,
+          "height": 128,
+          "rotation": 0,
+          "offset": [
+            0,
+            0
+          ],
+          "color_depth": 16,
+          "switch": true,
+          "debug": true
+        },
+        "ui": true
+      }
+    },
+    {
+      "id": "sphere002",
+      "mac": "AC:27:6E:D1:93:7C",
+      "static_ip": "192.168.49.102",
+      "features": {
+        "LED": true,
+        "IMU": "BNO055",
+        "LCD": {
+          "width": 128,
+          "height": 128,
+          "rotation": 0,
+          "offset": [
+            0,
+            0
+          ],
+          "color_depth": 16,
+          "switch": true,
+          "debug": true
+        },
+        "ui": true
+      }
     }
-  }
+  ],
+  "active_sphere": "all"
 }

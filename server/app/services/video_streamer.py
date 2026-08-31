@@ -32,14 +32,27 @@ PREVIEW_PERIOD = 1.0 / PREVIEW_FPS
 
 
 def _load_device_target():
-    """config.json から (device_ip, udp_port, width, height) を取得。"""
+    """config.json から (device_ip, udp_port, width, height) を取得。
+
+    宛先 IP は spheres[] のうち active_sphere のエントリ (新形式)、
+    無ければ旧形式の単一キー sphere.static_ip を使う。
+    運用中の切替は set_targets() で行う (WebUI の操作対象セレクタから)。
+    """
     for p in CONFIG_SEARCH_PATHS:
         if os.path.exists(p):
             try:
                 with open(p) as f:
                     c = json.load(f)
+                spheres = c.get("spheres")
+                ip = None
+                if isinstance(spheres, list) and spheres:
+                    active = c.get("active_sphere")
+                    entry = next((s for s in spheres if s.get("id") == active), spheres[0])
+                    ip = entry.get("static_ip")
+                if not ip:
+                    ip = c.get("sphere", {}).get("static_ip")
                 return (
-                    c.get("sphere", {}).get("static_ip", "192.168.49.101"),
+                    ip or "192.168.49.101",
                     int(c.get("wifi", {}).get("udp_port", 8889)),
                     int(c.get("image", {}).get("width", 320)),
                     int(c.get("image", {}).get("height", 160)),
@@ -52,9 +65,19 @@ def _load_device_target():
 class VideoStreamer:
     def __init__(self, quality: int = 80):
         ip, port, w, h = _load_device_target()
-        self._target = (ip, port)
+        # 送出先は複数持てる (操作対象 = ALL のとき全 core へ同じフレームを送る)
+        self._targets = [(ip, port)]
         self._w, self._h, self._q = w, h, quality
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # 宛先ごとに1ソケット。1本を共有すると、到達不能な core 向けに滞留した
+        # パケットが送信バッファ (SO_SNDBUF) を食い潰し、生きている core への
+        # 送出まで EWOULDBLOCK で落ちる (実測: 生存側のチャンク61%が欠損)。
+        # 宛先を分ければ滞留は当該ソケット内に閉じる。
+        self._socks = {}
+        # 停止時の黒フレーム等、宛先が確定しない用途のための既定ソケット
+        self._sock = self._new_sock()
+        # 宛先ごとの送信失敗数 (診断用) と、直近にログを出した時刻
+        self._send_errors = {}
+        self._send_error_logged = 0.0
         self._thread = None
         self._stop = threading.Event()
         self._pause = threading.Event()
@@ -67,7 +90,7 @@ class VideoStreamer:
         # UI プレビュー配信 (デジタルツイン用)。main.py で set_preview_broadcaster() 済み。
         self._preview_sm = None          # StateManager
         self._preview_loop = None        # uvicorn イベントループ (別スレッドから投入する)
-        logger.info(f"VideoStreamer target={self._target} size={self._w}x{self._h}")
+        logger.info(f"VideoStreamer targets={self._targets} size={self._w}x{self._h}")
 
     def set_preview_broadcaster(self, state_manager, loop):
         """UI へのプレビュー配信先 (StateManager) とイベントループを登録する。
@@ -93,7 +116,62 @@ class VideoStreamer:
     def get_status(self):
         return {"status": self.status, "video_id": self.current_video_id,
                 "playlist_id": self.current_playlist_id, "path": self.current_path,
-                "loop": self._loop, "target": list(self._target)}
+                "loop": self._loop, "target": list(self._targets[0]) if self._targets else None,
+                "targets": [list(t) for t in self._targets]}
+
+    @staticmethod
+    def _new_sock():
+        """映像送出用 UDP ソケットを作る。
+
+        非ブロッキング必須。到達不能な core を宛先に含むと、カーネルの未解決
+        近傍キュー (unres_qlen) が埋まった時点で sendto が ARP 再送タイムアウト
+        ぶん (実測 約2.4秒) ブロックする。_send_frame は宛先を逐次ループするので、
+        落ちた1台のために生きている core のフレームまで止まっていた。
+        映像は UDP で取りこぼし前提なので、送れないぶんは捨てるのが正しい。
+        """
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setblocking(False)
+        return s
+
+    def _sock_for(self, target):
+        """宛先に対応するソケットを返す (無ければ作る)。"""
+        s = self._socks.get(target)
+        if s is None:
+            s = self._new_sock()
+            self._socks[target] = s
+        return s
+
+    def get_targets(self):
+        """現在の映像送出先 IP の一覧を返す。"""
+        return [ip for ip, _ in self._targets]
+
+    def set_targets(self, ips, port: int = None):
+        """映像 (UDP) の送出先 core を切り替える (複数指定可)。
+
+        WebUI で操作対象 core を切り替えたときに呼ばれる。操作対象が ALL の場合は
+        全 core の IP を渡す。_run スレッドは送出のたびに self._targets を読むので、
+        再生中に差し替えても次フレームから新しい宛先に載る (リストごと入れ替える
+        ため要素の途中状態は見えず、ロックは不要)。
+        """
+        ips = [ip for ip in (ips or []) if ip]
+        if not ips:
+            return
+        cur_port = self._targets[0][1] if self._targets else 8889
+        p = int(port) if port else cur_port
+        self._targets = [(ip, p) for ip in ips]
+        # 宛先から外れたソケットは閉じる (滞留パケットもここで捨てられる)。
+        # _send_frame は _targets のスナップショットを取るので、送出中に
+        # 閉じても該当フレームは _sock_for で作り直されるだけで例外にならない。
+        for old in [t for t in self._socks if t not in self._targets]:
+            try:
+                self._socks.pop(old).close()
+            except Exception:
+                pass
+        logger.info(f"VideoStreamer targets -> {self._targets}")
+
+    def set_target(self, ip: str, port: int = None):
+        """送出先を1台だけに切り替える (set_targets の単一指定版)。"""
+        self.set_targets([ip], port)
 
     def set_loop(self, loop: bool):
         """ループ再生フラグを切り替える (再生中に変更すると末尾到達時の挙動に反映)。"""
@@ -212,7 +290,7 @@ class VideoStreamer:
                     eff_fps = src_fps / skip
                     period = 1.0 / max(1.0, eff_fps)
                     logger.info(f"streaming {entry['path']} src={src_fps:.0f}fps "
-                                f"-> {eff_fps:.1f}fps (skip {skip}) -> {self._target}")
+                                f"-> {eff_fps:.1f}fps (skip {skip}) -> {self._targets}")
                     next_t = time.time()
                     next_preview = 0.0   # 次に UI プレビューを送る時刻 (即送出から開始)
                     while not self._stop.is_set():
@@ -256,6 +334,10 @@ class VideoStreamer:
                         idx = 0
                     else:
                         break
+        except Exception:
+            # ここに来るのは送出以外の想定外エラー (デコード等)。従来は例外が
+            # スレッド外へ抜けて「なぜ再生が止まったか」が記録されなかった。
+            logger.exception("streaming thread aborted")
         finally:
             if not self._stop.is_set():
                 # 自然終了 (loop=False でプレイリスト末尾に到達)。stop() を経由しない
@@ -267,8 +349,36 @@ class VideoStreamer:
         logger.info("streaming ended")
 
     def _send_frame(self, fid, jpeg):
+        """1フレームをチャンク分割して全宛先へ送出する。
+
+        送信失敗 (到達不能な core、送信バッファ満杯) は宛先ごとに握り潰す。
+        ここで例外を投げると _run のループを抜けて再生スレッドごと終了し、
+        以後 UI から再生し直すまでフレームが出なくなる。
+        """
         n = (len(jpeg) + MAX_CHUNK - 1) // MAX_CHUNK
+        # ループ中に set_targets() で差し替わっても一貫した宛先で1フレームを送る
+        targets = self._targets
         for ci in range(n):
             part = jpeg[ci * MAX_CHUNK:(ci + 1) * MAX_CHUNK]
             hdr = struct.pack("<IIHHHH", MAGIC, fid & 0xFFFFFFFF, ci, n, len(part), 0)
-            self._sock.sendto(hdr + part, self._target)
+            dgram = hdr + part
+            for target in targets:
+                try:
+                    self._sock_for(target).sendto(dgram, target)
+                except OSError as e:
+                    # BlockingIOError (EWOULDBLOCK) もここに入る
+                    self._note_send_error(target, e)
+
+    def _note_send_error(self, target, err):
+        """送信失敗を宛先ごとに数え、たまにまとめてログに出す。
+
+        毎チャンク出すと 15fps x チャンク数ぶん流れてログが埋まるため、
+        30秒に1回だけ累計を出す。
+        """
+        key = f"{target[0]}:{target[1]}"
+        self._send_errors[key] = self._send_errors.get(key, 0) + 1
+        now = time.time()
+        if now - self._send_error_logged >= 30.0:
+            self._send_error_logged = now
+            logger.warning(f"UDP send failures (累計): {self._send_errors} "
+                           f"last={type(err).__name__} {err}")

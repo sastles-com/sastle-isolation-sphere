@@ -59,8 +59,48 @@ async def lifespan(app: FastAPI):
     app.state.video_streamer = video_streamer
     app.state.config_service = config_service
 
-    # config の事前設定を反映: params 既定値 / loop / autoplay
+    def retarget_streamer(online_ids=None):
+        """映像 (UDP) の宛先を「操作対象 ∩ オンライン」に絞る。
+
+        到達不能な core を宛先に含めると、その IP の ARP が解決できないまま
+        カーネルの未解決近傍キューと wlp1s0 の送信キューを埋め、生きている core
+        へのチャンクまで EWOULDBLOCK で落ちる (実測 9%欠損 = フレームの過半が
+        再構成不能)。宛先から外すのが唯一の構造的な解。
+
+        online_ids が None のときは StateManager の現在値を使う。
+        オンラインが1台も無い場合は絞り込まず操作対象そのままに戻す:
+        死活判定の一時的な取りこぼしや、起動直後でまだ publish していない core
+        で映像が出なくなるのを防ぐ (フェイルオープン)。
+        """
+        active = config_service.get_active_sphere()
+        wanted = config_service.get_target_ips(active)
+        if online_ids is None:
+            online_ids = state_manager.online_ids()
+        live_ips = {
+            sp.get("static_ip") for sp in config_service.get_spheres()
+            if sp.get("id") in set(online_ids) and sp.get("static_ip")
+        }
+        effective = [ip for ip in wanted if ip in live_ips] or wanted
+        video_streamer.set_targets(effective)
+
+    app.state.retarget_streamer = retarget_streamer
+
+    # core の死活監視。publish が途切れた core を online から外して UI に伝え、
+    # 同時に映像の宛先からも外す (落ちた core が生存 core の映像を妨害する)
+    presence_task = asyncio.create_task(
+        state_manager.presence_sweep_loop(on_change=retarget_streamer))
+
+    # config の事前設定を反映: spheres / 操作対象 / params 既定値 / loop / autoplay
     try:
+        # デバイスレジストリ (config.json の spheres[]) と既定の操作対象を反映。
+        # コマンドは MQTT sphere/<id>/command/*、映像は UDP でこの core に送られる。
+        state_manager.set_spheres(config_service.get_spheres())
+        active_sphere = config_service.get_active_sphere()
+        state_manager.set_initial_target(active_sphere)
+        # 起動直後はまだ誰も publish していないので、フェイルオープンで
+        # 操作対象そのまま (= 従来と同じ宛先) になる
+        retarget_streamer()
+
         params = config_service.get_params()
         state_manager.set_initial_params(params)
         playback_cfg = config_service.get_playback()
@@ -76,6 +116,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     clock_task.cancel()
+    presence_task.cancel()
     video_streamer.stop()
     mqtt_service.stop()
     db.close()

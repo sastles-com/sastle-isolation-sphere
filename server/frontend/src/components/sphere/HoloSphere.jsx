@@ -4,6 +4,7 @@ import { Sphere } from '@react-three/drei';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { apiGet } from '../../lib/api';
 import * as THREE from 'three';
+import { selectDeviceImu } from '../../lib/selectDeviceImu';
 
 // HUE (0-360) to RGB hex conversion
 const hueToRgb = (hue) => {
@@ -342,10 +343,11 @@ const IMUControlledSphere = ({ hue, brightness, colorMode }) => {
 
     useEffect(() => {
         // Update quaternion when IMU data received.
-        // 選択中の sphere があればそのデバイス別IMUを使い、無ければ後方互換の単一値にフォールバック。
+        // 表示は1台ぶんに固定する。操作対象が 'all' のときの代表機の決め方は
+        // selectDeviceImu() 側に集約 (素朴なフォールバックだと2台の姿勢が
+        // 交互に入って振動する)。
         if (lastMessage && lastMessage.type === 'STATE_UPDATE') {
-            const imu = (selectedDeviceId && lastMessage.payload?.devices?.[selectedDeviceId]?.imu)
-                || lastMessage.payload?.imu;
+            const { imu } = selectDeviceImu(lastMessage.payload, selectedDeviceId);
             if (imu) {
                 const { w, x, y, z } = imu;
                 // Three.js uses (x, y, z, w) order

@@ -106,15 +106,16 @@ bool MQTTManager::connect() {
         Serial.println("MQTT connected!");
         
         // 接続時のデフォルト購読
-        // 1. デバイス固有のコマンドトピック
+        // 1. 自機宛のコマンドトピック sphere/<id>/command/#
+        //    (WebUI で操作対象 core を選んだときはこちらに届く)
         char topic[64];
-        _deviceTopic("command", topic, sizeof(topic));
+        _deviceTopic("command/#", topic, sizeof(topic));
         subscribe(topic);
 
         // 2. 全デバイス向けの状態トピック (StateManagerから配信)
         subscribe(topics::kAllState);
 
-        // 3. 全デバイス向けのコマンドトピック
+        // 3. 全デバイス向けのコマンドトピック (操作対象 = ALL のとき)
         subscribe(topics::kAllCommandWild);  // ワイルドカードで全コマンドを購読
 
         // ステータス送信（JSON形式）

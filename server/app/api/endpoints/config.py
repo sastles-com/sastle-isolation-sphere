@@ -18,8 +18,48 @@ class SettingsUpdate(BaseModel):
 
 @router.get("/settings")
 async def get_settings(request: Request):
-    """config.json の params / playback を返す。"""
+    """config.json の params / playback / spheres を返す。"""
     return request.app.state.config_service.get_public()
+
+
+# ===== 操作対象 core (spheres レジストリ) =====
+# core は同一 config.json を共有し、自機 MAC で spheres[] の自分のエントリを選ぶ。
+# サーバーは選択された core にだけコマンド (MQTT) と映像 (UDP) を送る。
+
+class ActiveSphereUpdate(BaseModel):
+    id: str  # spheres[].id または "all" (全 core へブロードキャスト)
+
+
+@router.get("/spheres")
+async def get_spheres(request: Request):
+    """登録されている core の一覧と現在の操作対象を返す。"""
+    cs = request.app.state.config_service
+    return {"spheres": cs.get_spheres(), "active": cs.get_active_sphere()}
+
+
+@router.put("/spheres/active")
+async def set_active_sphere(request: Request, body: ActiveSphereUpdate):
+    """操作対象 core を切り替える。
+
+    コマンド (MQTT sphere/<id>/command/*) と映像 (UDP) の宛先を同時に切り替え、
+    config.json の active_sphere に永続化する。
+    """
+    cs = request.app.state.config_service
+    try:
+        active = cs.set_active_sphere(body.id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # 宛先はオンラインの core だけに絞る (到達不能な core を混ぜると、その IP の
+    # ARP 未解決が送信キューを埋めて生存 core の映像まで壊す)。実処理は lifespan の
+    # retarget_streamer が持ち、死活変化時と同じ経路を通す。
+    request.app.state.retarget_streamer()
+    await request.app.state.state_manager.set_target(active)
+    return {
+        "active": active,
+        "targets": request.app.state.video_streamer.get_targets(),
+        "requested": cs.get_target_ips(active),
+    }
 
 
 # ===== LED 物理レイアウト配信 (実機と同一の core/data CSV が単一ソース) =====

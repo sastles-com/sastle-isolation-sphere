@@ -179,10 +179,29 @@ public:
     UIConfig getUIConfig();
     
     /**
-     * @brief 球体設定を取得
+     * @brief 自機の球体設定を取得
      * @return SphereConfig構造体
+     *
+     * config.json の spheres[] から「自機の MAC アドレスに一致するエントリ」を
+     * 選んで返す。これにより全 core が同一の config.json (uploadfs) を共有できる。
+     * 解決結果はキャッシュされ、初回呼び出し時に選択理由をログ出力する。
+     *
+     * 解決順序:
+     *   1. spheres[] のうち mac が自機 MAC と一致するエントリ
+     *   2. ビルドフラグ -D SPHERE_ID="sphereNNN" と id が一致するエントリ
+     *      (新基板で MAC が未採番のときのブートストラップ用)
+     *   3. mac が空の未採番スロット (警告ログ付き。稼働中 core との IP/clientId
+     *      衝突を避けるため spheres[0] より先に選ぶ)
+     *   4. spheres[0] (警告ログ付き。衝突の可能性あり)
+     *   5. 旧形式の単一キー "sphere" (後方互換)
      */
     SphereConfig getSphereConfig();
+
+    /**
+     * @brief 自機の WiFi STA MAC アドレスを "AA:BB:CC:DD:EE:FF" 形式で取得
+     * @note WiFi 未初期化でも efuse から読めるため config 解決時に使用できる。
+     */
+    String getSelfMac();
     
     /**
      * @brief PSRAM有効状態を取得
@@ -202,12 +221,13 @@ public:
     int getMQTTPort() { return doc["wifi"]["mqtt_port"] | 1883; }
     int getUDPPort() { return doc["wifi"]["udp_port"] | 8889; }
     
-    String getSphereID() { return doc["sphere"]["id"] | ""; }
-    String getSphereMAC() { return doc["sphere"]["mac"] | ""; }
-    String getSphereIP() { return doc["sphere"]["static_ip"] | ""; }
+    // sphere 系は spheres[] から自機エントリを解決した結果を返す (getSphereConfig 経由)
+    String getSphereID() { return getSphereConfig().id; }
+    String getSphereMAC() { return getSphereConfig().mac; }
+    String getSphereIP() { return getSphereConfig().static_ip; }
     
-    bool isLEDEnabled() { return doc["sphere"]["features"]["LED"] | false; }
-    String getIMUType() { return doc["sphere"]["features"]["IMU"] | ""; }
+    bool isLEDEnabled() { return getSphereConfig().LED_enabled; }
+    String getIMUType() { return getSphereConfig().IMU_type; }
     
     String getLayoutPath() { return doc["system"]["paths"]["layout"] | "/led_layouts-5strip.csv"; }
     String getImagesPath() { return doc["system"]["paths"]["images"] | "/images/"; }
@@ -226,7 +246,7 @@ public:
      * @brief LCD表示デバッグモードを取得
      * @return true デバッグ表示有効, false 無効
      */
-    bool getLCDDebugEnabled() { return doc["sphere"]["features"]["LCD"]["debug"] | false; }
+    bool getLCDDebugEnabled() { return getSphereConfig().lcd.debug; }
 
     // params ブロック = 表示パラメータの起動時デフォルト (CommandHandler::_params)。
     // MQTT の params コマンドで実行時に上書きされる。fallback は server 側
@@ -248,6 +268,17 @@ public:
 private:
     DynamicJsonDocument doc{8192};  // 8KB buffer for config
     bool parseJSON(const String& jsonStr);
+
+    SphereConfig _sphere;            ///< 解決済みの自機エントリ (キャッシュ)
+    bool _sphereResolved = false;    ///< _sphere が解決済みか
+    String _selfMac;                 ///< 自機 MAC (キャッシュ)
+
+    /// spheres[] から自機エントリを解決して _sphere に格納する
+    void _resolveSphere();
+    /// JSON の1エントリを SphereConfig へパースする
+    static void _parseSphereEntry(JsonVariantConst src, SphereConfig& out);
+    /// MAC 比較用の正規化 (区切り文字除去 + 大文字化)
+    static String _normalizeMac(const String& mac);
 };
 
 } // namespace sastle

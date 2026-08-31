@@ -18,11 +18,13 @@ except ImportError:
 
 from app.core.config import (
     CONFIG_SEARCH_PATHS,
+    MQTT_ANY_COMMAND_TOPIC_WILDCARD,
+    MQTT_ANY_LOG_TOPIC_WILDCARD,
+    MQTT_ANY_STATUS_TOPIC_WILDCARD,
     MQTT_BROKER_PORT,
     MQTT_CLIENT_ID,
     MQTT_CLOCK_INTERVAL_SEC,
     MQTT_CLOCK_TOPIC,
-    MQTT_COMMAND_TOPIC_WILDCARD,
     MQTT_DEVICE_ID,
 )
 from app.services.state_manager import StateManager
@@ -93,21 +95,28 @@ class MQTTService:
             return "localhost"
 
     def _load_device_id(self):
-        """Load device ID from config.json (sphere.id).
+        """Load the default device ID from config.json.
 
-        ファームと同じ config.json を読み、デバイス ID を一致させる。
-        見つからなければ従来のハードコード値 MQTT_DEVICE_ID にフォールバック。
+        ファームと同じ config.json を読み、既定の操作対象 core の id を得る。
+        新形式は spheres[] + active_sphere、旧形式は単一キー sphere.id。
+        購読は全 core 分をワイルドカードで行うため、この値は表示・診断用の既定値。
         """
         try:
             for path in CONFIG_SEARCH_PATHS:
                 if os.path.exists(path):
                     with open(path, 'r') as f:
                         config = json.load(f)
-                        device_id = config.get("sphere", {}).get("id")
-                        if device_id:
-                            logger.info(f"Loaded device ID from config: {device_id}")
-                            return device_id
-                        break
+                    spheres = config.get("spheres")
+                    if isinstance(spheres, list) and spheres:
+                        ids = [s.get("id") for s in spheres if isinstance(s, dict) and s.get("id")]
+                        active = config.get("active_sphere")
+                        device_id = active if active in ids else (ids[0] if ids else None)
+                    else:
+                        device_id = (config.get("sphere") or {}).get("id")
+                    if device_id:
+                        logger.info(f"Loaded device ID from config: {device_id}")
+                        return device_id
+                    break
         except Exception as e:
             logger.error(f"Failed to load device ID: {e}, using default")
         logger.info(f"Using default device ID: {MQTT_DEVICE_ID}")
@@ -132,20 +141,20 @@ class MQTTService:
             client.subscribe(topic)
             logger.info(f"Subscribed to topic: {topic}")
             
-            # Subscribe to status topic
-            status_topic = f"sphere/{self.device_id}/status"
-            client.subscribe(status_topic)
-            logger.info(f"Subscribed to topic: {status_topic}")
-            
-            # Subscribe to command topics (wildcard for all command types)
-            command_topic = MQTT_COMMAND_TOPIC_WILDCARD
-            client.subscribe(command_topic)
-            logger.info(f"Subscribed to command topic: {command_topic}")
+            # Subscribe to status topic (全 core 分)
+            client.subscribe(MQTT_ANY_STATUS_TOPIC_WILDCARD)
+            logger.info(f"Subscribed to topic: {MQTT_ANY_STATUS_TOPIC_WILDCARD}")
+
+            # Subscribe to command topics
+            # "sphere/+/command/#" は sphere/all/... と sphere/<id>/... の両方に
+            # マッチする。両方を個別に購読するとマッチした購読ごとに配信され、
+            # コマンドが二重処理されるため、ここは1つだけ購読する。
+            client.subscribe(MQTT_ANY_COMMAND_TOPIC_WILDCARD)
+            logger.info(f"Subscribed to command topic: {MQTT_ANY_COMMAND_TOPIC_WILDCARD}")
 
             # Subscribe to debug log topic (plain-text lines, forwarded to UI)
-            log_topic = f"sphere/{self.device_id}/log"
-            client.subscribe(log_topic)
-            logger.info(f"Subscribed to topic: {log_topic}")
+            client.subscribe(MQTT_ANY_LOG_TOPIC_WILDCARD)
+            logger.info(f"Subscribed to topic: {MQTT_ANY_LOG_TOPIC_WILDCARD}")
         else:
             logger.error(f"Failed to connect to MQTT broker. Return code: {rc}")
             self.is_connected = False
@@ -162,7 +171,7 @@ class MQTTService:
 
             # デバッグログはプレーンテキストなので JSON パース前に処理する
             if topic.endswith("/log"):
-                self._handle_log(msg.payload.decode(errors="replace"))
+                self._handle_log(topic.split("/")[1], msg.payload.decode(errors="replace"))
                 return
 
             payload = json.loads(msg.payload.decode())
@@ -178,20 +187,25 @@ class MQTTService:
                 self._handle_imu_data(device_id, payload)
             # Handle status data
             elif topic.endswith("/status"):
-                self._handle_status_data(payload)
+                self._handle_status_data(topic.split("/")[1], payload)
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode MQTT message: {e}")
         except Exception as e:
             logger.error(f"Error handling MQTT message: {e}")
 
-    def _handle_log(self, line: str):
-        """Forward a plain-text device debug log line to WebSocket clients"""
+    def _handle_log(self, device_id: str, line: str):
+        """Forward a plain-text device debug log line to WebSocket clients
+
+        複数 core が同時にログを出すため、どの core の行かを先頭に付ける。
+        """
         if not self.state_manager:
             return
+        self.state_manager.touch_device(device_id)
         line = line.rstrip("\r\n")
         if not line:
             return
+        line = f"[{device_id}] {line}"
         self._submit_coroutine(
             self.state_manager.broadcast_log(line),
             "broadcast log line"
@@ -254,14 +268,16 @@ class MQTTService:
         except Exception as e:
             logger.error(f"Error handling IMU data: {e}")
 
-    def _handle_status_data(self, payload):
-        """Handle device status data"""
+    def _handle_status_data(self, device_id: str, payload):
+        """Handle device status data (topic: sphere/<device_id>/status)"""
         # TODO: MQTTスレッド内で新しいイベントループを生成しており、
         # メインループ上の observers/_state と競合しうる。
         # _submit_coroutine() に統一すべきだが挙動が変わるため別タスクで対応。
         if not self.state_manager:
             logger.warning("StateManager not set, skipping status update")
             return
+
+        self.state_manager.touch_device(device_id)
 
         try:
             # Update system state with device status
@@ -276,6 +292,7 @@ class MQTTService:
                     self.state_manager.update_state("system", {
                         **self.state_manager.get_state().get("system", {}),
                         "device_status": payload.get("status", "unknown"),
+                        "device_status_from": device_id,
                         "last_update": payload.get("timestamp", "")
                     })
                 )
@@ -284,6 +301,7 @@ class MQTTService:
                     self.state_manager.update_state("system", {
                         **self.state_manager.get_state().get("system", {}),
                         "device_status": payload.get("status", "unknown"),
+                        "device_status_from": device_id,
                         "last_update": payload.get("timestamp", "")
                     })
                 )

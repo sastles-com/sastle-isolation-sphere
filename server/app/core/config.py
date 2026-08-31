@@ -11,6 +11,26 @@ MQTT_STATE_TOPIC = "sphere/all/state"
 MQTT_COMMAND_TOPIC_PREFIX = "sphere/all/command"
 MQTT_COMMAND_TOPIC_WILDCARD = "sphere/all/command/#"
 
+# 操作対象 core を選んだときの宛先。ファーム側は sphere/<id>/command/# を購読する
+# (core/src/MQTTManager.cpp)。"all" を選んだ場合は MQTT_COMMAND_TOPIC_PREFIX を使う。
+MQTT_DEVICE_COMMAND_PREFIX_FMT = "sphere/{device_id}/command"
+DEVICE_TARGET_ALL = "all"
+
+# ===== core の死活判定 =====
+# core は IMU を約8.5Hz で publish し続けるため、これが途切れたことを
+# オフラインの判定に使う。タイムアウトは取りこぼし数発を許容する値にする
+# (MQTT の再接続やブローカーの一時的な詰まりで点滅させない)。
+DEVICE_OFFLINE_TIMEOUT_SEC = 3.0
+# online 集合の変化を監視する周期。変化が無ければ配信しないので実質無負荷。
+DEVICE_PRESENCE_SWEEP_SEC = 1.0
+
+# サーバーが購読するワイルドカード。"sphere/+/command/#" は sphere/all/... も含むため、
+# MQTT_COMMAND_TOPIC_WILDCARD と併用しない (同一クライアントで購読が重複すると
+# ブローカーがマッチした購読ごとに配信し、コマンドが二重処理される)。
+MQTT_ANY_COMMAND_TOPIC_WILDCARD = "sphere/+/command/#"
+MQTT_ANY_STATUS_TOPIC_WILDCARD = "sphere/+/status"
+MQTT_ANY_LOG_TOPIC_WILDCARD = "sphere/+/log"
+
 # 時刻同期ビーコン (複数コアの共通タイムベース。設計: core/doc/time_sync_show.md)
 # 1秒周期・QoS0・非retain でブロードキャストする。
 MQTT_CLOCK_TOPIC = "sphere/all/clock"
