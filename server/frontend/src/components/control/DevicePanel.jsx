@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useStateUpdate } from '../../hooks/useSphereState';
 import { useCorePresence } from '../../hooks/useCorePresence';
 import { useWebSocket } from '../../contexts/WebSocketContext';
-import { apiPut } from '../../lib/api';
+import { apiPost, apiPut } from '../../lib/api';
 import { TARGET_ALL } from '../../lib/selectDeviceImu';
 import { CoreIndicator } from '../ui/CoreIndicator';
 import { GlassButton } from '../ui/GlassButton';
@@ -33,7 +33,8 @@ const Row = ({ k, v }) => (
  * 死活判定) として区別する。切替は 2 系統に効く:
  *   - WebSocket 経由のコマンド: sendMessage が device を載せる (WebSocketContext)
  *   - サーバー保持の操作対象:   PUT /api/config/spheres/active で MQTT/UDP の宛先ごと切替
- * 再起動等の system コマンドは将来枠 (仕様 §2.3)。
+ * REBOOT は POST /api/command/system {action:"restart", device} → MQTT
+ * sphere/<id>/command/system。core が固まって MQTT を処理できない場合は効かない。
  */
 export const DevicePanel = () => {
     const [system, setSystem] = useState(null);
@@ -87,6 +88,25 @@ export const DevicePanel = () => {
     ];
     const current = selectedDeviceId ?? serverTarget ?? ids[0];
 
+    // 再起動: 操作対象 core に system {"action":"restart"} を送る (core は 1 秒後に
+    // ESP.restart)。loop タスクが生きている場合のみ効き、完全ハング時は電源再投入。
+    const [rebooting, setRebooting] = useState(false);
+    const reboot = useCallback(async () => {
+        const label = current === TARGET_ALL ? '全 core' : (current ?? '操作対象');
+        if (!window.confirm(`${label} を再起動します。よろしいですか？`)) return;
+        setRebooting(true);
+        try {
+            const body = { action: 'restart' };
+            if (current && current !== TARGET_ALL) body.device = current;
+            const r = await apiPost('/api/command/system', body);
+            if (!r.ok) console.warn('reboot failed:', await r.text());
+        } catch (e) {
+            console.warn('reboot failed:', e);
+        } finally {
+            setTimeout(() => setRebooting(false), 3000);  // 連打防止
+        }
+    }, [current]);
+
     return (
         <Section title="Device">
             {options.length > 1 && (
@@ -113,9 +133,10 @@ export const DevicePanel = () => {
             <Row k="Temp" v={system?.temp != null ? `${Math.round(system.temp)}°C` : '—'} />
             <Row k="Host" v={window.location.hostname} />
             <div style={{ marginTop: 10 }}>
-                <GlassButton variant="pill" disabled title="再起動 (将来対応)"
+                <GlassButton variant="pill" disabled={rebooting || !current} onClick={reboot}
+                    title="操作対象の core を再起動 (system restart)"
                     style={{ width: '100%', color: 'var(--err)', borderColor: 'rgb(248 113 113 / .3)' }}>
-                    REBOOT (将来対応)
+                    {rebooting ? 'REBOOTING…' : 'REBOOT'}
                 </GlassButton>
             </div>
         </Section>

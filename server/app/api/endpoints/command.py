@@ -44,6 +44,36 @@ class LEDCommand(BaseModel):
     imu_i2c_khz: Optional[int] = None  # IMU の I2C クロック [kHz] 10〜400 (配線切り分け用)
     imu_wordread: Optional[bool] = None  # quat を 2B×4 回に分割読み (多バイト転送不良の個体用)
 
+class SystemCommand(BaseModel):
+    action: str  # "restart" (ファーム CommandHandler::_handleSystem が処理)
+    device: Optional[str] = None  # 宛先 core id。省略時は現在の操作対象
+
+
+@router.post("/command/system")
+async def send_system_command(command: SystemCommand, request: Request):
+    """
+    system コマンドを送信 (再起動など)。
+
+    例: {"action": "restart", "device": "sphere002"}
+    core 側は 1 秒後に ESP.restart() する。loop タスクが生きている場合のみ効く
+    (完全ハング時は電源再投入が必要)。
+    """
+    if command.action not in ("restart",):
+        raise HTTPException(status_code=400, detail=f"unsupported action: {command.action}")
+    try:
+        mqtt_service = request.app.state.mqtt_service
+        payload = {"action": command.action}
+        prefix = request.app.state.state_manager.command_prefix(command.device)
+        mqtt_service.client.publish(f"{prefix}/system", _mqtt_json(payload), qos=1)
+        logger.info(f"System command sent to {prefix}: {payload}")
+        return {"status": "ok", "command": payload, "topic": f"{prefix}/system"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to send system command: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/command/playback")
 async def send_playback_command(command: PlaybackCommand, request: Request):
     """
