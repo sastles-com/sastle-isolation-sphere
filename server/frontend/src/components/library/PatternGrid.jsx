@@ -11,7 +11,7 @@ const STUDIO_URL = '/studio';
  * Studio 起動リンク + アップロード / 削除 / 単発再生。
  * パターンは実体が equirectangular 動画なので再生/削除は素材動画と同じ経路を使う。
  */
-export const PatternGrid = ({ patterns, currentVideoId, isStreaming, onPlay, onDelete, onUpload }) => {
+export const PatternGrid = ({ patterns, currentVideoId, isStreaming, onPlay, onDelete, onAdd, onUpload }) => {
     const fileRef = useRef(null);
     const [uploading, setUploading] = useState(false);
 
@@ -63,6 +63,7 @@ export const PatternGrid = ({ patterns, currentVideoId, isStreaming, onPlay, onD
                             playing={isStreaming && v.id === currentVideoId}
                             onPlay={() => onPlay(v)}
                             onDelete={() => onDelete(v)}
+                            onAdd={onAdd ? () => onAdd(v) : undefined}
                         />
                     ))}
                 </div>

@@ -50,6 +50,33 @@ export const LibrarySheet = ({ pb }) => {
         if (window.confirm(`「${v.title}」を削除しますか?`)) await pb.deleteVideo(v.id);
     };
 
+    // 動画/パターンをプレイリストへ追加。追加先はアクティブなプレイリスト。
+    // 未設定でプレイリストが 1 本ならそれ、複数なら番号で選ぶ (UI v2 はまだ
+    // ピッカーを持たないので prompt で代替)。0 本なら作成を促す。
+    const handleAddToPlaylist = async (v) => {
+        const pls = pb.playlists;
+        if (pls.length === 0) {
+            if (!window.confirm('プレイリストがありません。作成しますか?')) return;
+            const name = window.prompt('プレイリスト名', 'Playlist 1');
+            if (!name || !(await pb.createPlaylist(name))) return;
+            // 作成直後の一覧は再取得待ちなので、ユーザーにもう一度押してもらう
+            window.alert(`「${name}」を作成しました。もう一度 +PL を押して追加してください。`);
+            return;
+        }
+        let target = pb.currentPlaylist ?? (pls.length === 1 ? pls[0] : null);
+        if (!target) {
+            const menu = pls.map((pl, i) => `${i + 1}: ${pl.name} (${pl.item_count ?? 0}本)`).join('\n');
+            const ans = window.prompt(`追加先のプレイリスト番号を入力\n${menu}`, '1');
+            const idx = parseInt(ans, 10) - 1;
+            if (Number.isNaN(idx) || idx < 0 || idx >= pls.length) return;
+            target = pls[idx];
+        } else if (!window.confirm(`「${v.title}」を「${target.name}」に追加しますか?`)) {
+            return;
+        }
+        const ok = await pb.addToPlaylist(target.id, v.id);
+        if (!ok) window.alert('追加に失敗しました');
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             <div style={{ padding: '4px 20px 10px', flexShrink: 0 }}>
@@ -80,6 +107,7 @@ export const LibrarySheet = ({ pb }) => {
                         isStreaming={pb.isStreaming}
                         onPlay={(v) => pb.playVideo(v.id)}
                         onDelete={handleDeleteVideo}
+                        onAdd={handleAddToPlaylist}
                         onUpload={pb.uploadVideo}
                     />
                 )}
@@ -90,6 +118,7 @@ export const LibrarySheet = ({ pb }) => {
                         isStreaming={pb.isStreaming}
                         onPlay={(v) => pb.playVideo(v.id)}
                         onDelete={handleDeleteVideo}
+                        onAdd={handleAddToPlaylist}
                         onUpload={pb.uploadVideo}
                     />
                 )}

@@ -151,6 +151,13 @@ export const usePlayback = () => {
         return r.ok;
     }, [fetchPlaylists]);
 
+    // 動画/パターンをプレイリスト末尾に追加 (POST /playlists/{pid}/items)
+    const addToPlaylist = useCallback(async (pid, videoId) => {
+        const r = await apiPost(`${PB}/playlists/${pid}/items`, { video_id: videoId });
+        if (r.ok) fetchPlaylists();  // item_count を更新
+        return r.ok;
+    }, [fetchPlaylists]);
+
     const uploadVideo = useCallback(async (file, kind = 'video') => {
         const fd = new FormData();
         fd.append('file', file);
@@ -173,7 +180,7 @@ export const usePlayback = () => {
         isPlaying, isStreaming, loopOn, activeId, currentPlaylist, currentVideo,
         play, pauseToggle, togglePlay, stop, toggleLoop, setActivePlaylist,
         activateAndPlay, playVideo, skipNext, skipPrev,
-        createPlaylist, deletePlaylist, uploadVideo, deleteVideo,
+        createPlaylist, deletePlaylist, addToPlaylist, uploadVideo, deleteVideo,
         refresh: fetchPlayback, refreshPlaylists: fetchPlaylists, refreshVideos: fetchVideos,
     };
 };

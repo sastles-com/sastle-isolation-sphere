@@ -6,7 +6,7 @@ import { IconUpload } from '../ui/icons';
 /**
  * VideoGrid — 素材動画の 2 列グリッド。アップロード / 削除 / 単発再生。
  */
-export const VideoGrid = ({ videos, currentVideoId, isStreaming, onPlay, onDelete, onUpload }) => {
+export const VideoGrid = ({ videos, currentVideoId, isStreaming, onPlay, onDelete, onAdd, onUpload }) => {
     const fileRef = useRef(null);
     const [uploading, setUploading] = useState(false);
 
@@ -51,6 +51,7 @@ export const VideoGrid = ({ videos, currentVideoId, isStreaming, onPlay, onDelet
                             playing={isStreaming && v.id === currentVideoId}
                             onPlay={() => onPlay(v)}
                             onDelete={() => onDelete(v)}
+                            onAdd={onAdd ? () => onAdd(v) : undefined}
                         />
                     ))}
                 </div>

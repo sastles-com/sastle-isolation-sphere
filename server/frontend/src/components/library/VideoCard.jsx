@@ -5,10 +5,10 @@ import { GlassButton } from '../ui/GlassButton';
 import { IconPlay, IconTrash } from '../ui/icons';
 
 /**
- * VideoCard (glass 版) — サムネイル + タイトル + メタ + 再生/削除。
- * サムネイルタップ or 再生ボタンで単発再生。
+ * VideoCard (glass 版) — サムネイル + タイトル + メタ + 再生/+PL/削除。
+ * サムネイルタップ or 再生ボタンで単発再生。+PL はプレイリストへ追加 (onAdd 省略時は非表示)。
  */
-export const VideoCard = ({ video, playing, onPlay, onDelete }) => (
+export const VideoCard = ({ video, playing, onPlay, onDelete, onAdd }) => (
     <motion.div
         className="glass"
         whileTap={{ scale: 0.98 }}
@@ -75,6 +75,12 @@ export const VideoCard = ({ video, playing, onPlay, onDelete }) => (
                     style={{ flex: 1, minHeight: 36, height: 36 }}>
                     <IconPlay size={16} />
                 </GlassButton>
+                {onAdd && (
+                    <GlassButton title="プレイリストに追加" onClick={onAdd}
+                        style={{ minWidth: 44, minHeight: 36, height: 36, fontSize: 12, fontWeight: 700 }}>
+                        +PL
+                    </GlassButton>
+                )}
                 <GlassButton title="削除" onClick={onDelete}
                     style={{ minWidth: 36, minHeight: 36, width: 36, height: 36, color: 'var(--err)' }}>
                     <IconTrash size={16} />
