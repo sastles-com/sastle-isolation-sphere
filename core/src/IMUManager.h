@@ -228,6 +228,16 @@ public:
      */
     void setWordRead(bool on) { _wordRead = on; }
     bool wordRead() const { return _wordRead; }
+
+    // --- 診断スナップショット (IMU タスクが書き、loop タスクが取り出して MQTT へ) ---
+    // sastle::Log は単一行バッファ + 同期 publish で排他が無いため、IMU タスク
+    // (core0) から呼ぶと loop (core1) の出力と混ざり、PubSubClient が詰まって
+    // core0 が十数秒停止した (2026-09-06 実測: imu_read=0/s の窓)。IMU タスク側は
+    // 生バイトを置くだけにし、ログ出力は必ず loop 側 (main.cpp の周期ログ) で行う。
+    bool takeDiagReadFail(uint8_t out[8]);              ///< 直近の読み失敗 (生 8B)
+    bool takeDiagDiscard(uint8_t out[8], float& n2);    ///< 直近の棄却 quat (生 8B + ノルム²)
+    bool takeDiagVecPartial(uint8_t& reg, uint8_t out[6]); ///< 直近の補助データ部分読み
+    bool takeDiagClockChanged(uint32_t& hz);            ///< I2C クロック変更が適用された
     
     /**
      * @brief センサー温度を取得
@@ -264,6 +274,11 @@ private:
     // 2B 転送は同時刻でも 100% 成功した (2026-09-06)。OFF は比較実験用。
     volatile bool _wordRead = true;  ///< quat/補助データを 2B 単位のトランザクションで読む
     uint32_t _i2cHz = 100000;      ///< 現在の I2C クロック [Hz]
+    // 診断スナップショット (フラグは volatile、配列は診断用途なので torn read 許容)
+    volatile bool _diagFailNew = false;   uint8_t _diagFailRaw[8] = {0};
+    volatile bool _diagDiscNew = false;   uint8_t _diagDiscRaw[8] = {0}; float _diagDiscN2 = 0;
+    volatile bool _diagVecNew = false;    uint8_t _diagVecReg = 0; uint8_t _diagVecRaw[6] = {0};
+    volatile bool _diagClockNew = false;
     volatile uint32_t _i2cHzPending = 0; ///< 変更要求 (0 = なし)。IMU タスクが適用する
     volatile uint32_t _quatSeq = 0;///< 姿勢を受理するたびに +1 (描画側の鮮度判定用)
     TaskHandle_t _taskHandle = nullptr; ///< 専用ポーリングタスク

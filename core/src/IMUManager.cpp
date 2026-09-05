@@ -124,6 +124,36 @@ bool IMUManager::update() {
     return _updateOnce();
 }
 
+bool IMUManager::takeDiagReadFail(uint8_t out[8]) {
+    if (!_diagFailNew) return false;
+    memcpy(out, _diagFailRaw, 8);
+    _diagFailNew = false;
+    return true;
+}
+
+bool IMUManager::takeDiagDiscard(uint8_t out[8], float& n2) {
+    if (!_diagDiscNew) return false;
+    memcpy(out, _diagDiscRaw, 8);
+    n2 = _diagDiscN2;
+    _diagDiscNew = false;
+    return true;
+}
+
+bool IMUManager::takeDiagVecPartial(uint8_t& reg, uint8_t out[6]) {
+    if (!_diagVecNew) return false;
+    reg = _diagVecReg;
+    memcpy(out, _diagVecRaw, 6);
+    _diagVecNew = false;
+    return true;
+}
+
+bool IMUManager::takeDiagClockChanged(uint32_t& hz) {
+    if (!_diagClockNew) return false;
+    hz = _i2cHz;
+    _diagClockNew = false;
+    return true;
+}
+
 #ifndef IMU_SENSOR_M5IMU
 bool IMUManager::_readVector6(uint8_t reg, float scale, imu::Vector<3>& out) {
     I2cGuard guard(this);
@@ -152,15 +182,14 @@ bool IMUManager::_readVector6(uint8_t reg, float scale, imu::Vector<3>& out) {
         // 静止時に本当に 0 になることが多い (実測 partial=20/s 相当) ので、ここでは
         // _wdPartialReads に数えず (quat 専用の指標に保つ)、再試行しても同じなら
         // 今回は諦めて前回値を維持する (診断用データなので欠けても支障はない)。
-        if (b[4] == 0 && b[5] == 0) continue;
-        if (b[4] == 0xFF && b[5] == 0xFF) {
-            // 0xFF 埋めの部分読み。生バイトを 5 秒に 1 回だけ MQTT ログへ (計装)。
-            static unsigned long lastFfLog = 0;
-            const unsigned long nowFf = millis();
-            if (nowFf - lastFfLog > 5000) {
-                lastFfLog = nowFf;
-                sastle::Log.printf("[IMU] vec reg=0x%02X partial(0xFF) raw=%02X%02X %02X%02X %02X%02X\n",
-                                   reg, b[1], b[0], b[3], b[2], b[5], b[4]);
+        // 末尾ワードの埋め検出は一括読みのときだけ。2B 分割読みでは 1 ワードが
+        // 0xFFFF (= -1 LSB、静止時の gyro z で頻出) でも読み失敗と区別できず、
+        // 正常値を捨ててしまうため行わない。
+        if (!_wordRead && ((b[4] == 0 && b[5] == 0) || (b[4] == 0xFF && b[5] == 0xFF))) {
+            if (!_diagVecNew) {
+                _diagVecReg = reg;
+                memcpy(_diagVecRaw, b, 6);
+                _diagVecNew = true;
             }
             continue;
         }
@@ -237,7 +266,7 @@ bool IMUManager::_updateOnce() {
         I2cGuard guard(this);
         Wire.setClock(hz);
         _i2cHz = hz;
-        sastle::Log.printf("[IMU] I2C clock -> %lu kHz\n", (unsigned long)(hz / 1000));
+        _diagClockNew = true;   // ログは loop 側 (takeDiagClockChanged) で出す
     }
 
     // データ取得: Adafruit の getQuat() は I2C 失敗を無視して古いバッファを返す
@@ -297,11 +326,13 @@ bool IMUManager::_updateOnce() {
             // という矛盾ログを実測)。いずれも z の 2 バイトが 0x0000 になるので、
             // ここで検出して再試行する。z が本当に 0 ぴったりになる確率は 1/16384
             // で、その場合も次サイクルで読み直すだけなので副作用は無い。
-            if (qb[6] == 0 && qb[7] == 0) { _wdPartialReads++; continue; }
+            // (2B 分割読みでは 1 ワード単位で読むので「末尾埋め」は起きず、z=0 や
+            //  z=-1 LSB は正常値の可能性の方が高い。分割読み時はノルム検査に任せる)
+            if (!_wordRead && qb[6] == 0 && qb[7] == 0) { _wdPartialReads++; continue; }
             // 同じく末尾が 0xFFFF (= -1 LSB) の亜種。I2C でスレーブが途中で SDA を
             // 駆動しなくなると残りは 1 (0xFF) として読める。6 バイト読みの gyro/acc/
             // euler で「x だけ妥当で y,z が -1 LSB」が回転中に頻発したのを実測。
-            if (qb[6] == 0xFF && qb[7] == 0xFF) { _wdPartialReads++; continue; }
+            if (!_wordRead && qb[6] == 0xFF && qb[7] == 0xFF) { _wdPartialReads++; continue; }
 
             const float s = 1.0f / 16384.0f;  // 2^14 LSB/unit
             q = imu::Quaternion(
@@ -313,19 +344,11 @@ bool IMUManager::_updateOnce() {
         }
         if (!readOk) {
             _wdReadFails++;
-            // 生バイトを出して「ゼロ埋めか化けか」を切り分ける。5秒に1回だけ。
-            // Serial ではなく sastle::Log なので MQTT で観測できる。
-            static unsigned long lastRawLog = 0;
-            const unsigned long nowRaw = millis();
-            if (nowRaw - lastRawLog > 5000) {
-                lastRawLog = nowRaw;
-                const uint8_t* qb = b;
-                sastle::Log.printf(
-                    "[IMU] quat read failed, raw=%02X %02X %02X %02X %02X %02X %02X %02X"
-                    " (zero=%lu partial=%lu fails=%lu/%lu)\n",
-                    qb[0], qb[1], qb[2], qb[3], qb[4], qb[5], qb[6], qb[7],
-                    (unsigned long)_wdZeroReads, (unsigned long)_wdPartialReads,
-                    (unsigned long)_wdReadFails, (unsigned long)_wdReadTotal);
+            // 生バイトを退避して「ゼロ埋めか 0xFF 埋めか化けか」を切り分ける。
+            // MQTT ログ出力は loop 側 (main.cpp, takeDiagReadFail) が行う。
+            if (!_diagFailNew) {
+                memcpy(_diagFailRaw, b, 8);
+                _diagFailNew = true;
             }
         }
         _wdReadTotal++;
@@ -386,18 +409,14 @@ bool IMUManager::_updateOnce() {
         taskEXIT_CRITICAL(&_quatMux);
         _wdConsecDiscards = 0;
     } else if (readOk) {   // 読み失敗は fail に数えるので disc とは分ける
-        static unsigned long lastBadLog = 0;
         _wdDiscards++;
         _wdConsecDiscards++;
-        // 棄却した生バイトを MQTT ログに出す (2秒に1回)。「どのバイトから化けるか」
+        // 棄却した生バイトを退避 (loop 側が周期ログで出す)。「どのバイトから化けるか」
         // を実機で特定するための計装。
-        if (now - lastBadLog > 2000) {
-            lastBadLog = now;
-            sastle::Log.printf(
-                "[IMU] Discarded quat |q|^2=%.3f raw=%02X%02X %02X%02X %02X%02X %02X%02X"
-                " (discards=%lu)\n",
-                n2, b[1], b[0], b[3], b[2], b[5], b[4], b[7], b[6],
-                (unsigned long)_wdDiscards);
+        if (!_diagDiscNew) {
+            memcpy(_diagDiscRaw, b, 8);
+            _diagDiscN2 = n2;
+            _diagDiscNew = true;
         }
     }
     // 補助データ (aux ON のときだけ)。I2C時間の節約で間引く:

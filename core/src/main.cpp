@@ -428,6 +428,25 @@ void loop() {
             s_loops = 0; s_pReads = rt; s_pFails = rf; s_pDisc = rd; s_pZero = rz;
             s_pPartial = rp;
             s_lastRate = nowR;
+
+            // IMU タスクが退避した診断スナップショットをここ (loop) で出力する。
+            // sastle::Log は排他が無いので IMU タスクから直接呼んではいけない。
+            uint8_t raw[8]; float n2; uint8_t reg; uint32_t hz;
+            if (imuSensor.takeDiagClockChanged(hz)) {
+                sastle::Log.printf("[IMU] I2C clock -> %lu kHz\n", (unsigned long)(hz / 1000));
+            }
+            if (imuSensor.takeDiagReadFail(raw)) {
+                sastle::Log.printf("[IMU] quat read failed, raw=%02X %02X %02X %02X %02X %02X %02X %02X\n",
+                                   raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
+            }
+            if (imuSensor.takeDiagDiscard(raw, n2)) {
+                sastle::Log.printf("[IMU] Discarded quat |q|^2=%.3f raw=%02X%02X %02X%02X %02X%02X %02X%02X\n",
+                                   n2, raw[1], raw[0], raw[3], raw[2], raw[5], raw[4], raw[7], raw[6]);
+            }
+            if (imuSensor.takeDiagVecPartial(reg, raw)) {
+                sastle::Log.printf("[IMU] vec reg=0x%02X partial raw=%02X%02X %02X%02X %02X%02X\n",
+                                   reg, raw[1], raw[0], raw[3], raw[2], raw[5], raw[4]);
+            }
         }
     }
 
