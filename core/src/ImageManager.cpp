@@ -178,6 +178,11 @@ void ImageManager::decodeTaskFunc(void* param) {
             self->_framesDecoded++;
             self->_fpsFrameCount++;
             self->calculateFPS();
+            // 連続受信中も 1 tick 譲る。デコードは 1 フレーム 50〜100ms で 15fps だと
+            // core0 を 80〜100% 占有し、アイドルタスクが 5 秒走れずに TASK_WDT で
+            // リセットした (2026-09-06 実測、重い JPEG 20KB のシーンで頻発)。
+            // 毎フレーム 1ms 譲れば WDT は構造的に防げ、コストは 1.5% 以下。
+            vTaskDelay(1);
         } else {
             vTaskDelay(1);  // フレーム未受信時は譲る
         }

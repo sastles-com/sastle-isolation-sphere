@@ -285,14 +285,16 @@ void setup() {
         imageManager.startDecodeTask(0, 1, 8192);
     }
 
-    // IMUポーリングを専用タスク (Core0, 優先度3) に移す。
-    // loop() から呼んでいた頃は core1 のレンダリングタスク (優先度2) に押されて
-    // 実効 43Hz・間隔 1〜22ms のばらつきになり、描画が同じ姿勢を数フレーム
-    // 使い回してから2ステップ分ジャンプする「カクつき」の主因になっていた。
-    // デコードタスク (優先度1) より高い優先度にして、1周期あたり ~2ms の I2C
-    // アクセスを確実に定刻で実行させる。
+    // IMUポーリングを専用タスク (Core1, 優先度3) で回す。
+    // loop() から呼んでいた頃 (優先度1) は core1 のレンダリングタスク (優先度2) に
+    // 押されて実効 43Hz・間隔 1〜22ms のばらつきになり「カクつき」の主因だった。
+    // 専用タスクを優先度3にすれば描画より先に走るので core1 でも定刻を守れる。
+    // core0 は WiFi + JPEG デコード (1フレーム 50〜100ms、15fps で 80〜100%) で
+    // 予算がなく、IMU タスクを core0 に置くと重い動画で TASK_WDT リセットした
+    // (2026-09-06 実測)。I2C の ISR は Wire.begin() を呼んだ core1 に付いているので、
+    // タスクも core1 に置く方がコア間の起床も減る。CPU コストは 1周期 ~1ms (≈10%)。
     if (imuSensor.isInitialized()) {
-        if (!imuSensor.startTask(0, 3, 4096)) {
+        if (!imuSensor.startTask(1, 3, 4096)) {
             sastle::Log.println("Failed to start IMU task (fallback: loop polling)");
         }
     }
