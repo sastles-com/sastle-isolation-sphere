@@ -273,6 +273,8 @@ void setup() {
     }
     
     // CommandHandler初期化
+    // led {"imu_aux": bool} で IMU の補助データ読みを切り替えるための参照
+    commandHandler.setIMUManager(imuSensor.isInitialized() ? &imuSensor : nullptr);
     if (!commandHandler.begin(&ledManager, &config)) {
         sastle::Log.println("CommandHandler initialization failed");
     }
@@ -404,21 +406,27 @@ static void publishTimeSyncIfDue(unsigned long now) {
 void loop() {
     // --- 実効レート計装 (5秒ごとにMQTTログへ) ---
     {
-        static uint32_t s_loops = 0, s_pReads = 0, s_pFails = 0, s_pDisc = 0, s_pZero = 0;
+        static uint32_t s_loops = 0, s_pReads = 0, s_pFails = 0, s_pDisc = 0, s_pZero = 0,
+                        s_pPartial = 0;
         static unsigned long s_lastRate = 0;
         s_loops++;
         unsigned long nowR = millis();
         if (nowR - s_lastRate >= 5000) {
             uint32_t rt = imuSensor.debugReadTotal(), rf = imuSensor.debugReadFails(),
-                     rd = imuSensor.debugDiscards(), rz = imuSensor.debugZeroReads();
+                     rd = imuSensor.debugDiscards(), rz = imuSensor.debugZeroReads(),
+                     rp = imuSensor.debugPartialReads();
             float dt = (nowR - s_lastRate) * 0.001f;
-            // zero = I2Cが成功を返しつつ全ゼロだった回数。これが多いなら
-            // 「読めていない」ので、レートではなくバス/センサー側の問題。
+            // zero = I2Cが成功を返しつつ全ゼロだった回数、partial = 末尾ゼロ埋めの
+            // 部分読みを検出して再試行した回数。これらが多いなら「読めていない」
+            // ので、レートではなくバス/配線/センサー側の問題。aux=補助データ読み ON/OFF。
             sastle::Log.printf(
-                "[RATE] loop=%.0f/s imu_read=%.0f/s fail=%.0f/s disc=%.0f/s zero=%.0f/s\n",
+                "[RATE] loop=%.0f/s imu_read=%.0f/s fail=%.0f/s disc=%.0f/s zero=%.0f/s partial=%.0f/s aux=%d i2c=%lukHz word=%d\n",
                 s_loops / dt, (rt - s_pReads) / dt,
-                (rf - s_pFails) / dt, (rd - s_pDisc) / dt, (rz - s_pZero) / dt);
+                (rf - s_pFails) / dt, (rd - s_pDisc) / dt, (rz - s_pZero) / dt,
+                (rp - s_pPartial) / dt, imuSensor.auxReads() ? 1 : 0,
+                (unsigned long)(imuSensor.i2cClock() / 1000), imuSensor.wordRead() ? 1 : 0);
             s_loops = 0; s_pReads = rt; s_pFails = rf; s_pDisc = rd; s_pZero = rz;
+            s_pPartial = rp;
             s_lastRate = nowR;
         }
     }

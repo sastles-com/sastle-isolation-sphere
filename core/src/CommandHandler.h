@@ -11,6 +11,7 @@
 #include <ArduinoJson.h>
 #include "LEDManager.h"
 #include "ConfigManager.h"
+#include "IMUManager.h"
 
 namespace sastle {
 
@@ -36,7 +37,13 @@ public:
      * @return true 初期化成功
      */
     bool begin(LEDManager* ledManager, ConfigManager* config);
-    
+
+    /**
+     * @brief IMUManager を紐付ける (led {"imu_aux"} コマンド用、任意)
+     * @param imu IMUManager。nullptr なら imu_aux は無視される
+     */
+    void setIMUManager(IMUManager* imu) { _imuManager = imu; }
+
     /**
      * @brief MQTTメッセージを処理
      * @param topic トピック名
@@ -57,7 +64,8 @@ public:
 private:
     LEDManager* _ledManager;
     ConfigManager* _config;
-    
+    IMUManager* _imuManager = nullptr;
+
     // 現在の状態
     struct {
         uint8_t brightness;  // 0-100

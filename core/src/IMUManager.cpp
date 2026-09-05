@@ -43,7 +43,7 @@ bool IMUManager::begin(ConfigManager& config, uint8_t sda, uint8_t scl) {
     // BNO055 は I2C クロックストレッチが長く、400kHz ではレジスタ読み出しが
     // 化ける (quat の w だけ動き x/y/z=0、ノルム≠1 の壊れた値を実機で確認)。
     // 100kHz (エラー検出+リトライ付き直接読みがあるため、失敗は検出・再試行される)。
-    if (!Wire.begin(sda, scl, 100000)) {
+    if (!Wire.begin(sda, scl, _i2cHz)) {
         Serial.println("I2C bus initialization failed or already initialized");
     }
     delay(100);
@@ -124,6 +124,55 @@ bool IMUManager::update() {
     return _updateOnce();
 }
 
+#ifndef IMU_SENSOR_M5IMU
+bool IMUManager::_readVector6(uint8_t reg, float scale, imu::Vector<3>& out) {
+    I2cGuard guard(this);
+    for (int attempt = 0; attempt < 2; attempt++) {
+        uint8_t b[6];
+        if (_wordRead) {
+            // 2B×3 トランザクション (quat と同じ理由。6B 一括は 0xFF 化する個体がある)
+            bool wOk = true;
+            for (int k = 0; k < 3 && wOk; k++) {
+                Wire.beginTransmission(0x28);
+                Wire.write((uint8_t)(reg + 2 * k));
+                if (Wire.endTransmission(false) != 0) { wOk = false; break; }
+                if (Wire.requestFrom(0x28, (uint8_t)2) != 2) { wOk = false; break; }
+                b[2 * k] = Wire.read();
+                b[2 * k + 1] = Wire.read();
+            }
+            if (!wOk) continue;
+        } else {
+            Wire.beginTransmission(0x28);
+            Wire.write(reg);
+            if (Wire.endTransmission(false) != 0) continue;   // repeated start
+            if (Wire.requestFrom(0x28, (uint8_t)6) != 6) continue;
+            for (int i = 0; i < 6; i++) b[i] = Wire.read();
+        }
+        // quat と同じ部分読み検出 (末尾 z=0x0000 → ゼロ埋めの疑い)。gyro の z は
+        // 静止時に本当に 0 になることが多い (実測 partial=20/s 相当) ので、ここでは
+        // _wdPartialReads に数えず (quat 専用の指標に保つ)、再試行しても同じなら
+        // 今回は諦めて前回値を維持する (診断用データなので欠けても支障はない)。
+        if (b[4] == 0 && b[5] == 0) continue;
+        if (b[4] == 0xFF && b[5] == 0xFF) {
+            // 0xFF 埋めの部分読み。生バイトを 5 秒に 1 回だけ MQTT ログへ (計装)。
+            static unsigned long lastFfLog = 0;
+            const unsigned long nowFf = millis();
+            if (nowFf - lastFfLog > 5000) {
+                lastFfLog = nowFf;
+                sastle::Log.printf("[IMU] vec reg=0x%02X partial(0xFF) raw=%02X%02X %02X%02X %02X%02X\n",
+                                   reg, b[1], b[0], b[3], b[2], b[5], b[4]);
+            }
+            continue;
+        }
+        out = imu::Vector<3>((int16_t)((b[1] << 8) | b[0]) * scale,
+                             (int16_t)((b[3] << 8) | b[2]) * scale,
+                             (int16_t)((b[5] << 8) | b[4]) * scale);
+        return true;
+    }
+    return false;
+}
+#endif
+
 void IMUManager::taskFunction(void* parameter) {
     IMUManager* self = static_cast<IMUManager*>(parameter);
     Serial.printf("[IMU_Task] Started on core %d (%lu Hz)\n",
@@ -180,25 +229,56 @@ bool IMUManager::_updateOnce() {
     const unsigned long now = millis();
     _lastUpdate = now;
 
+    // I2C クロック変更要求 (MQTT led {"imu_i2c_khz"}) はトランザクションの隙間で
+    // IMU タスク自身が適用する (他コアから setClock を叩いて読みと衝突させない)。
+    if (_i2cHzPending) {
+        const uint32_t hz = _i2cHzPending;
+        _i2cHzPending = 0;
+        I2cGuard guard(this);
+        Wire.setClock(hz);
+        _i2cHz = hz;
+        sastle::Log.printf("[IMU] I2C clock -> %lu kHz\n", (unsigned long)(hz / 1000));
+    }
+
     // データ取得: Adafruit の getQuat() は I2C 失敗を無視して古いバッファを返す
     // (実測: 回転中でも約8割のサンプルが停滞→たまに成功してジャンプ)。
     // エラー検出付きの直接レジスタ読みに置き換え、失敗時は前回値を保持する。
     imu::Quaternion q = _quat;  // 読めなければ前回値
+    // NOTE: gyro/euler/quat を 0x14 から 20 バイト連続読みする実装を試したが、
+    // 実機では quat 部分がゴミになり全棄却された (2026-09-06, disc=100/s)。
+    // BNO055 のバースト長制限か ESP32 側の問題かは未確定。実績のある 8 バイト
+    // 単独読みに固定し、補助データは 6 バイト単位の個別トランザクションで読む。
+    const bool aux = _auxReads;
+    uint8_t b[8] = {0};
+    bool readOk = false;
     {
         // endTransmission(false) と requestFrom() は repeated start で1つの
         // シーケンスを成す。その間に他コアの I2C が割り込むと別のレジスタ窓を
         // 読んでしまうため、シーケンス全体を排他する。
         I2cGuard guard(this);
-        bool readOk = false;
-        uint8_t lastBytes[8] = {0};
         for (int attempt = 0; attempt < 3 && !readOk; attempt++) {
-            Wire.beginTransmission(0x28);
-            Wire.write(0x20);  // QUA_DATA_W_LSB
-            if (Wire.endTransmission(false) != 0) continue;   // repeated start
-            if (Wire.requestFrom(0x28, 8) != 8) continue;
-            uint8_t b[8];
-            for (int i = 0; i < 8; i++) b[i] = Wire.read();
-            memcpy(lastBytes, b, 8);
+            if (_wordRead) {
+                // 実験: 2 バイト×4 トランザクション (w,x,y,z を個別に読む)。
+                // 4 回の読みが融合更新 (10ms) をまたぐと成分が混ざるが、隣接
+                // サンプル差は 300°/s でも 3° なので下流の検査で問題にならない。
+                bool wOk = true;
+                for (int k = 0; k < 4 && wOk; k++) {
+                    Wire.beginTransmission(0x28);
+                    Wire.write((uint8_t)(0x20 + 2 * k));
+                    if (Wire.endTransmission(false) != 0) { wOk = false; break; }
+                    if (Wire.requestFrom(0x28, (uint8_t)2) != 2) { wOk = false; break; }
+                    b[2 * k] = Wire.read();
+                    b[2 * k + 1] = Wire.read();
+                }
+                if (!wOk) continue;
+            } else {
+                Wire.beginTransmission(0x28);
+                Wire.write(0x20);  // QUA_DATA_W_LSB
+                if (Wire.endTransmission(false) != 0) continue;   // repeated start
+                if (Wire.requestFrom(0x28, (uint8_t)8) != 8) continue;
+                for (int i = 0; i < 8; i++) b[i] = Wire.read();
+            }
+            const uint8_t* qb = b;
 
             // 実測: I2C が「成功」を返しつつ 8バイト全ゼロを返すことがある
             // (加速度も同じ周期で 0.0 と 9.9 を交互に返していた)。全ゼロ quat は
@@ -207,15 +287,28 @@ bool IMUManager::_updateOnce() {
             // 再試行させる。BNO055 が全ゼロの姿勢を返すことは原理的に無い
             // (単位クォータニオンなので必ずどれかの成分が非0)。
             bool allZero = true;
-            for (int i = 0; i < 8; i++) { if (b[i] != 0) { allZero = false; break; } }
+            for (int i = 0; i < 8; i++) { if (qb[i] != 0) { allZero = false; break; } }
             if (allZero) { _wdZeroReads++; continue; }
+
+            // 部分読みガード (2026-09-06 実測): 全ゼロの亜種として「先頭 2/4/6 バイト
+            // だけ有効で残りがゼロ埋め」が回転中に頻発する。(w,x,0,0) はノルム²が
+            // 0.5 を超えると正規化されて X 軸だけ回った偽姿勢として受理され、
+            // (w,0,0,0) は恒等姿勢になる (回転中に q=(1,0,0,0) なのに gyro=139°/s
+            // という矛盾ログを実測)。いずれも z の 2 バイトが 0x0000 になるので、
+            // ここで検出して再試行する。z が本当に 0 ぴったりになる確率は 1/16384
+            // で、その場合も次サイクルで読み直すだけなので副作用は無い。
+            if (qb[6] == 0 && qb[7] == 0) { _wdPartialReads++; continue; }
+            // 同じく末尾が 0xFFFF (= -1 LSB) の亜種。I2C でスレーブが途中で SDA を
+            // 駆動しなくなると残りは 1 (0xFF) として読める。6 バイト読みの gyro/acc/
+            // euler で「x だけ妥当で y,z が -1 LSB」が回転中に頻発したのを実測。
+            if (qb[6] == 0xFF && qb[7] == 0xFF) { _wdPartialReads++; continue; }
 
             const float s = 1.0f / 16384.0f;  // 2^14 LSB/unit
             q = imu::Quaternion(
-                (int16_t)((b[1] << 8) | b[0]) * s,
-                (int16_t)((b[3] << 8) | b[2]) * s,
-                (int16_t)((b[5] << 8) | b[4]) * s,
-                (int16_t)((b[7] << 8) | b[6]) * s);
+                (int16_t)((qb[1] << 8) | qb[0]) * s,
+                (int16_t)((qb[3] << 8) | qb[2]) * s,
+                (int16_t)((qb[5] << 8) | qb[4]) * s,
+                (int16_t)((qb[7] << 8) | qb[6]) * s);
             readOk = true;
         }
         if (!readOk) {
@@ -226,13 +319,13 @@ bool IMUManager::_updateOnce() {
             const unsigned long nowRaw = millis();
             if (nowRaw - lastRawLog > 5000) {
                 lastRawLog = nowRaw;
+                const uint8_t* qb = b;
                 sastle::Log.printf(
                     "[IMU] quat read failed, raw=%02X %02X %02X %02X %02X %02X %02X %02X"
-                    " (zero_reads=%lu fails=%lu/%lu)\n",
-                    lastBytes[0], lastBytes[1], lastBytes[2], lastBytes[3],
-                    lastBytes[4], lastBytes[5], lastBytes[6], lastBytes[7],
-                    (unsigned long)_wdZeroReads, (unsigned long)_wdReadFails,
-                    (unsigned long)_wdReadTotal);
+                    " (zero=%lu partial=%lu fails=%lu/%lu)\n",
+                    qb[0], qb[1], qb[2], qb[3], qb[4], qb[5], qb[6], qb[7],
+                    (unsigned long)_wdZeroReads, (unsigned long)_wdPartialReads,
+                    (unsigned long)_wdReadFails, (unsigned long)_wdReadTotal);
             }
         }
         _wdReadTotal++;
@@ -241,8 +334,14 @@ bool IMUManager::_updateOnce() {
     // 「単位でない=破棄」にすると正常値の半分を捨ててしまう (実測 disc=loopの
     // 半分〜全部でカクつきの主因になった)。妥当な範囲なら正規化して受理し、
     // 明らかな化け (ノルムが大きく崩れている) だけ破棄する。
+    // 範囲は個体の実測 (ノルム² 0.92〜0.98) に余裕を持たせた 0.85〜1.15。旧 0.5〜2.0
+    // では部分読み (w,x,0,0) が w²+x²>0.5 で素通りしていた。部分読み自体は上の
+    // z=0 ガードで弾くので、ここは取りこぼしの誤差上限を抑えるバックストップ。
     const float n2 = (float)(q.w()*q.w() + q.x()*q.x() + q.y()*q.y() + q.z()*q.z());
-    bool ok = (n2 > 0.5f && n2 < 2.0f);
+    // 読めなかったサイクルは前回値を「再受理」しない (以前は前回値がそのまま
+    // ノルム/連続性検査を通って _quatSeq が進み、描画側の stale が 9% のまま
+    // 読み失敗 90/s を隠していた)。前回値は保持され、seq は進まない。
+    bool ok = readOk && (n2 > 0.85f && n2 < 1.15f);
     if (ok && fabsf(n2 - 1.0f) > 1e-4f) {
         const float inv = 1.0f / sqrtf(n2);
         q = imu::Quaternion(q.w() * inv, q.x() * inv, q.y() * inv, q.z() * inv);
@@ -265,8 +364,11 @@ bool IMUManager::_updateOnce() {
         // 隙間 + 速い回転」で正常値を大量に誤破棄し (disc が imu_read の半分)、
         // 追従が止まる主因になっていた。ガードは「明らかな化け値だけ弾く」緩い
         // 網として使い、精度は上流 (I2C 100kHz + エラー検出付き直接読み) で担保する。
-        const float gyroMag = fabsf((float)_gyro.x()) + fabsf((float)_gyro.y()) +
-                              fabsf((float)_gyro.z());          // [deg/s]
+        // aux OFF 中は gyro が更新されないので、手持ち回転の想定最大 360°/s で代用する
+        // (固定 15° に落とすと「読み損ねの隙間 + 速い回転」で正常値を誤棄却する)。
+        const float gyroMag = aux ? (fabsf((float)_gyro.x()) + fabsf((float)_gyro.y()) +
+                                    fabsf((float)_gyro.z()))    // [deg/s]
+                                  : 360.0f;
         const float maxAngle = 0.26f + gyroMag * dts * 1.5f;    // [rad] 基本15°+速度比例
         const float dotClamped = dot > 1.0f ? 1.0f : dot;
         const float ang = 2.0f * acosf(dotClamped);             // 姿勢差 [rad]
@@ -283,36 +385,46 @@ bool IMUManager::_updateOnce() {
         _quatSeq++;
         taskEXIT_CRITICAL(&_quatMux);
         _wdConsecDiscards = 0;
-    } else {
+    } else if (readOk) {   // 読み失敗は fail に数えるので disc とは分ける
         static unsigned long lastBadLog = 0;
         _wdDiscards++;
         _wdConsecDiscards++;
-        if (now - lastBadLog > 5000) {
+        // 棄却した生バイトを MQTT ログに出す (2秒に1回)。「どのバイトから化けるか」
+        // を実機で特定するための計装。
+        if (now - lastBadLog > 2000) {
             lastBadLog = now;
-            Serial.printf("[IMU] Discarded corrupt quat (|q|^2=%.3f, discards=%u)\n",
-                          n2, _wdDiscards);
+            sastle::Log.printf(
+                "[IMU] Discarded quat |q|^2=%.3f raw=%02X%02X %02X%02X %02X%02X %02X%02X"
+                " (discards=%lu)\n",
+                n2, b[1], b[0], b[3], b[2], b[5], b[4], b[7], b[6],
+                (unsigned long)_wdDiscards);
         }
     }
-    // I2C時間の節約: quat以外は間引いて読む (accel/gyro=2回に1回, euler=10回に1回)
+    // 補助データ (aux ON のときだけ)。I2C時間の節約で間引く:
+    //   accel/gyro (0x08 / 0x14, 6B, 100 LSB/(m/s²) / 16 LSB/(°/s)) = 2回に1回
+    //   euler      (0x1A, 6B, 16 LSB/°)                            = 10回に1回
+    // Adafruit getVector() は I2C 失敗を無視して古いバッファを返すため使わず、
+    // quat と同じ部分読み検出付きの _readVector6() で読む。
     static uint8_t subCycle = 0;
     subCycle++;
-    if ((subCycle & 1) == 0) {
-        I2cGuard guard(this);
-        const imu::Vector<3> a = _bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
-        const imu::Vector<3> g = _bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    if (aux && (subCycle & 1) == 0) {
+        imu::Vector<3> a, g;
+        const bool okA = _readVector6(0x08, 1.0f / 100.0f, a);
+        const bool okG = _readVector6(0x14, 1.0f / 16.0f, g);
         taskENTER_CRITICAL(&_quatMux);
-        _accel = a;
-        _gyro = g;
+        if (okA) _accel = a;
+        if (okG) _gyro = g;
         taskEXIT_CRITICAL(&_quatMux);
     }
     if (subCycle >= 10) {
         subCycle = 0;
-        I2cGuard guard(this);
-        const imu::Vector<3> e = _bno.getVector(Adafruit_BNO055::VECTOR_EULER);
-        // _euler は loop タスク (GestureManager) が読むので排他して差し替える
-        taskENTER_CRITICAL(&_quatMux);
-        _euler = e;
-        taskEXIT_CRITICAL(&_quatMux);
+        imu::Vector<3> e;
+        if (aux && _readVector6(0x1A, 1.0f / 16.0f, e)) {
+            // _euler は loop タスク (GestureManager) が読むので排他して差し替える
+            taskENTER_CRITICAL(&_quatMux);
+            _euler = e;
+            taskEXIT_CRITICAL(&_quatMux);
+        }
     }
 
     // 融合停止ウォッチドッグ (電源瞬断で BNO055 の fusion が止まり、quat が

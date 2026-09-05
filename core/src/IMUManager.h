@@ -190,8 +190,44 @@ public:
     uint32_t debugReadFails() const { return _wdReadFails; }
     uint32_t debugDiscards()  const { return _wdDiscards; }
     uint32_t debugZeroReads() const { return _wdZeroReads; }
+    /// 「末尾バイトだけゼロ」の部分読み (I2Cは成功を返す) を検出して再試行した回数
+    uint32_t debugPartialReads() const { return _wdPartialReads; }
     /// 受理された姿勢更新の通番。描画側が「前回と同じ姿勢か」を判定できる。
     uint32_t quatSeq() const { return _quatSeq; }
+
+    /**
+     * @brief 補助データ (gyro/euler/accel) の I2C 読み出しを ON/OFF する
+     *
+     * OFF にすると毎サイクル quat 8 バイトだけを読む (トランザクション最短)。
+     * 部分ゼロ読みの発生率がトランザクション長に依存するかを実機で切り分ける
+     * ための実験スイッチ。OFF 中は gyro/euler/accel は最後の値のまま止まり、
+     * 姿勢ジャンプ判定のしきい値は想定最大角速度ベースのフォールバックになる。
+     * MQTT: sphere/<id>/command/led {"imu_aux": false}
+     */
+    void setAuxReads(bool on) { _auxReads = on; }
+    bool auxReads() const { return _auxReads; }
+
+    /**
+     * @brief I2C クロックを実行時に変更する (次の IMU タスク周期で適用)
+     *
+     * 配線が限界的だと 400kHz で「w だけ有効で残りが化ける」症状が出た実績があり
+     * (begin() のコメント参照)、100kHz でも回転中に同じ症状が出る個体 (sphere002)
+     * があるため、50kHz 等に落として改善するかを実機で試すためのスイッチ。
+     * MQTT: sphere/<id>/command/led {"imu_i2c_khz": 50}
+     */
+    void setI2cClock(uint32_t hz) { _i2cHzPending = hz; }
+    uint32_t i2cClock() const { return _i2cHz; }
+
+    /**
+     * @brief quat を 8 バイト一括ではなく 2 バイト×4 トランザクションで読む
+     *
+     * sphere002 で「8 バイト読みの 3 バイト目以降が 0xFF」が静止中も 100% 出た
+     * (2026-09-06)。スレーブが多バイト転送の途中で応答を止めている挙動なので、
+     * 1 トランザクションを 2 バイトに縮めれば読めるかを試す実験スイッチ。
+     * MQTT: sphere/<id>/command/led {"imu_wordread": true}
+     */
+    void setWordRead(bool on) { _wordRead = on; }
+    bool wordRead() const { return _wordRead; }
     
     /**
      * @brief センサー温度を取得
@@ -222,11 +258,20 @@ private:
     uint32_t _wdReadFails = 0;     ///< I2C quat読み出し失敗の累計
     uint32_t _wdReadTotal = 0;     ///< I2C quat読み出し試行の累計
     uint32_t _wdZeroReads = 0;     ///< I2Cが成功を返しつつ全ゼロだった回数
+    uint32_t _wdPartialReads = 0;  ///< I2Cが成功を返しつつ末尾がゼロ埋めだった回数 (部分読み)
+    volatile bool _auxReads = true;///< gyro/euler/accel も読むか (false = quat 8B のみ)
+    // 既定 ON: sphere002 で「起動 ~1 分後から 3 バイト以上の連続転送が 0xFF 化」を実測、
+    // 2B 転送は同時刻でも 100% 成功した (2026-09-06)。OFF は比較実験用。
+    volatile bool _wordRead = true;  ///< quat/補助データを 2B 単位のトランザクションで読む
+    uint32_t _i2cHz = 100000;      ///< 現在の I2C クロック [Hz]
+    volatile uint32_t _i2cHzPending = 0; ///< 変更要求 (0 = なし)。IMU タスクが適用する
     volatile uint32_t _quatSeq = 0;///< 姿勢を受理するたびに +1 (描画側の鮮度判定用)
     TaskHandle_t _taskHandle = nullptr; ///< 専用ポーリングタスク
     volatile bool _taskRunning = false;
     static void taskFunction(void* parameter); ///< 固定周期ポーリングループ
     bool _updateOnce();            ///< 時間ゲートなしの1回分の取得 (タスクから呼ぶ)
+    /// BNO055 の 6 バイトベクタレジスタ (accel/gyro/euler) を部分読み検出付きで読む
+    bool _readVector6(uint8_t reg, float scale, imu::Vector<3>& out);
 
     // --- I2C バスの排他 ---
     // IMU タスク (core0) が 100Hz でセンサーを読む一方、診断系の getter

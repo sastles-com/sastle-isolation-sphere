@@ -346,6 +346,39 @@ bool CommandHandler::_handleLed(const char* payload) {
         handled = true;
     }
 
+    // IMU 補助データ (gyro/euler/accel) の I2C 読み出し ON/OFF。部分ゼロ読みの
+    // 発生率がトランザクション長に依存するかを切り分ける実験用スイッチ。
+    if (doc.containsKey("imu_aux")) {
+        bool on = doc["imu_aux"].as<bool>();
+        if (_imuManager) {
+            _imuManager->setAuxReads(on);
+        }
+        Serial.printf("  → IMU aux reads: %s\n", on ? "ON" : "OFF");
+        handled = true;
+    }
+
+    // IMU の I2C クロック [kHz] (10〜400)。配線が限界的な個体の切り分け用。
+    if (doc.containsKey("imu_i2c_khz")) {
+        int khz = doc["imu_i2c_khz"].as<int>();
+        if (khz < 10) khz = 10;
+        if (khz > 400) khz = 400;
+        if (_imuManager) {
+            _imuManager->setI2cClock((uint32_t)khz * 1000UL);
+        }
+        Serial.printf("  → IMU I2C clock: %d kHz\n", khz);
+        handled = true;
+    }
+
+    // quat を 2B×4 回に分割して読む実験スイッチ (多バイト転送の途中で 0xFF になる個体用)
+    if (doc.containsKey("imu_wordread")) {
+        bool on = doc["imu_wordread"].as<bool>();
+        if (_imuManager) {
+            _imuManager->setWordRead(on);
+        }
+        Serial.printf("  → IMU word read: %s\n", on ? "ON" : "OFF");
+        handled = true;
+    }
+
     return handled;
 }
 
@@ -450,6 +483,10 @@ bool CommandHandler::getState(char* buffer, size_t bufferSize) {
     JsonObject led = doc.createNestedObject("led");
     led["mode"] = _led.mode;
     led["axis"] = _led.axisIndicator;
+    if (_imuManager) {
+        led["imu_aux"] = _imuManager->auxReads();
+        led["imu_i2c_khz"] = _imuManager->i2cClock() / 1000;
+    }
     
     // system
     JsonObject system = doc.createNestedObject("system");

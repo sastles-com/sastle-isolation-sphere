@@ -40,6 +40,9 @@ class LEDCommand(BaseModel):
     pattern: Optional[str] = None  # test モード時のパターン: "strip_id" | "chase"
     width: Optional[int] = None  # test:chase の連続点灯LED数
     imu_comp: Optional[bool] = None  # IMU補正 ON/OFF (mode とは独立)
+    imu_aux: Optional[bool] = None  # IMU補助データ(gyro/euler/accel)のI2C読み ON/OFF (診断用)
+    imu_i2c_khz: Optional[int] = None  # IMU の I2C クロック [kHz] 10〜400 (配線切り分け用)
+    imu_wordread: Optional[bool] = None  # quat を 2B×4 回に分割読み (多バイト転送不良の個体用)
 
 @router.post("/command/playback")
 async def send_playback_command(command: PlaybackCommand, request: Request):
